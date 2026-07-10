@@ -117,7 +117,7 @@ Ideas the user floated (to refine later):
 ## Cross-cutting / tech debt
 
 - [x] Extract `CameraController` interface (decouples UI from BLE/Wi-Fi transports) — enables Phase 3 tests
-- [ ] Dependency version catalog (`libs.versions.toml`)
+- [x] Dependency version catalog (`gradle/libs.versions.toml`)
 - [ ] Error/telemetry model shared across BLE + HTTP
 - [ ] Consider Nordic BLE library if raw GATT proves fragile across OEMs
 - [ ] Structured logging (behind a debug flag)
