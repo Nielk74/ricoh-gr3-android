@@ -82,30 +82,33 @@ grounded in the cloned OpenAPI spec + community repos. UI wiring is Phase 6.
 - [ ] Battery + storage indicators (from BLE Camera service)
 - [ ] Handle multiple cameras / camera picker
 
-## Phase 6 — UI / UX design  (L) — DETAILS TBD WITH USER
+## Phase 6 — UI / UX design  (L) — DIRECTION CHOSEN
 
-Direction (given): **modern, very minimalist, mostly white**, UI/UX-skill driven.
-Concrete layouts/flows to be decided together when we get here.
+Direction (chosen with user): **Concept A "Contact Sheet"** — mostly-white paper, warm
+near-black ink, **Ricoh red** as the sole accent, mono metadata (camera-OSD / film-rebate).
+**Library is the hero** (primary use = photo offload + edit); shooting is one tap away.
+Two UX requirements: an **"edited" mark** on styled frames + **sticky last-used look**.
+Concept artifacts approved; full-minimal Concept-A for single-photo viewer.
 
-- [ ] Design language: mostly-white minimal theme, light/dark, typography, spacing system
-      (use design/dataviz + artifact-design skills; prototype screens as artifacts for sign-off)
-- [ ] Core screens: connect, live view + shutter, gallery, photo detail, settings
+- [x] Design language + tokens: Compose theme wired in (`ui/theme/` — `Color.kt` Ricoh-red
+      palette, `Type.kt` sans+mono roles, `Theme.kt` light/dark + `GrColors` extended tokens)
+- [ ] Core screens (Concept-A style): connect, live view + shutter, gallery, photo detail, settings
+- [ ] Gallery / contact-sheet grid + full-screen viewer (with edited mark), transfer progress
 - [ ] Live-view viewfinder UX (tap-to-focus, exposure controls, minimal chrome)
-- [ ] Gallery grid + full-screen viewer, transfer progress
 - [ ] Onboarding / camera-pairing flow (explain BLE→Wi-Fi handoff simply)
 - [ ] Accessibility pass (contrast, touch targets, TalkBack)
 
-## Phase 7 — Signature features  (L) — SCOPE TBD WITH USER
+## Phase 7 — Signature features  (L) — SPECCED → see `docs/PHASE7-LOOKS.md`
 
-Ideas the user floated (to refine later):
+Full plan with real `/v1/params` `effect` enum values in **`docs/PHASE7-LOOKS.md`**.
+Decision: **start on-camera, grow in-app**; Auto-Look kept; sticky look + edited mark.
 
-- [ ] **Film emulations** — replicate/extend GR III Custom Image looks (posi film, bleach bypass,
-      hard/soft monochrome, HDR tone…) as post-process filters on transferred JPEG/RAW
-- [ ] **Auto filter** — auto-select/apply a look (heuristic or on-device ML) per scene
-- [ ] In-app RAW (DNG) develop pipeline (exposure, WB, tone, grain)
-- [ ] Preset system: save/share custom looks; apply on import
-- [ ] Batch processing / export
-- [ ] Optional: apply look as camera-side Custom Image setting before capture (via `/v1/params`)
+- [ ] **7.1 On-camera looks** (ships first): push GR III `effect` before capture (`efc_posiFilm`,
+      `efc_bleachBypass`, `efc_hardMonochrome`, `efc_HDRTone`, `col_vivid`…) via `/v1/params/camera`
+- [ ] **7.2 Look UX in library**: edited mark, sticky default across frames, batch apply, before/after
+- [ ] **7.3 In-app develop engine**: DNG decode + GPU pipeline + film-emulation LUTs (the big one)
+- [ ] **7.4 Auto-Look**: heuristic scene→look (EXIF + thumbnail), opt-in; v2 tiny on-device model
+- [ ] **7.5 Presets & sharing**: save/share edit stacks, apply on import (no cloud)
 
 ## Phase 8 — Polish & release  (M)
 
