@@ -1,7 +1,8 @@
 # CLAUDE.md — Ricoh GR3 Android app
 
 Android companion app to control the **Ricoh GR III / GR IIIx** wirelessly.
-See `research/FEASIBILITY.md` for the protocol analysis this app is built on.
+See `research/FEASIBILITY.md` for the protocol analysis this app is built on, and
+`ROADMAP.md` for the living plan (keep it updated as work progresses).
 
 ## Build
 

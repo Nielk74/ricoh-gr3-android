@@ -3,7 +3,8 @@
 An Android app to connect to and control the **Ricoh GR III / GR IIIx** (griii) camera
 wirelessly: remote shutter, live view, settings control, and photo transfer.
 
-> **Status:** Research / feasibility phase. See [`research/FEASIBILITY.md`](research/FEASIBILITY.md).
+> **Status:** BLE remote-shutter proof of concept working. See [`ROADMAP.md`](ROADMAP.md) for
+> the full living plan and [`research/FEASIBILITY.md`](research/FEASIBILITY.md) for the protocol analysis.
 
 ## TL;DR — Is this feasible?
 
