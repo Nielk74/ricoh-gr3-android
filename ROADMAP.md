@@ -26,30 +26,31 @@ Legend for effort: S = small, M = medium, L = large.
 
 ---
 
-## Phase 2 — CI / CD  (M)
+## Phase 2 — CI / CD  (M) ✅ MOSTLY DONE
 
 Goal: every push is built & tested; tags cut a GitHub Release with an APK.
 
-- [ ] GitHub Actions: `build.yml` — on push/PR: set up JDK 17 + Android SDK, `./gradlew assembleDebug lint test`
-- [ ] Gradle build cache + dependency caching in CI (speed)
-- [ ] `test.yml` (or same workflow): run unit tests (JVM) + Android lint, upload reports
-- [ ] `release.yml` — on tag `v*`: build **release APK**, sign it, create GitHub Release, attach APK/AAB
-  - [ ] Signing: generate keystore, store as GitHub secrets (`KEYSTORE_B64`, `KEY_ALIAS`, passwords)
-  - [ ] Wire signing config into `app/build.gradle.kts` (release buildType, secrets from env)
-- [ ] Version bumping strategy (versionCode/versionName from tag)
-- [ ] Status badges in README
+- [x] GitHub Actions: `build.yml` — on push/PR: set up JDK 17 + Android SDK, `./gradlew assembleDebug lint test`
+- [x] Gradle build cache + dependency caching in CI (setup-java `cache: gradle`)
+- [x] Unit tests (JVM) + Android lint in `build.yml`; reports uploaded as artifacts (`if: always()`)
+- [x] `release.yml` — on tag `v*`: build **release APK + AAB**, sign it, create GitHub Release, attach artifacts
+  - [x] Signing: config reads keystore from GitHub secrets (`KEYSTORE_B64`, `KEY_ALIAS`, `KEY_PASSWORD`, `STORE_PASSWORD`); see `RELEASING.md`
+  - [x] Wire optional signing config into `app/build.gradle.kts` (falls back to unsigned locally when secrets absent)
+- [x] Version bumping strategy (versionName from tag, versionCode from run number, via env vars)
+- [x] Status badge in README
 - [ ] (later) instrumented tests on emulator via `reactivecircus/android-emulator-runner`
 - [ ] (optional) Dependabot / renovate for dependency updates
+- [ ] **Verify CI on GitHub** — first real push/tag run (needs the repo secrets configured for release)
 
-## Phase 3 — Testing foundation  (M)
+## Phase 3 — Testing foundation  (M) — IN PROGRESS
 
-- [ ] Unit tests for BLE payload encoding (`RicohGattProfile`, shutter byte array) — pure logic, no device
-- [ ] Fake/mocked `CameraBleManager` interface so ViewModel + UI are testable without a radio
-  - [ ] Extract a `CameraController` interface (BLE impl + fake impl)
-- [ ] ViewModel state-transition tests
+- [x] Unit tests for BLE payload encoding (`RicohGattProfile.shutterPayload`, shutter byte array) — pure logic, no device
+- [x] Fake/mocked controller so ViewModel + UI are testable without a radio (`FakeCameraController`)
+  - [x] Extract a `CameraController` interface (BLE impl + fake impl)
+- [x] Controller/state-transition tests (scan → discover → connect → shutter count)
 - [ ] Compose UI tests (screens render per connection state)
-- [ ] HTTP layer tests against a mock web server (`MockWebServer`) using recorded `/v1/` responses
-- [ ] Test the `/v1/` response parsers with fixtures captured from the reference specs
+- [ ] HTTP layer tests against a mock web server (`MockWebServer`) using recorded `/v1/` responses — *deferred to Phase 4*
+- [ ] Test the `/v1/` response parsers with fixtures captured from the reference specs — *deferred to Phase 4*
 
 ## Phase 4 — Wi-Fi layer (HTTP `/v1/` API)  (L)
 
@@ -115,7 +116,7 @@ Ideas the user floated (to refine later):
 
 ## Cross-cutting / tech debt
 
-- [ ] Extract `CameraController` interface (decouples UI from BLE/Wi-Fi transports) — enables Phase 3 tests
+- [x] Extract `CameraController` interface (decouples UI from BLE/Wi-Fi transports) — enables Phase 3 tests
 - [ ] Dependency version catalog (`libs.versions.toml`)
 - [ ] Error/telemetry model shared across BLE + HTTP
 - [ ] Consider Nordic BLE library if raw GATT proves fragile across OEMs

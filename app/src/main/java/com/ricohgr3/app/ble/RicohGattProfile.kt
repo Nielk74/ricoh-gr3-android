@@ -39,6 +39,17 @@ object RicohGattProfile {
         const val GREEN_BUTTON: Byte = 2
     }
 
+    /**
+     * Encode the [OPERATION_REQUEST] payload that fires the shutter.
+     * [af] triggers autofocus before capture. Pure + unit-testable (no GATT).
+     *
+     * @return `[START_SHOOTING, AF]` when [af] is true, else `[START_SHOOTING, NO_AF]`.
+     */
+    fun shutterPayload(af: Boolean): ByteArray {
+        val param = if (af) OperationParameter.AF else OperationParameter.NO_AF
+        return byteArrayOf(OperationCode.START_SHOOTING, param)
+    }
+
     /** Client Characteristic Configuration Descriptor — enables notifications. */
     val CCCD: UUID = shortUuid(0x2902)
 

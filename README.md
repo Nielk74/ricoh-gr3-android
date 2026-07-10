@@ -1,5 +1,7 @@
 # Ricoh GR III — Android Companion App
 
+[![Build](https://github.com/Nielk74/ricoh-gr3-android/actions/workflows/build.yml/badge.svg)](https://github.com/Nielk74/ricoh-gr3-android/actions/workflows/build.yml)
+
 An Android app to connect to and control the **Ricoh GR III / GR IIIx** (griii) camera
 wirelessly: remote shutter, live view, settings control, and photo transfer.
 

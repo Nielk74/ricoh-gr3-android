@@ -1,7 +1,37 @@
+import java.io.FileOutputStream
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+/**
+ * Resolve a build parameter from either an environment variable or a Gradle
+ * property (env wins). Returns null when neither is set or the value is blank.
+ */
+fun buildParam(name: String): String? =
+    (System.getenv(name) ?: (project.findProperty(name) as String?))?.takeIf { it.isNotBlank() }
+
+/**
+ * Materialise the release keystore, if any. Supports two mechanisms:
+ *   - KEYSTORE_B64:  base64-encoded keystore, decoded to a temp file.
+ *   - KEYSTORE_FILE: path to an existing keystore file.
+ * Returns null when no keystore material is provided (local dev without secrets).
+ */
+fun resolveKeystoreFile(): File? {
+    buildParam("KEYSTORE_FILE")?.let { path ->
+        val f = File(path)
+        if (f.exists()) return f
+    }
+    buildParam("KEYSTORE_B64")?.let { b64 ->
+        val out = File(layout.buildDirectory.get().asFile, "release-keystore.jks")
+        out.parentFile?.mkdirs()
+        FileOutputStream(out).use { it.write(Base64.getDecoder().decode(b64.trim())) }
+        return out
+    }
+    return null
 }
 
 android {
@@ -12,8 +42,32 @@ android {
         applicationId = "com.ricohgr3.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = (buildParam("VERSION_CODE")?.toIntOrNull()) ?: 1
+        versionName = buildParam("VERSION_NAME") ?: "0.1.0"
+    }
+
+    // Optional release signing. Only wired up when a keystore and all
+    // credentials are present; otherwise the release build is left unsigned
+    // so contributors without secrets can still run `./gradlew assembleRelease`
+    // locally.
+    val releaseKeystore = resolveKeystoreFile()
+    val storePasswordParam = buildParam("STORE_PASSWORD")
+    val keyAliasParam = buildParam("KEY_ALIAS")
+    val keyPasswordParam = buildParam("KEY_PASSWORD")
+    val hasReleaseSigning = releaseKeystore != null &&
+        storePasswordParam != null &&
+        keyAliasParam != null &&
+        keyPasswordParam != null
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = storePasswordParam
+                keyAlias = keyAliasParam
+                keyPassword = keyPasswordParam
+            }
+        }
     }
 
     buildTypes {
@@ -23,6 +77,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -56,4 +113,7 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     implementation("androidx.compose.ui:ui-tooling-preview")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
 }

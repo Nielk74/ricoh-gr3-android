@@ -32,14 +32,14 @@ import java.util.ArrayDeque
  * BLUETOOTH_ADMIN + ACCESS_FINE_LOCATION (API 26-30) before calling scan/connect.
  */
 @SuppressLint("MissingPermission")
-class CameraBleManager(private val context: Context) {
+class CameraBleManager(private val context: Context) : CameraController {
 
     private val bluetoothManager =
         context.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager
     private val adapter: BluetoothAdapter? get() = bluetoothManager.adapter
 
     private val _state = MutableStateFlow(BleState())
-    val state: StateFlow<BleState> = _state.asStateFlow()
+    override val state: StateFlow<BleState> = _state.asStateFlow()
 
     private val scanner get() = adapter?.bluetoothLeScanner
     private var gatt: BluetoothGatt? = null
@@ -47,11 +47,11 @@ class CameraBleManager(private val context: Context) {
     /** Serialized queue of characteristic reads (Android GATT allows one op at a time). */
     private val readQueue = ArrayDeque<java.util.UUID>()
 
-    fun isBluetoothEnabled(): Boolean = adapter?.isEnabled == true
+    override fun isBluetoothEnabled(): Boolean = adapter?.isEnabled == true
 
     // ---- Scanning -----------------------------------------------------------
 
-    fun startScan() {
+    override fun startScan() {
         val scanner = scanner ?: run {
             _state.update { it.copy(error = "Bluetooth unavailable") }
             return
@@ -67,7 +67,7 @@ class CameraBleManager(private val context: Context) {
         scanner.startScan(emptyList<ScanFilter>(), settings, scanCallback)
     }
 
-    fun stopScan() {
+    override fun stopScan() {
         if (!_state.value.isScanning) return
         scanner?.stopScan(scanCallback)
         _state.update { it.copy(isScanning = false) }
@@ -96,7 +96,7 @@ class CameraBleManager(private val context: Context) {
 
     // ---- Connecting ---------------------------------------------------------
 
-    fun connect(address: String) {
+    override fun connect(address: String) {
         stopScan()
         val device: BluetoothDevice = adapter?.getRemoteDevice(address) ?: return
         _state.update { it.copy(connectionState = ConnectionState.CONNECTING, error = null) }
@@ -107,7 +107,7 @@ class CameraBleManager(private val context: Context) {
         }
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         gatt?.disconnect()
     }
 
@@ -226,7 +226,7 @@ class CameraBleManager(private val context: Context) {
     // ---- Shutter ------------------------------------------------------------
 
     /** Fire the shutter. [af] triggers autofocus before capture. */
-    fun fireShutter(af: Boolean = true) {
+    override fun fireShutter(af: Boolean) {
         val g = gatt ?: return
         val ch = g.getService(RicohGattProfile.SHOOTING_SERVICE)
             ?.getCharacteristic(RicohGattProfile.OPERATION_REQUEST)
@@ -234,9 +234,7 @@ class CameraBleManager(private val context: Context) {
             _state.update { it.copy(error = "Shutter characteristic not found") }
             return
         }
-        val param = if (af) RicohGattProfile.OperationParameter.AF
-        else RicohGattProfile.OperationParameter.NO_AF
-        val payload = byteArrayOf(RicohGattProfile.OperationCode.START_SHOOTING, param)
+        val payload = RicohGattProfile.shutterPayload(af)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             g.writeCharacteristic(ch, payload, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
@@ -251,7 +249,7 @@ class CameraBleManager(private val context: Context) {
         Log.d(TAG, "Shutter fired (af=$af)")
     }
 
-    fun close() {
+    override fun close() {
         stopScan()
         gatt?.close()
         gatt = null
