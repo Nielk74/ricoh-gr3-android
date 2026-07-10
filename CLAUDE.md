@@ -1,0 +1,39 @@
+# CLAUDE.md — Ricoh GR3 Android app
+
+Android companion app to control the **Ricoh GR III / GR IIIx** wirelessly.
+See `research/FEASIBILITY.md` for the protocol analysis this app is built on.
+
+## Build
+
+```bash
+./gradlew :app:assembleDebug     # debug APK -> app/build/outputs/apk/debug/
+./gradlew :app:installDebug      # install on a connected device/emulator
+```
+
+Requires the Android SDK (`local.properties` → `sdk.dir`). JDK 17. Compile SDK 34, min SDK 26.
+
+## Layout
+
+- `app/src/main/java/com/ricohgr3/app/`
+  - `MainActivity.kt` — entry point, runtime BLE permission handling.
+  - `MainViewModel.kt` — owns `CameraBleManager`, exposes state to Compose.
+  - `ble/RicohGattProfile.kt` — reverse-engineered GATT UUIDs (shutter = Operation Request).
+  - `ble/CameraBleManager.kt` — scan / connect / read device info / fire shutter.
+  - `ble/BleState.kt` — immutable UI state model.
+  - `ui/CameraScreen.kt` — Compose UI.
+
+## Current scope (PoC)
+
+BLE only: discover camera → connect → read model/firmware/serial → remote shutter (with/without AF).
+The shutter writes `[1, AF]` to characteristic `559644B8-E0BC-4011-929B-5CF9199851E7`.
+
+## Roadmap (see FEASIBILITY.md §6)
+
+Next: BLE → read WLAN SSID/passphrase → wake Wi-Fi AP → HTTP `/v1/` (live view MJPEG,
+settings, photo browse/download). Wi-Fi work needs `WifiNetworkSpecifier` to route traffic
+to the camera AP (no internet on that network).
+
+## Testing note
+
+BLE cannot be exercised on the CI/build host — it needs a physical GR III and a real Android
+device (emulators have no BLE radio). The build verifies compilation; on-device testing is manual.
