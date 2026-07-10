@@ -52,23 +52,27 @@ Goal: every push is built & tested; tags cut a GitHub Release with an APK.
 - [ ] HTTP layer tests against a mock web server (`MockWebServer`) using recorded `/v1/` responses — *deferred to Phase 4*
 - [ ] Test the `/v1/` response parsers with fixtures captured from the reference specs — *deferred to Phase 4*
 
-## Phase 4 — Wi-Fi layer (HTTP `/v1/` API)  (L)
+## Phase 4 — Wi-Fi layer (HTTP `/v1/` API)  (L) — DATA LAYER DONE
 
 Goal: live view + settings + photo transfer over the camera's Wi-Fi AP.
+Transport/data layer built & unit-tested (23 tests green, MockWebServer + fixtures);
+grounded in the cloned OpenAPI spec + community repos. UI wiring is Phase 6.
 
 - [ ] **BLE → wake Wi-Fi**: read WLAN SSID/passphrase/channel via BLE WLAN Control chars; enable camera AP
-- [ ] **Android Wi-Fi join**: `WifiNetworkSpecifier` + `bindProcessToNetwork` so app traffic routes to
-      the camera AP (which has no internet) without breaking the phone's normal connectivity
-- [ ] HTTP client (OkHttp) rooted at `http://192.168.0.1/v1/`
-- [ ] `GET /v1/ping`, `GET /v1/props` — connectivity + camera state model
-- [ ] **Live view**: parse `GET /v1/liveview` MJPEG stream → render frames in Compose
-- [ ] **Settings control**: `PUT /v1/params/camera` (ISO, shutter, aperture, exposure comp, WB, effect)
-      — map to GR III enums from `research/references/.../capture_ricoh_gr_iii.yaml`
-- [ ] **Capture over Wi-Fi**: `POST /v1/camera/shoot` (+ focus endpoints)
-- [ ] **Photo browse**: `GET /v1/photos` list + thumbnails; `GET .../info` for EXIF
-- [ ] **Photo download**: JPEG + RAW (DNG) pull; save to app storage / MediaStore
+- [~] **Android Wi-Fi join**: `WifiApConnector` (`WifiNetworkSpecifier` + `bindProcessToNetwork` + teardown)
+      scaffolded & documented; needs on-device validation (API 29+; no host radio)
+- [x] HTTP client (OkHttp) rooted at `http://192.168.0.1/v1/` (`CameraHttpClient`, `NO_PROXY`, interface `CameraWifiController`)
+- [x] `GET /v1/ping`, `GET /v1/props` — parsed into models (fixtures + tests)
+- [~] **Live view**: MJPEG frame splitter (`MjpegFrameParser`, SOI/EOI marker-based) built & tested;
+      Compose rendering + end-to-end stream = Phase 6
+- [x] **Settings control**: `PUT /v1/params/camera` (`CaptureParams`) — request shape tested; GR III enums
+      (`sv`/`tv`/`av`/`xv`/`effect` incl. film sims) documented from `capture_ricoh_gr_iii.yaml`
+- [x] **Capture over Wi-Fi**: `POST /v1/camera/shoot` (empty body per spec — verify on device)
+- [x] **Photo browse**: `GET /v1/photos` list + `GET .../info` for EXIF (models + tests)
+- [x] **Photo download**: JPEG + RAW (DNG) pull (`downloadPhoto`, size options); TODO: stream to disk vs. buffer
 - [ ] `GET /v1/changes` (WebSocket) — react to camera-side setting changes
 - [ ] Graceful reconnect / AP-drop handling; clear "camera Wi-Fi vs internet" UX
+- [ ] **On-device validation** of the whole Wi-Fi plane (needs physical GR III)
 
 ## Phase 5 — Connection & session management  (M)
 

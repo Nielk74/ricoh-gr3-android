@@ -23,6 +23,9 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Required by ConnectivityManager.requestNetwork/bindProcessToNetwork to route app
+         traffic onto the camera's internet-less AP (WifiNetworkSpecifier, API 29+). -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 
     <uses-feature
         android:name="android.hardware.bluetooth_le"

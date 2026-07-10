@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 /**
@@ -111,9 +112,14 @@ dependencies {
 
     implementation(libs.androidx.navigation.compose)
 
+    // Wi-Fi HTTP /v1 layer: OkHttp transport + kotlinx.serialization JSON parsing.
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.serialization.json)
+
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.compose.ui.tooling.preview)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
 }

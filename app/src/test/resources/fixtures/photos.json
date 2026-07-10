@@ -1,0 +1,14 @@
+{
+  "errCode": 200,
+  "errMsg": "OK",
+  "dirs": [
+    {
+      "name": "100RICOH",
+      "files": ["R0000001.JPG", "R0000002.DNG", "R0000003.JPG"]
+    },
+    {
+      "name": "101RICOH",
+      "files": ["R0000004.JPG"]
+    }
+  ]
+}
