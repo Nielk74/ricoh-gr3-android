@@ -33,9 +33,10 @@ fun main(args: Array<String>) {
     val src = ImageIO.read(sample) ?: error("could not decode $sample")
     println("Loaded ${sample.name}: ${src.width}x${src.height}")
 
-    // Bound the preview so each thumbnail is small and fast for the README table. Keep aspect.
-    // JPEG (not PNG) keeps the committed files ~30–50 KB each instead of >1 MB.
-    val maxW = 560
+    // Render at a resolution that stays crisp in the README grid (was 560px → looked pixelated,
+    // and per-pixel grain read as digital noise). Develop at this size so grain is fine relative
+    // to the image. JPEG q≈0.9 keeps each thumbnail ~150–250 KB.
+    val maxW = 1200
     val work = if (src.width > maxW) scaleTo(src, maxW) else toRgb(src)
 
     // Standard (as-shot) baseline first.
@@ -106,14 +107,22 @@ private fun scaleTo(src: BufferedImage, targetW: Int): BufferedImage {
     val gfx = out.createGraphics()
     gfx.setRenderingHint(
         java.awt.RenderingHints.KEY_INTERPOLATION,
-        java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR,
+        java.awt.RenderingHints.VALUE_INTERPOLATION_BICUBIC,
+    )
+    gfx.setRenderingHint(
+        java.awt.RenderingHints.KEY_RENDERING,
+        java.awt.RenderingHints.VALUE_RENDER_QUALITY,
+    )
+    gfx.setRenderingHint(
+        java.awt.RenderingHints.KEY_ANTIALIASING,
+        java.awt.RenderingHints.VALUE_ANTIALIAS_ON,
     )
     gfx.drawImage(src, 0, 0, targetW, h, null)
     gfx.dispose()
     return out
 }
 
-private fun writeJpg(img: BufferedImage, file: File, quality: Float = 0.85f) {
+private fun writeJpg(img: BufferedImage, file: File, quality: Float = 0.9f) {
     file.parentFile?.mkdirs()
     val writer = ImageIO.getImageWritersByFormatName("jpg").next()
     val param = writer.defaultWriteParam.apply {
