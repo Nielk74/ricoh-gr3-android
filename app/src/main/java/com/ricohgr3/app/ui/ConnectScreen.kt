@@ -425,6 +425,13 @@ private fun WifiHandoffSection(
                 style = MaterialTheme.typography.bodyMedium,
                 color = GrTheme.colors.inkSoft,
             )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Tip: unplug the camera from any computer first — the GR III won't turn " +
+                    "Wi-Fi on while it's connected over USB.",
+                style = MaterialTheme.typography.labelSmall,
+                color = GrTheme.colors.accent,
+            )
             ble.wlanCredentials?.ssid?.takeIf { it.isNotBlank() }?.let { ssid ->
                 Spacer(Modifier.height(6.dp))
                 Text(

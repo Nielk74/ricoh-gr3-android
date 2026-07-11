@@ -51,7 +51,13 @@ fun LiveViewScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    LiveViewContent(state = state, onShoot = viewModel::shoot, onBack = onBack, modifier = modifier)
+    LiveViewContent(
+        state = state,
+        onShoot = viewModel::shoot,
+        onRetry = viewModel::retryLiveview,
+        onBack = onBack,
+        modifier = modifier,
+    )
 }
 
 /** Stateless content — split out so previews / future tests can drive it with a plain state. */
@@ -59,6 +65,7 @@ fun LiveViewScreen(
 private fun LiveViewContent(
     state: LiveViewUiState,
     onShoot: () -> Unit,
+    onRetry: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -77,7 +84,7 @@ private fun LiveViewContent(
             LiveFrame(frame = state.frame)
 
             if (!state.hasStream) {
-                WaitingOverlay(error = state.error)
+                WaitingOverlay(error = state.error, onRetry = onRetry)
             }
             state.lastShot?.let { ShotToast(it) }
         }
@@ -106,7 +113,7 @@ private fun LiveFrame(frame: ByteArray?) {
 }
 
 @Composable
-private fun WaitingOverlay(error: String?) {
+private fun WaitingOverlay(error: String?, onRetry: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
         Text(
             text = if (error != null) "LIVE VIEW UNAVAILABLE" else "WAITING FOR LIVE VIEW",
@@ -122,6 +129,8 @@ private fun WaitingOverlay(error: String?) {
                 color = GrTheme.colors.inkSoft,
                 textAlign = TextAlign.Center,
             )
+            Spacer(Modifier.size(8.dp))
+            TextButton(onClick = onRetry) { Text("Retry", color = GrTheme.colors.accent) }
         }
     }
 }

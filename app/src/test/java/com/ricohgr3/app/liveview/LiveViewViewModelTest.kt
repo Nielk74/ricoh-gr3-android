@@ -12,6 +12,7 @@ import com.ricohgr3.app.wifi.PhotoList
 import com.ricohgr3.app.wifi.ShootResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -78,6 +79,36 @@ class LiveViewViewModelTest {
             return shootResult
         }
         override fun liveview(): Flow<ByteArray> = flowOf(frame)
+    }
+
+    /** liveview() throws on the first call, then emits a frame — exercises retry-then-recover. */
+    private class FlakyLiveviewController(private val props: CameraProps) : CameraWifiController {
+        var liveviewCalls = 0
+            private set
+        override suspend fun ping(): CameraTime = CameraTime(datetime = "x")
+        override suspend fun props(): CameraProps = props
+        override suspend fun listPhotos(storage: String?, limit: Int?, after: String?) = PhotoList(errCode = 200)
+        override suspend fun photoInfo(folder: String, file: String, storage: String?) = PhotoInfo(errCode = 200)
+        override suspend fun downloadPhoto(folder: String, file: String, size: ImageSize, storage: String?) = ByteArray(0)
+        override suspend fun setCameraParams(params: CaptureParams) = props
+        override suspend fun shoot() = ShootResult(errCode = 200, captured = true)
+        override fun liveview(): Flow<ByteArray> {
+            liveviewCalls++
+            return if (liveviewCalls == 1) flow { throw java.io.IOException("drop") }
+            else flowOf(byteArrayOf(7))
+        }
+    }
+
+    /** liveview() always errors — exercises the give-up-with-terminal-error path. */
+    private class AlwaysFailingLiveviewController(private val props: CameraProps) : CameraWifiController {
+        override suspend fun ping(): CameraTime = CameraTime(datetime = "x")
+        override suspend fun props(): CameraProps = props
+        override suspend fun listPhotos(storage: String?, limit: Int?, after: String?) = PhotoList(errCode = 200)
+        override suspend fun photoInfo(folder: String, file: String, storage: String?) = PhotoInfo(errCode = 200)
+        override suspend fun downloadPhoto(folder: String, file: String, size: ImageSize, storage: String?) = ByteArray(0)
+        override suspend fun setCameraParams(params: CaptureParams) = props
+        override suspend fun shoot() = ShootResult(errCode = 200, captured = true)
+        override fun liveview(): Flow<ByteArray> = flow { throw java.io.IOException("always down") }
     }
 
     @Test
@@ -155,6 +186,44 @@ class LiveViewViewModelTest {
         dispatcher.scheduler.advanceUntilIdle()
 
         assertEquals(ShotResult.FAILURE, vm.state.value.lastShot)
+    }
+
+    @Test
+    fun `shoot succeeds when captured is null but a captureId is returned`() = runTest {
+        // Firmware that omits `captured` but returns a captureId must count as success.
+        val props = CameraProps(errCode = 200)
+        val idOnly = ShootResult(errCode = 200, captureId = 7, captured = null)
+        val vm = LiveViewViewModel(TestController(props, shootResult = idOnly))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        vm.shoot()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(ShotResult.SUCCESS, vm.state.value.lastShot)
+    }
+
+    @Test
+    fun `live view retries after a stream error and recovers on the next frame`() = runTest {
+        // First collection throws; the retry (after backoff) yields a frame.
+        val ctl = FlakyLiveviewController(CameraProps(errCode = 200))
+        val vm = LiveViewViewModel(ctl)
+
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val s = vm.state.value
+        assertTrue("should have recovered a frame after retry", s.hasStream)
+        assertNull(s.error)
+        assertTrue("retry actually re-collected", ctl.liveviewCalls >= 2)
+    }
+
+    @Test
+    fun `live view gives up with a terminal error after repeated failures`() = runTest {
+        val ctl = AlwaysFailingLiveviewController(CameraProps(errCode = 200))
+        val vm = LiveViewViewModel(ctl)
+
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertNotNull("should surface a terminal error", vm.state.value.error)
     }
 
     private fun assertArrayEqual(expected: ByteArray, actual: ByteArray) {

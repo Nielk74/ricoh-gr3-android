@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Ricoh GR III's HTTP API is served plaintext at http://192.168.0.1/v1/ over its own
+  internet-less Wi-Fi AP — there is no HTTPS option on the camera. Android 9+ (API 28+) blocks
+  cleartext by default, which would make EVERY camera request fail with
+  "Cleartext HTTP traffic to 192.168.0.1 not permitted".
+
+  We permit cleartext ONLY to the camera's fixed AP address, so the rest of the app keeps the
+  secure-by-default posture. Do not widen this to a broader domain.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">192.168.0.1</domain>
+    </domain-config>
+</network-security-config>
