@@ -16,6 +16,16 @@ import kotlin.random.Random
  */
 object DevelopPipeline {
 
+    /**
+     * A mild base grade applied **before** the film LUT, used to bring a flat RAW/DNG preview up
+     * to the camera-JPEG-like tonal base the film models expect (see `PhotoSave`). Applied in
+     * display space: an S-curve contrast around mid-grey plus a saturation scale.
+     *
+     * @property contrast S-curve strength around 0.5 (0 = none, ~0.2 gentle).
+     * @property saturation display-space saturation scale (1 = unchanged).
+     */
+    data class PreGrade(val contrast: Float, val saturation: Float)
+
     private const val GAMMA = 2.2f
 
     private fun srgbToLinear(c: Float): Float = if (c <= 0f) 0f else exp(GAMMA * kotlin.math.ln(c))
@@ -33,9 +43,13 @@ object DevelopPipeline {
         r: FloatArray, g: FloatArray, b: FloatArray,
         width: Int, height: Int,
         look: FilmLook, lut: LutCube,
+        preGrade: PreGrade? = null,
     ) {
         val n = width * height
         val tmp = FloatArray(3)
+
+        // 0. Optional RAW base grade (before the LUT) — lifts a flat DNG to a JPEG-like base.
+        if (preGrade != null) applyPreGrade(r, g, b, preGrade)
 
         // 1–2. Colour LUT (captures tone + colour response + cross-talk together).
         for (i in 0 until n) {
@@ -64,6 +78,32 @@ object DevelopPipeline {
         // 5. Grain (display space, last).
         val gr = look.grain
         if (gr.enabled) applyGrain(r, g, b, width, height, gr)
+    }
+
+    /**
+     * Apply a [PreGrade] to the RGB planes in place (display space): an S-curve contrast pivot
+     * around mid-grey (smoothstep-blended so it doesn't clip) plus a luminance-preserving
+     * saturation scale. Exposed for unit testing.
+     */
+    fun applyPreGrade(r: FloatArray, g: FloatArray, b: FloatArray, pg: PreGrade) {
+        val c = pg.contrast
+        val sat = pg.saturation
+        fun contrast(x: Float): Float {
+            if (c == 0f) return x
+            // Same shape as the film S-curve: push away from 0.5, tapering at the extremes.
+            val s = x + c * (x - 0.5f) * (1f - kotlin.math.abs(2f * x - 1f)) * 2f
+            return s.coerceIn(0f, 1f)
+        }
+        for (i in r.indices) {
+            var rr = contrast(r[i]); var gg = contrast(g[i]); var bb = contrast(b[i])
+            if (sat != 1f) {
+                val l = luma(rr, gg, bb)
+                rr = (l + (rr - l) * sat).coerceIn(0f, 1f)
+                gg = (l + (gg - l) * sat).coerceIn(0f, 1f)
+                bb = (l + (bb - l) * sat).coerceIn(0f, 1f)
+            }
+            r[i] = rr; g[i] = gg; b[i] = bb
+        }
     }
 
     /**
