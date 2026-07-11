@@ -17,6 +17,21 @@ interface CameraController {
     fun connect(address: String)
     fun disconnect()
     fun fireShutter(af: Boolean = true)
+
+    /**
+     * Read the camera's Wi-Fi AP SSID + passphrase over the WLAN Control service.
+     * The result is delivered asynchronously into [BleState.wlanCredentials]
+     * (GATT reads are async, mirroring the device-info reads).
+     */
+    fun readWlanCredentials()
+
+    /**
+     * Command the camera to wake its Wi-Fi access point by writing the WLAN Control
+     * "Network Type" characteristic to AP mode (or OFF). Progress/result is reflected
+     * in [BleState.wifiEnabling] / [BleState.wifiEnabled].
+     */
+    fun enableWifiAp(enable: Boolean = true)
+
     fun isBluetoothEnabled(): Boolean
     fun close()
 }

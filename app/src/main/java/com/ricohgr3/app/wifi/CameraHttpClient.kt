@@ -1,5 +1,6 @@
 package com.ricohgr3.app.wifi
 
+import android.net.Network
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -159,7 +160,9 @@ class CameraHttpClient(
     companion object {
         const val DEFAULT_BASE_URL = "http://192.168.0.1/v1/"
 
-        fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
+        fun defaultClient(): OkHttpClient = defaultClientBuilder().build()
+
+        private fun defaultClientBuilder(): OkHttpClient.Builder = OkHttpClient.Builder()
             .proxy(Proxy.NO_PROXY)
             .connectTimeout(3, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
@@ -168,6 +171,29 @@ class CameraHttpClient(
             // flow cancellation for teardown.
             .callTimeout(0, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
+
+        /**
+         * Build a client whose sockets are opened on [network] (the camera AP), via
+         * [Network.getSocketFactory]. This is a belt-and-suspenders complement to
+         * [WifiApConnector]'s process-wide `bindProcessToNetwork`: even if the process binding is
+         * ever cleared or another network becomes default, this client still routes to the camera.
+         * The DNS is left at OkHttp's default — irrelevant here since the camera is reached by its
+         * literal IP (`192.168.0.1`), not a hostname.
+         */
+        fun clientForNetwork(network: Network): OkHttpClient = defaultClientBuilder()
+            .socketFactory(network.socketFactory)
             .build()
+
+        /**
+         * Create a [CameraHttpClient] whose OkHttp sockets are pinned to [network]. Use this when
+         * you have the camera's joined [Network] from [WifiApConnector.Listener.onAvailable] and
+         * want routing guaranteed independent of the process-wide binding.
+         *
+         * @param baseUrl override for tests; defaults to `http://192.168.0.1/v1/`.
+         */
+        fun forNetwork(
+            network: Network,
+            baseUrl: HttpUrl = DEFAULT_BASE_URL.toHttpUrl(),
+        ): CameraHttpClient = CameraHttpClient(baseUrl = baseUrl, okHttpClient = clientForNetwork(network))
     }
 }

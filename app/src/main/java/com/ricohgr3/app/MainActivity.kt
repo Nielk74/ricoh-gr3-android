@@ -36,7 +36,10 @@ class MainActivity : ComponentActivity() {
                     // The Wi-Fi client talks to the camera AP (http://192.168.0.1/v1/); it is
                     // only reachable once the phone has joined that AP (Phase 4/5 handoff).
                     val appContext = applicationContext
-                    val photoRepository = remember { PhotoRepository(CameraHttpClient()) }
+                    // One CameraHttpClient backs both the gallery's PhotoRepository and the
+                    // live-view screen (MVP-3), so they share a single OkHttp/session instance.
+                    val cameraWifiController = remember { CameraHttpClient() }
+                    val photoRepository = remember { PhotoRepository(cameraWifiController) }
                     val stickyLookStore = remember { StickyLookStore(appContext) }
                     val galleryViewModel: GalleryViewModel = viewModel(
                         factory = GalleryViewModel.Factory(photoRepository, stickyLookStore),
@@ -53,6 +56,7 @@ class MainActivity : ComponentActivity() {
                         viewModel = vm,
                         galleryViewModel = galleryViewModel,
                         photoRepository = photoRepository,
+                        cameraWifiController = cameraWifiController,
                         permissionsGranted = granted,
                         onRequestPermissions = { launcher.launch(requiredPermissions()) },
                     )

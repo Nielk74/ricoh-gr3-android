@@ -50,6 +50,51 @@ object RicohGattProfile {
         return byteArrayOf(OperationCode.START_SHOOTING, param)
     }
 
+    /**
+     * WLAN Control service — read the camera's Wi-Fi AP credentials (SSID / passphrase)
+     * and switch its network type to wake the access point for the HTTP `/v1/` API.
+     *
+     * Source: research/references/ricoh-gr-bluetooth-api/wlan_control_command/
+     *   ssid.md, passphrase.md, network_type.md, channel.md
+     */
+    val WLAN_CONTROL_SERVICE: UUID = UUID.fromString("F37F568F-9071-445D-A938-5441F2E82399")
+
+    /** SSID characteristic (Read/Write, utf8s). Source: ssid.md */
+    val WLAN_SSID: UUID = UUID.fromString("90638E5A-E77D-409D-B550-78F7E1CA5AB4")
+
+    /** Passphrase characteristic (Read/Write, utf8s). Source: passphrase.md */
+    val WLAN_PASSPHRASE: UUID = UUID.fromString("0F38279C-FE9E-461B-8596-81287E8C9A81")
+
+    /**
+     * Network Type characteristic (Read/Write/Notify, sint8). Writing
+     * [NetworkType.AP_MODE] wakes the camera's Wi-Fi access point. Source: network_type.md
+     */
+    val WLAN_NETWORK_TYPE: UUID = UUID.fromString("9111CDD0-9F01-45C4-A2D4-E09E8FB0424D")
+
+    /** Channel characteristic (Read/Write, sint8: 0=Auto, 1-11=channel). Source: channel.md */
+    val WLAN_CHANNEL: UUID = UUID.fromString("51DE6EBC-0F22-4357-87E4-B1FA1D385AB8")
+
+    /** Values for the [WLAN_NETWORK_TYPE] sint8 field (network_type.md). */
+    object NetworkType {
+        const val OFF: Byte = 0
+        const val AP_MODE: Byte = 1
+    }
+
+    /**
+     * Parse a WLAN Control string characteristic ([WLAN_SSID] / [WLAN_PASSPHRASE]).
+     * The camera stores these as utf8s; decode as UTF-8 and strip any trailing NUL
+     * padding / whitespace some firmwares include. Pure + unit-testable (no GATT).
+     */
+    fun parseWlanString(value: ByteArray): String =
+        value.toString(Charsets.UTF_8).trim { it == '\u0000' || it.isWhitespace() }
+
+    /**
+     * Encode the [WLAN_NETWORK_TYPE] payload: `true` → AP mode (wake the Wi-Fi AP),
+     * `false` → OFF. A single sint8 byte per network_type.md. Pure + unit-testable.
+     */
+    fun networkTypePayload(enable: Boolean): ByteArray =
+        byteArrayOf(if (enable) NetworkType.AP_MODE else NetworkType.OFF)
+
     /** Client Characteristic Configuration Descriptor — enables notifications. */
     val CCCD: UUID = shortUuid(0x2902)
 

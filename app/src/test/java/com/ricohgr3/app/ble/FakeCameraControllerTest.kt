@@ -68,6 +68,44 @@ class FakeCameraControllerTest {
     }
 
     @Test
+    fun `readWlanCredentials populates ssid and passphrase when connected`() = runTest {
+        val controller = FakeCameraController()
+        controller.startScan()
+        controller.connect(controller.fakeCamera.address)
+        assertNull(controller.state.value.wlanCredentials)
+
+        controller.readWlanCredentials()
+
+        val creds = controller.state.value.wlanCredentials
+        assertEquals("GR_FAKE0001", creds?.ssid)
+        assertEquals("fakepass1234", creds?.passphrase)
+    }
+
+    @Test
+    fun `enableWifiAp sets wifiEnabled and clears wifiEnabling`() = runTest {
+        val controller = FakeCameraController()
+        controller.startScan()
+        controller.connect(controller.fakeCamera.address)
+
+        controller.enableWifiAp(enable = true)
+
+        val s = controller.state.value
+        assertTrue(s.wifiEnabled)
+        assertFalse(s.wifiEnabling)
+    }
+
+    @Test
+    fun `wlan handoff methods are no-ops when not connected`() = runTest {
+        val controller = FakeCameraController()
+
+        controller.readWlanCredentials()
+        controller.enableWifiAp()
+
+        assertNull(controller.state.value.wlanCredentials)
+        assertFalse(controller.state.value.wifiEnabled)
+    }
+
+    @Test
     fun `full lifecycle scan connect shoot disconnect`() = runTest {
         val controller = FakeCameraController()
 

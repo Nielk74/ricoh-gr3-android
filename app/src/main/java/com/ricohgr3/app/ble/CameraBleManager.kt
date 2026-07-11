@@ -47,6 +47,9 @@ class CameraBleManager(private val context: Context) : CameraController {
     /** Serialized queue of characteristic reads (Android GATT allows one op at a time). */
     private val readQueue = ArrayDeque<java.util.UUID>()
 
+    /** The [RicohGattProfile.NetworkType] value of the in-flight enable-AP write. */
+    private var pendingWifiEnable = false
+
     override fun isBluetoothEnabled(): Boolean = adapter?.isEnabled == true
 
     // ---- Scanning -----------------------------------------------------------
@@ -137,10 +140,12 @@ class CameraBleManager(private val context: Context) : CameraController {
                 return
             }
             val hasShooting = g.getService(RicohGattProfile.SHOOTING_SERVICE) != null
+            val hasWlan = g.getService(RicohGattProfile.WLAN_CONTROL_SERVICE) != null
             _state.update {
                 it.copy(
                     connectionState = ConnectionState.CONNECTED,
                     shutterAvailable = hasShooting,
+                    wlanControlAvailable = hasWlan,
                 )
             }
             // Queue the Device Information reads.
@@ -181,11 +186,19 @@ class CameraBleManager(private val context: Context) : CameraController {
             characteristic: BluetoothGattCharacteristic,
             status: Int,
         ) {
-            if (characteristic.uuid == RicohGattProfile.OPERATION_REQUEST) {
-                _state.update {
+            val ok = status == BluetoothGatt.GATT_SUCCESS
+            when (characteristic.uuid) {
+                RicohGattProfile.OPERATION_REQUEST -> _state.update {
                     it.copy(
-                        lastShutterOk = status == BluetoothGatt.GATT_SUCCESS,
-                        shutterCount = it.shutterCount + if (status == BluetoothGatt.GATT_SUCCESS) 1 else 0,
+                        lastShutterOk = ok,
+                        shutterCount = it.shutterCount + if (ok) 1 else 0,
+                    )
+                }
+                RicohGattProfile.WLAN_NETWORK_TYPE -> _state.update {
+                    it.copy(
+                        wifiEnabling = false,
+                        wifiEnabled = ok && pendingWifiEnable,
+                        error = if (ok) it.error else "Failed to switch Wi-Fi mode ($status)",
                     )
                 }
             }
@@ -194,33 +207,62 @@ class CameraBleManager(private val context: Context) : CameraController {
 
     private fun handleRead(uuid: java.util.UUID, value: ByteArray?, status: Int, g: BluetoothGatt) {
         if (status == BluetoothGatt.GATT_SUCCESS && value != null) {
-            val text = value.toString(Charsets.UTF_8).trim()
-            _state.update { s ->
-                val info = s.deviceInfo ?: DeviceInfo()
-                s.copy(
-                    deviceInfo = when (uuid) {
-                        RicohGattProfile.MANUFACTURER_NAME_STRING -> info.copy(manufacturer = text)
-                        RicohGattProfile.MODEL_NUMBER_STRING -> info.copy(model = text)
-                        RicohGattProfile.FIRMWARE_REVISION_STRING -> info.copy(firmware = text)
-                        RicohGattProfile.SERIAL_NUMBER_STRING -> info.copy(serial = text)
-                        else -> info
+            when (uuid) {
+                RicohGattProfile.WLAN_SSID, RicohGattProfile.WLAN_PASSPHRASE ->
+                    handleWlanRead(uuid, value)
+                else -> {
+                    val text = value.toString(Charsets.UTF_8).trim()
+                    _state.update { s ->
+                        val info = s.deviceInfo ?: DeviceInfo()
+                        s.copy(
+                            deviceInfo = when (uuid) {
+                                RicohGattProfile.MANUFACTURER_NAME_STRING -> info.copy(manufacturer = text)
+                                RicohGattProfile.MODEL_NUMBER_STRING -> info.copy(model = text)
+                                RicohGattProfile.FIRMWARE_REVISION_STRING -> info.copy(firmware = text)
+                                RicohGattProfile.SERIAL_NUMBER_STRING -> info.copy(serial = text)
+                                else -> info
+                            }
+                        )
                     }
-                )
+                }
             }
         }
         dequeueRead(g)
     }
 
+    /** Fold an SSID or passphrase read into [BleState.wlanCredentials]. */
+    private fun handleWlanRead(uuid: java.util.UUID, value: ByteArray) {
+        val text = RicohGattProfile.parseWlanString(value)
+        _state.update { s ->
+            val creds = s.wlanCredentials ?: WlanCredentials(ssid = "", passphrase = "")
+            s.copy(
+                wlanCredentials = when (uuid) {
+                    RicohGattProfile.WLAN_SSID -> creds.copy(ssid = text)
+                    RicohGattProfile.WLAN_PASSPHRASE -> creds.copy(passphrase = text)
+                    else -> creds
+                }
+            )
+        }
+    }
+
     private fun dequeueRead(g: BluetoothGatt) {
         val next = readQueue.poll() ?: return
-        val svc = g.getService(RicohGattProfile.DEVICE_INFORMATION_SERVICE)
-        val ch = svc?.getCharacteristic(next)
+        val ch = g.getService(serviceForCharacteristic(next))?.getCharacteristic(next)
         if (ch == null) {
             // Characteristic not present on this model — skip to the next one.
             dequeueRead(g)
         } else {
             g.readCharacteristic(ch)
         }
+    }
+
+    /** Map a queued characteristic UUID to the service that hosts it. */
+    private fun serviceForCharacteristic(uuid: java.util.UUID): java.util.UUID = when (uuid) {
+        RicohGattProfile.WLAN_SSID,
+        RicohGattProfile.WLAN_PASSPHRASE,
+        RicohGattProfile.WLAN_NETWORK_TYPE,
+        RicohGattProfile.WLAN_CHANNEL -> RicohGattProfile.WLAN_CONTROL_SERVICE
+        else -> RicohGattProfile.DEVICE_INFORMATION_SERVICE
     }
 
     // ---- Shutter ------------------------------------------------------------
@@ -247,6 +289,57 @@ class CameraBleManager(private val context: Context) : CameraController {
             }
         }
         Log.d(TAG, "Shutter fired (af=$af)")
+    }
+
+    // ---- Wi-Fi handoff ------------------------------------------------------
+
+    /**
+     * Read the camera's Wi-Fi AP SSID + passphrase from the WLAN Control service.
+     * Queues the two reads through the same serialized [readQueue] as device info;
+     * results land in [BleState.wlanCredentials] via [handleWlanRead].
+     */
+    override fun readWlanCredentials() {
+        val g = gatt ?: return
+        if (g.getService(RicohGattProfile.WLAN_CONTROL_SERVICE) == null) {
+            _state.update { it.copy(error = "WLAN Control service not found") }
+            return
+        }
+        val busy = readQueue.isNotEmpty()
+        readQueue.add(RicohGattProfile.WLAN_SSID)
+        readQueue.add(RicohGattProfile.WLAN_PASSPHRASE)
+        // Only kick the queue if nothing is currently draining it; otherwise the
+        // in-flight read's completion callback will pick these up.
+        if (!busy) dequeueRead(g)
+    }
+
+    /**
+     * Wake (or turn off) the camera's Wi-Fi access point by writing the WLAN Control
+     * "Network Type" characteristic. Result is reflected in [BleState.wifiEnabling] /
+     * [BleState.wifiEnabled] from [onCharacteristicWrite].
+     */
+    override fun enableWifiAp(enable: Boolean) {
+        val g = gatt ?: return
+        val ch = g.getService(RicohGattProfile.WLAN_CONTROL_SERVICE)
+            ?.getCharacteristic(RicohGattProfile.WLAN_NETWORK_TYPE)
+        if (ch == null) {
+            _state.update { it.copy(error = "WLAN Network Type characteristic not found") }
+            return
+        }
+        pendingWifiEnable = enable
+        _state.update { it.copy(wifiEnabling = true, error = null) }
+        val payload = RicohGattProfile.networkTypePayload(enable)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            g.writeCharacteristic(ch, payload, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+        } else {
+            @Suppress("DEPRECATION")
+            run {
+                ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                ch.value = payload
+                g.writeCharacteristic(ch)
+            }
+        }
+        Log.d(TAG, "Wi-Fi AP enable=$enable requested")
     }
 
     override fun close() {

@@ -14,6 +14,15 @@ data class DeviceInfo(
     val serial: String? = null,
 )
 
+/**
+ * Wi-Fi access-point credentials read from the camera's WLAN Control service over BLE.
+ * Used to join the camera's AP for the HTTP `/v1/` API (see FEASIBILITY.md §6).
+ */
+data class WlanCredentials(
+    val ssid: String,
+    val passphrase: String,
+)
+
 enum class ConnectionState {
     DISCONNECTED,
     CONNECTING,
@@ -30,5 +39,13 @@ data class BleState(
     val shutterAvailable: Boolean = false,
     val lastShutterOk: Boolean? = null,
     val shutterCount: Int = 0,
+    /** True once the WLAN Control service is present on the connected camera. */
+    val wlanControlAvailable: Boolean = false,
+    /** Wi-Fi AP credentials read over BLE, or null until [WlanCredentials] is fetched. */
+    val wlanCredentials: WlanCredentials? = null,
+    /** True while an enable-AP (network type → AP mode) write is in flight. */
+    val wifiEnabling: Boolean = false,
+    /** True once the camera acknowledged switching its network type to AP mode. */
+    val wifiEnabled: Boolean = false,
     val error: String? = null,
 )

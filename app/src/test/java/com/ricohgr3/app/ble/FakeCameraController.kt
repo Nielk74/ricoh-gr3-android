@@ -23,6 +23,10 @@ class FakeCameraController(
         firmware = "1.60",
         serial = "FAKE-0001",
     ),
+    private val fakeCredentials: WlanCredentials = WlanCredentials(
+        ssid = "GR_FAKE0001",
+        passphrase = "fakepass1234",
+    ),
 ) : CameraController {
 
     private val _state = MutableStateFlow(BleState())
@@ -69,6 +73,18 @@ class FakeCameraController(
         _state.update {
             it.copy(lastShutterOk = true, shutterCount = it.shutterCount + 1)
         }
+    }
+
+    override fun readWlanCredentials() {
+        if (_state.value.connectionState != ConnectionState.CONNECTED) return
+        _state.update { it.copy(wlanCredentials = fakeCredentials) }
+    }
+
+    override fun enableWifiAp(enable: Boolean) {
+        if (_state.value.connectionState != ConnectionState.CONNECTED) return
+        // Drive the enabling -> enabled transition synchronously for JVM tests.
+        _state.update { it.copy(wifiEnabling = true) }
+        _state.update { it.copy(wifiEnabling = false, wifiEnabled = enable) }
     }
 
     override fun isBluetoothEnabled(): Boolean = bluetoothEnabled

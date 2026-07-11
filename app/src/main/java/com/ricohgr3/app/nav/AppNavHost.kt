@@ -23,7 +23,11 @@ import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.gallery.GalleryScreen
 import com.ricohgr3.app.gallery.GalleryViewModel
 import com.ricohgr3.app.gallery.ViewerScreen
+import com.ricohgr3.app.liveview.LiveViewScreen
+import com.ricohgr3.app.liveview.LiveViewViewModel
 import com.ricohgr3.app.ui.CameraScreen
+import com.ricohgr3.app.wifi.CameraWifiController
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
  * App navigation graph. [Screen.Connect] is the start destination and hosts the existing
@@ -36,6 +40,9 @@ fun AppNavHost(
     viewModel: MainViewModel,
     galleryViewModel: GalleryViewModel,
     photoRepository: PhotoRepository,
+    // MVP-3: Wi-Fi controller for the live-view + shutter screen. Threaded from MainActivity
+    // (same CameraHttpClient instance that backs the PhotoRepository).
+    cameraWifiController: CameraWifiController,
     permissionsGranted: Boolean,
     onRequestPermissions: () -> Unit,
     navController: NavHostController = rememberNavController(),
@@ -94,8 +101,16 @@ fun AppNavHost(
             }
         }
 
+        // MVP-3: real live-view + Wi-Fi shutter screen, replacing the placeholder. Its
+        // ViewModel is scoped to this destination via LiveViewViewModel.Factory.
         composable(Screen.LiveView.route) {
-            SimplePlaceholder(title = "Live View", onBack = { navController.popBackStack() })
+            val liveViewModel: LiveViewViewModel = viewModel(
+                factory = LiveViewViewModel.Factory(cameraWifiController),
+            )
+            LiveViewScreen(
+                viewModel = liveViewModel,
+                onBack = { navController.popBackStack() },
+            )
         }
         composable(Screen.Settings.route) {
             SimplePlaceholder(title = "Settings", onBack = { navController.popBackStack() })
