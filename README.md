@@ -26,6 +26,26 @@ built on standard Android APIs: `HttpURLConnection`/OkHttp + `android.bluetooth.
 See [`research/FEASIBILITY.md`](research/FEASIBILITY.md) for the full analysis, and
 [`research/references/`](research/references/) for cloned protocol specs.
 
+## Film emulations
+
+The app develops captured photos on-device through a real film-emulation engine (3D LUT + film
+tone/colour + split-tone + halation + a physically-motivated grain model). The previews below are
+rendered by CI from **one neutral, unedited GR III sample** through the **exact same pipeline** the
+app ships, so they're an honest preview of each look — see
+[`docs/FILM_PREVIEWS.md`](docs/FILM_PREVIEWS.md) for how they're generated.
+
+| Standard (as shot) | Provia | Velvia | Astia |
+|:--:|:--:|:--:|:--:|
+| ![Standard](docs/previews/standard.jpg) | ![Provia](docs/previews/provia.jpg) | ![Velvia](docs/previews/velvia.jpg) | ![Astia](docs/previews/astia.jpg) |
+| **Classic Chrome** | **Classic Neg** | **Nostalgic Neg** | **Eterna** |
+| ![Classic Chrome](docs/previews/classic_chrome.jpg) | ![Classic Neg](docs/previews/classic_neg.jpg) | ![Nostalgic Neg](docs/previews/nostalgic_neg.jpg) | ![Eterna](docs/previews/eterna.jpg) |
+| **Pro Neg Hi** | **Pro Neg Std** | **Reala Ace** | **Bleach Bypass** |
+| ![Pro Neg Hi](docs/previews/pro_neg_hi.jpg) | ![Pro Neg Std](docs/previews/pro_neg_std.jpg) | ![Reala Ace](docs/previews/reala_ace.jpg) | ![Bleach Bypass](docs/previews/bleach_bypass.jpg) |
+
+<sub>Sample photo © its author (RICOH GR III sample gallery); film-simulation LUTs from
+[`abpy/FujifilmCameraProfiles`](https://github.com/abpy/FujifilmCameraProfiles). Included for
+preview/illustration; see [`docs/FILM_PREVIEWS.md`](docs/FILM_PREVIEWS.md) for licensing notes.</sub>
+
 ## Recommended architecture
 
 ```

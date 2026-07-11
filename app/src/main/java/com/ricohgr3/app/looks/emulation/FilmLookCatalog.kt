@@ -23,8 +23,16 @@ object FilmLookCatalog {
     /** A look plus the colour model used to synthesise its LUT **only if the asset is missing**. */
     data class Entry(val look: FilmLook, val model: Model)
 
-    /** Gamma the Fuji `.cube` LUTs expect on their (sRGB) input — see class kdoc. */
-    private const val FUJI_INPUT_GAMMA = 1.6f
+    /**
+     * Gamma the Fuji `.cube` LUTs expect on their (sRGB) input — see class kdoc.
+     *
+     * These LUTs bake a strong S-curve and expect a *linear-ish* input. Calibrated on a real
+     * photo (not just a mid-grey patch): `1.6` correctly placed mid-grey but pushed sRGB shadows
+     * so low that the LUT clipped them to black (crushed shadows, even on soft stocks like Eterna
+     * that should *lift* them). `1.3` preserves shadow detail (sRGB 0.05→~0.03, 0.2→~0.14) while
+     * keeping mids filmic — the honest match to how these sims actually render.
+     */
+    private const val FUJI_INPUT_GAMMA = 1.3f
 
     /** Neutral fallback model (used only if a `.cube` asset fails to load). */
     private val fallbackColour = Model(
