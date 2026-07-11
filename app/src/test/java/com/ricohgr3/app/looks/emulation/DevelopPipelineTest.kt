@@ -25,6 +25,19 @@ class DevelopPipelineTest {
         assertTrue("same seed -> identical grain", run().contentEquals(run()))
     }
 
+    @Test fun grainIsActuallyVisibleAfterCorrelationBlur() {
+        // Regression: blurring the noise field for correlation used to collapse grain amplitude
+        // to <1 of 255 (invisible). With renormalisation, a size>1 grain must still land at a
+        // clearly visible std (target: a few of 255), not near zero.
+        val w = 128; val h = 128; val n = w * h
+        val r = FloatArray(n) { 0.5f }; val g = FloatArray(n) { 0.5f }; val b = FloatArray(n) { 0.5f }
+        DevelopPipeline.applyGrain(r, g, b, w, h, GrainParams(amount = 0.05f, size = 2.5f, shadowBias = 0.6f, seed = 9))
+        var sum = 0.0; var sq = 0.0
+        for (v in r) { val d = v - 0.5f; sum += d; sq += d.toDouble() * d }
+        val std = kotlin.math.sqrt(sq / n - (sum / n) * (sum / n))
+        assertTrue("grain must be visible (std=$std, ~${std * 255} of 255)", std * 255 > 2f)
+    }
+
     @Test fun grainSeedChangesOutput() {
         fun run(seed: Long): FloatArray {
             val r = FloatArray(64) { 0.5f }; val g = FloatArray(64) { 0.5f }; val b = FloatArray(64) { 0.5f }

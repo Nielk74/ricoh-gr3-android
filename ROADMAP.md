@@ -133,9 +133,26 @@ Decision: **start on-camera, grow in-app**; Auto-Look kept; sticky look + edited
 - [~] **7.2 Look UX in library**: edited mark ✅, sticky default across frames ✅, batch apply ✅,
       before/after (press-and-hold) ✅, reset ✅ — all built in Phase 6d/6e. Preview tint is
       *indicative* (LookSwatch); true per-frame render awaits 7.3. On-device look-push wiring = 7.1.
-- [ ] **7.3 In-app develop engine**: DNG decode + GPU pipeline + film-emulation LUTs (the big one)
+- [~] **7.3 In-app develop engine**: film-emulation LUTs ✅ (real colour science: scene-linear
+      per-channel density curves + dye cross-talk + split-tone + halation + grain), ~11 real
+      film stocks shown directly in the picker ✅, DNG decode + develop → JPEG ✅, real
+      developed preview in the viewer ✅. Remaining: **GPU/AGSL preview fast-path** (API 33+) so
+      the full-res develop is instant on new devices (CPU path is the portable baseline).
 - [ ] **7.4 Auto-Look**: heuristic scene→look (EXIF + thumbnail), opt-in; v2 tiny on-device model
 - [ ] **7.5 Presets & sharing**: save/share edit stacks, apply on import (no cloud)
+- [ ] **7.6 Advanced editing** (the **⋮ three-dots** menu on a photo): a per-photo manual editor
+      that opens from an overflow menu, sitting *on top of* the film-stock look (the stock is the
+      starting grade; these are fine adjustments over it). Scope:
+  - **Tone**: exposure, contrast, highlights, shadows, whites, blacks (sliders over the develop).
+  - **Colour**: temperature/tint (white balance), vibrance, saturation, HSL per-channel (later).
+  - **Film controls**: grain amount/size, halation strength, split-tone — expose the existing
+      `DevelopPipeline` params as live sliders (the engine already supports them).
+  - **Geometry**: crop / straighten / rotate, aspect presets (3:2, 1:1, 16:9).
+  - **Reset per-section** + a live histogram; all non-destructive (edit stack saved, → **7.5**).
+  - UX: ⋮ overflow on the viewer (and long-press on a gallery thumb) → bottom-sheet editor with
+      the real-time developed preview (reuse the 7.3 preview path). Manual edits fold into the
+      same `DevelopPipeline` so preview == exported JPEG. Keep crash rules (bounded buffers,
+      off-main-thread, catch `Throwable`).
 
 ## Phase 8 — Polish & release  (M)
 
