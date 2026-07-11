@@ -84,12 +84,21 @@ Goal: the "intuitive editing" requirements, made concrete.
 
 Goal: unlimited, shareable looks applied to transferred **JPEG and RAW (DNG)** — no longer
 limited to the camera's built-in set. This is where "film emulations" become truly ours.
+Research + design: **`research/FILM_EMULATION.md`**.
 
+- [x] **CPU film-emulation engine (v1 landed)** — pure-Kotlin, JVM-tested, in
+      `looks/emulation/`: `LutCube` (`.cube` parse + trilinear 3D LUT), `DevelopPipeline`
+      (linearise → LUT → split-tone → halation → grain), `DevelopEngine` (Bitmap glue),
+      `FilmLutFactory`/`FilmLookCatalog` (curated stocks: Portra 400, Gold 200, Velvia,
+      CineStill 800T, Retro Fade, Tri-X). Wired into the **edited export** path
+      (`gallery/PhotoSave.saveEdited` via `CameraLookMapping`): developing a frame now renders
+      a real look, not the indicative gradient tint.
+- [ ] Ship **licensed film-stock `.cube` assets** to replace the procedural LUTs
+      (`FilmLookLoader` already prefers an asset when present — see `FILM_EMULATION.md` §5 on
+      redistribution rights).
+- [ ] **AGSL/`RuntimeShader` preview fast-path** (API 33+) for live grid/viewer preview;
+      keep the CPU engine as the universal + export path (min SDK 26). No RenderScript.
 - [ ] DNG decode (transferred via `downloadPhoto(... raw)`), demosaic to a working buffer.
-- [ ] A small GPU pipeline (RenderScript replacement / OpenGL / `RuntimeShader` on API 33+):
-      exposure, WB, tone curve, HSL, grain, split-tone.
-- [ ] **Film-emulation LUTs** that *extend* the GR looks (e.g. richer posi-film variants,
-      classic B&W stocks) — authored as `.cube` LUTs, applied in-shader.
 - [ ] Non-destructive edit stack per photo; render on export.
 
 ## Phase 7.4 — Auto-Look  (M) — kept from Concept B

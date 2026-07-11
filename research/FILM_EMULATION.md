@@ -1,0 +1,160 @@
+# Film Emulation — science, libraries, and the plan for this app
+
+Research backing the "much better filters" work. Grounded in how real film emulation is
+done in colour-grading tools and the constraints of this Android app (min SDK 26,
+compile SDK 34, Jetpack Compose, no RenderScript).
+
+---
+
+## 1. Why the current "filters" are weak
+
+Two things exist today and neither actually *renders* a look onto a captured photo:
+
+1. **Camera-side `effect` enums** (`CameraLook.kt`) — `col_vivid`, `efc_posiFilm`, … are
+   pushed to the camera via `PUT /v1/params/camera` *before capture*. Authentic, but:
+   only ~11 fixed looks, only applies to *future* frames, nothing you can do to an
+   already-captured JPEG, and no on-device preview of the real result.
+2. **`LookSwatch.kt`** — a two-stop gradient per look. Purely indicative chips; not the
+   image. The "edited" download path has no real pixels to export.
+
+So "better filters" = **a real client-side develop engine** that renders a look onto a
+captured bitmap, on-device, with quality comparable to Lightroom/Resolve film LUTs.
+
+---
+
+## 2. How film emulation actually works (the science)
+
+A convincing film look is *not* one operation. It is a stack, applied in a defined order.
+Every serious tool (DaVinci Resolve film-emulation powergrades, FilmBox, RawTherapee /
+darktable film simulations, Fuji's in-camera Film Simulation) is some subset of:
+
+1. **Input linearisation / working space.** Do the colour math in a linear-ish space, not
+   raw sRGB gamma, or hue shifts and blends look wrong. At minimum, decode sRGB → linear
+   before tone/colour ops, re-encode after.
+
+2. **Tone curve (the biggest single contributor).** Film's characteristic S-curve: a toe
+   that lifts and compresses shadows, a shoulder that rolls off highlights instead of
+   clipping. This is what gives "film" its gentle contrast. Implemented as a 1D curve per
+   channel (or on luma). Kodak vs Fuji differ mostly here + in colour.
+
+3. **Colour response / channel cross-talk.** Film dyes are not clean RGB. Emulation shifts
+   hues per region (e.g. greens toward yellow, skies toward cyan), changes saturation
+   non-uniformly (Velvia: high sat; Portra: restrained, warm skin), and does *channel
+   mixing* (a bit of red leaks into green, etc.). This is why a 3D LUT is the right tool —
+   it captures arbitrary colour-to-colour maps a per-channel curve can't.
+
+4. **Split toning.** Different tint in shadows vs highlights (classic: teal shadows, warm
+   highlights; or the faded "retro" warm shadow). Cheap, huge stylistic payoff.
+
+5. **Halation.** Red-orange bloom bleeding out of bright edges into darker surroundings —
+   film's anti-halation layer failing at highlights. Implemented as: threshold the
+   highlights → Gaussian blur → tint red/orange → screen/add back. Luminance-gated.
+
+6. **Grain.** Luminance-dependent monochrome (or slightly chromatic) noise. Real film grain
+   is *stronger in mid-tones/shadows structure* and correlated (not per-pixel white noise) —
+   good grain is Gaussian noise with spatial correlation (blur the noise slightly) and
+   amplitude modulated by local luminance. Cheap version: per-pixel Gaussian scaled by a
+   luma curve. Better: pre-blur the noise field.
+
+7. **Optional: vignette, soft bloom, slight desaturation of extremes, black/white point.**
+
+**Order matters:** linearise → tone → colour(LUT) → split-tone → halation → (re-encode) →
+grain → vignette. Grain and vignette go last, in display space.
+
+### The 3D LUT is the workhorse
+A **3D LUT** partitions RGB space into a grid (typically 17³, 33³, or 64³); each vertex
+holds an output RGB. At runtime you find the cube a pixel falls in and **trilinear-
+interpolate** the 8 corners. One lookup captures tone + colour + cross-talk together — which
+is exactly why the industry ships film looks as `.cube` files. Steps 4–7 (split-tone,
+halation, grain) are layered *around* the LUT because they're spatial or parametric and
+don't belong in a pointwise colour map.
+
+**File formats:** `.cube` (Adobe/Resolve text format — easiest to parse), `.3dl`, and
+**HaldCLUT** (a PNG that is the identity LUT laid out as an image; apply any edit to the
+Hald PNG in an editor and it *becomes* a LUT). HaldCLUT is attractive here because it ships
+as a plain PNG asset and there are large free, permissively-usable collections.
+
+---
+
+## 3. Libraries / assets surveyed
+
+| Source | What it gives | License / usability |
+|---|---|---|
+| **G'MIC / "film emulation" HaldCLUTs** (Pat David / rawtherapee set) | ~300 film-stock HaldCLUT PNGs (Fuji, Kodak, Polaroid, Agfa…) generated from real stock scans | Public-domain / CC0-ish — the community set is widely redistributed. **Verify each file's license before shipping.** |
+| **RawTherapee / darktable film-simulation packs** | Same Hald PNG collection, documented | GPL tooling, CC0 luts |
+| **Adobe `.cube` film LUTs (free packs)** | `.cube` 3D LUTs | Mixed — many "free" packs are *not* redistributable. Avoid bundling unless CC0/MIT. |
+| **Android `RuntimeShader` / AGSL** | GPU shader path for the LUT + halation + grain | Platform API, **SDK 33+ only** — needs a fallback |
+| **`ScriptIntrinsic3DLUT`** (RenderScript) | Ready-made trilinear 3D LUT on GPU | **Deprecated (API 31), being removed — do not use** |
+| **OpenGL ES 2/3** | Portable GPU path (sampler for LUT, fragment shader for grain/halation) | Works from API 26; more boilerplate |
+| **Pure Kotlin CPU** | Trilinear LUT + curves on an `IntArray` of pixels | Works everywhere; slow on full-res but fine as fallback / for export off the UI thread |
+
+### Rendering-path decision for THIS app (min SDK 26)
+- **AGSL (`RuntimeShader` + `RenderEffect`)** is the cleanest but is **API 33+**. Great for
+  the live *preview* on new devices.
+- **CPU trilinear-interpolated LUT** in pure Kotlin is the **portable baseline** — runs on
+  all supported devices, is unit-testable on the JVM (no device needed, matching this repo's
+  testing constraint), and is correct for the **export/download** path where latency is fine.
+- **Plan:** ship the **CPU engine first** (correct, testable, powers edited-export), add an
+  **AGSL fast-path for preview** behind an SDK-33 check later. Avoid RenderScript entirely.
+
+We store looks as **`.cube` 3D LUTs in assets** (small: 33³ ≈ 36k floats) parsed into a flat
+float array, plus per-look parametric metadata (grain amount, halation strength, split-tone
+tints) in a small manifest. That keeps looks data-driven — adding a stock is dropping in a
+`.cube` + a manifest row, no code.
+
+---
+
+## 4. Proposed engine architecture
+
+```
+looks/emulation/
+  LutCube.kt          # parse .cube -> FloatArray(size^3 * 3) + size; trilinear sample()
+  FilmLook.kt         # data: id, name, lut asset, toneCurve?, splitTone, halation, grain
+  FilmLookCatalog.kt  # loads manifest (JSON in assets) -> List<FilmLook>
+  DevelopEngine.kt    # applyCpu(bitmap, look): linearise -> LUT -> splitTone -> halation
+                      #                          -> encode -> grain -> vignette
+  Grain.kt            # correlated luminance-weighted noise field
+  Halation.kt         # highlight threshold -> blur -> tint -> screen
+  (later) LutShader.kt / AgslDevelop.kt  # SDK33+ preview fast-path
+```
+
+- **Pure-Kotlin core** (`LutCube`, curve math, grain field, split-tone) has **no Android
+  deps** → JVM unit tests, consistent with the repo's "BLE/device can't run in CI, so keep
+  logic pure" rule.
+- `DevelopEngine.applyCpu` operates on a pixel `IntArray` off the main thread (coroutine),
+  returns a new `Bitmap` → feeds the **edited-download/export** path directly.
+- Swatch chips (`LookSwatch`) get replaced/augmented by rendering each LUT against a small
+  fixed reference thumbnail so the picker shows the *real* look, not a gradient.
+
+### Look set (v1 target)
+Curated, not 300. A tight set that reads as "much better": e.g. Kodak Portra 400,
+Kodak Gold 200, Kodak Ektar 100, Fuji Superia 400, Fuji Pro 400H, Cinestill 800T (with
+strong halation), Ilford HP5 / Tri-X (B&W), plus a couple of "faded/retro" and a punchy
+"Velvia-like". Each = one `.cube` + parametric grain/halation/split-tone.
+
+---
+
+## 5. Open decisions before coding
+- **LUT asset sourcing & licence.** Prefer CC0/public-domain HaldCLUT stock sims (convert to
+  `.cube` at build time), or hand-authored `.cube` files we can licence-clear. Must confirm
+  redistribution rights per file before bundling.
+- **Preview cost.** CPU full-res is fine for export; for live grid preview use downscaled
+  thumbnails (already small) or the AGSL path on SDK 33+.
+- **Relationship to camera `effect` enums.** Keep both: camera-side looks for authentic
+  in-camera JPEGs (unchanged), client-side film emulation for developing/exporting any
+  captured frame. UI should make the distinction legible.
+
+---
+
+## Sources
+- [darktable — LUT 3D module](https://docs.darktable.org/usermanual/4.0/en/module-reference/processing-modules/lut-3d/)
+- [Largest collection of HaldCLUT/LUT film simulations](https://marcrphoto.wordpress.com/the-largest-collection-of-film-simulation-haldclut-luts-brought-together/)
+- [Film emulation — Wikipedia](https://en.wikipedia.org/wiki/Film_emulation)
+- [How the Film Look Really Works — a colorist's guide](https://pixeltoolspost.com/blogs/resolve/film-emulation-explained)
+- [Android — Migrate from RenderScript](https://developer.android.com/guide/topics/renderscript/migrate)
+- [Android — RenderEffect](https://developer.android.com/reference/android/graphics/RenderEffect)
+- [AGSL: Made in the Shade(r) — Chet Haase](https://medium.com/androiddevelopers/agsl-made-in-the-shade-r-7d06d14fe02a)
+- [ScriptIntrinsic3DLUT (deprecated) — trilinear 3D LUT reference](https://developer.android.com/reference/android/renderscript/ScriptIntrinsic3DLUT)
+- [NVIDIA GPU Gems 2, Ch.24 — Using lookup tables to accelerate colour transforms](https://developer.nvidia.com/gpugems/gpugems2/part-iii-high-quality-rendering/chapter-24-using-lookup-tables-accelerate-color)
+- [Film Grain Synthesis for AV1 (Norkin & Birkbeck)](https://norkin.org/pdf/DCC_2018_AV1_film_grain.pdf)
+- [Film Grain Rendering and Parameter Estimation — ACM TOG](https://dl.acm.org/doi/10.1145/3592127)

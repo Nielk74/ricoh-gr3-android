@@ -47,6 +47,8 @@ class MainActivity : ComponentActivity() {
                         vm.wifiSession?.let { SessionBoundWifiController(it) } ?: CameraHttpClient()
                     }
                     val photoRepository = remember(cameraWifiController) { PhotoRepository(cameraWifiController) }
+                    val photoExporter = remember(appContext) { com.ricohgr3.app.data.PhotoExporter(appContext) }
+                    val filmLookLoader = remember(appContext) { com.ricohgr3.app.looks.emulation.FilmLookLoader(appContext) }
                     val stickyLookStore = remember { StickyLookStore(appContext) }
                     val galleryViewModel: GalleryViewModel = viewModel(
                         factory = GalleryViewModel.Factory(photoRepository, stickyLookStore),
@@ -63,6 +65,8 @@ class MainActivity : ComponentActivity() {
                         viewModel = vm,
                         galleryViewModel = galleryViewModel,
                         photoRepository = photoRepository,
+                        photoExporter = photoExporter,
+                        filmLookLoader = filmLookLoader,
                         cameraWifiController = cameraWifiController,
                         permissionsGranted = granted,
                         onRequestPermissions = { launcher.launch(requiredPermissions()) },

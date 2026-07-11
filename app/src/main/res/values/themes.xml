@@ -1,3 +1,6 @@
 <resources>
-    <style name="Theme.RicohGR3" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.RicohGR3" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Light theme only: never let the OS apply auto-dark to native surfaces. -->
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
 </resources>

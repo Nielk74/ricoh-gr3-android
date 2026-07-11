@@ -25,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,10 +37,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.ricohgr3.app.data.PhotoExporter
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.data.PhotoResult
 import com.ricohgr3.app.looks.CameraLook
+import kotlinx.coroutines.launch
 import com.ricohgr3.app.ui.LookStrip
 import com.ricohgr3.app.ui.LookSwatch
 import com.ricohgr3.app.ui.theme.GrTheme
@@ -63,6 +66,8 @@ import com.ricohgr3.app.wifi.PhotoInfo
 fun ViewerScreen(
     id: PhotoId,
     repository: PhotoRepository,
+    exporter: PhotoExporter,
+    filmLookLoader: com.ricohgr3.app.looks.emulation.FilmLookLoader? = null,
     appliedLook: CameraLook,
     stickyLook: CameraLook,
     onApplyLook: (CameraLook) -> Unit,
@@ -78,6 +83,31 @@ fun ViewerScreen(
         mutableStateOf(if (appliedLook == CameraLook.STANDARD) stickyLook else appliedLook)
     }
     var showingBefore by remember { mutableStateOf(false) }
+
+    // Save-to-device state: a status line surfaced to the UI so a failed download is visible
+    // rather than swallowed. `saving` blocks re-taps while a full-res fetch is in flight.
+    val scope = rememberCoroutineScope()
+    var saving by remember(id) { mutableStateOf(false) }
+    var saveStatus by remember(id) { mutableStateOf<String?>(null) }
+
+    fun runSave(edited: Boolean) {
+        if (saving) return
+        saving = true
+        saveStatus = if (edited) "Saving edited…" else "Saving original…"
+        scope.launch {
+            saveStatus = try {
+                val outcome =
+                    if (edited) saveEdited(id, picked, repository, exporter, filmLookLoader)
+                    else saveOriginal(id, repository, exporter)
+                if (outcome.edited) "Saved ${outcome.displayName} to Pictures/GR3"
+                else "Saved to Pictures/GR3"
+            } catch (e: Exception) {
+                "Save failed: ${e.message ?: e::class.simpleName}"
+            } finally {
+                saving = false
+            }
+        }
+    }
 
     LaunchedEffect(id) {
         // A VIEW-sized rendition (720x480, ~500 KiB) is plenty for the viewer and far cheaper
@@ -164,6 +194,62 @@ fun ViewerScreen(
                 picked = CameraLook.STANDARD
                 onResetLook()
             },
+        )
+
+        SaveBar(
+            picked = picked,
+            saving = saving,
+            status = saveStatus,
+            onSaveOriginal = { runSave(edited = false) },
+            onSaveEdited = { runSave(edited = true) },
+        )
+    }
+}
+
+/**
+ * Download / save-to-device row. "Save original" pulls the full-resolution file untouched;
+ * "Save with <look>" bakes the indicative preview tint into a copy (only offered when a
+ * non-Standard look is picked). Both fetch over the camera-AP-bound HTTP client and write into
+ * `Pictures/GR3` via MediaStore. The [status] line makes success — and any failure — visible.
+ */
+@Composable
+private fun SaveBar(
+    picked: CameraLook,
+    saving: Boolean,
+    status: String?,
+    onSaveOriginal: () -> Unit,
+    onSaveEdited: () -> Unit,
+) {
+    HorizontalDivider(color = GrTheme.colors.hair)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (saving) {
+            CircularProgressIndicator(
+                color = GrTheme.colors.accent,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.size(8.dp))
+        }
+        TextButton(onClick = onSaveOriginal, enabled = !saving) {
+            Text("Save original", color = GrTheme.colors.ink)
+        }
+        Spacer(Modifier.weight(1f))
+        if (picked != CameraLook.STANDARD) {
+            TextButton(onClick = onSaveEdited, enabled = !saving) {
+                Text("Save with ${picked.displayName}", color = GrTheme.colors.accent)
+            }
+        }
+    }
+    status?.let {
+        Text(
+            text = it,
+            style = MaterialTheme.typography.labelSmall,
+            color = GrTheme.colors.inkSoft,
+            modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
         )
     }
 }

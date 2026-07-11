@@ -18,6 +18,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.ricohgr3.app.MainViewModel
+import com.ricohgr3.app.data.PhotoExporter
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.gallery.GalleryScreen
@@ -41,6 +42,8 @@ fun AppNavHost(
     viewModel: MainViewModel,
     galleryViewModel: GalleryViewModel,
     photoRepository: PhotoRepository,
+    photoExporter: PhotoExporter,
+    filmLookLoader: com.ricohgr3.app.looks.emulation.FilmLookLoader,
     // MVP-3: Wi-Fi controller for the live-view + shutter screen. Threaded from MainActivity
     // (same CameraHttpClient instance that backs the PhotoRepository).
     cameraWifiController: CameraWifiController,
@@ -136,6 +139,8 @@ fun AppNavHost(
                 ViewerScreen(
                     id = photoId,
                     repository = photoRepository,
+                    exporter = photoExporter,
+                    filmLookLoader = filmLookLoader,
                     appliedLook = state.lookFor(photoId),
                     stickyLook = state.stickyLook,
                     onApplyLook = { look -> galleryViewModel.applyLook(photoId, look) },
