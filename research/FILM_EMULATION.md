@@ -78,12 +78,14 @@ as a plain PNG asset and there are large free, permissively-usable collections.
 
 Realistic film grain, `I_out = I + A(I)·G`, checked against the film-grain guideline:
 
-- **`G` — the grain field**: a shared **luma** octave (fine) plus a **coarser** octave summed in
-  for *clumping and size variety* (not one uniform speckle size). On top, a small **per-channel
-  chroma** component (independent R and B octaves; G = −(R+B)/2) so R/G/B are
-  **correlated-but-distinct** — identical mono grain looks flat, fully-independent RGB looks
-  electronic. Each octave is blurred for spatial correlation then **renormalised** (blurring
-  otherwise collapses amplitude — the old bug that made grain invisible). `chroma=0` ⇒ pure mono.
+- **`G` — the grain field**: one **fine, single-scale** grain octave (a ~Gaussian noise field
+  lightly blurred for correlation, then **renormalised** — blurring otherwise collapses amplitude,
+  the old invisible-grain bug), shared across channels as luma grain, plus a **small per-channel
+  chroma** component (independent R and B octaves; G = −(R+B)/2) so R/G/B differ slightly (~mono,
+  not electronic). **No coarse "clumping" octave**: a multi-octave field produced ugly
+  low-frequency *blotches* in smooth regions (sky) that read as stains, not grain — the
+  `coarseAmount`/`smoothBoost` knobs still exist but default **off**. Real fine-grain film in a
+  clear sky is even and unobtrusive; that's the target.
 - **`A(I)` — the strength**: a **midtone-peaked hump** (`grainDensity`) that falls off in both the
   deepest shadows *and* the brightest highlights (real silver-grain density), biasable toward the
   shadows by `shadowBias`. Measured: peak ~0.95 at luma 0.25–0.5, ~0.54 at black, ~0.04 near white.

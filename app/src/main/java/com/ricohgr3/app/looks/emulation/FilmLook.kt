@@ -93,10 +93,10 @@ data class GrainParams(
     val amount: Float,
     val size: Float,
     val shadowBias: Float,
-    val chroma: Float = 0.12f,
-    val coarseAmount: Float = 0.4f,
+    val chroma: Float = 0.1f,
+    val coarseAmount: Float = 0f,
     val coarseSizeMul: Float = 2.4f,
-    val smoothBoost: Float = 0.3f,
+    val smoothBoost: Float = 0f,
     val seed: Long = 0L,
 ) {
     val enabled: Boolean get() = amount > 0f
