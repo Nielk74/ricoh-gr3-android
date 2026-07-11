@@ -22,6 +22,7 @@ import com.ricohgr3.app.looks.StickyLookStore
 import com.ricohgr3.app.nav.AppNavHost
 import com.ricohgr3.app.ui.theme.GrTheme
 import com.ricohgr3.app.wifi.CameraHttpClient
+import com.ricohgr3.app.wifi.SessionBoundWifiController
 
 class MainActivity : ComponentActivity() {
 
@@ -36,10 +37,16 @@ class MainActivity : ComponentActivity() {
                     // The Wi-Fi client talks to the camera AP (http://192.168.0.1/v1/); it is
                     // only reachable once the phone has joined that AP (Phase 4/5 handoff).
                     val appContext = applicationContext
-                    // One CameraHttpClient backs both the gallery's PhotoRepository and the
-                    // live-view screen (MVP-3), so they share a single OkHttp/session instance.
-                    val cameraWifiController = remember { CameraHttpClient() }
-                    val photoRepository = remember { PhotoRepository(cameraWifiController) }
+                    // The controller injected into the gallery + live-view screens must route to
+                    // the camera AP's *bound* Network — that controller only exists once the Wi-Fi
+                    // session reaches Connected, and is rebuilt on every reconnect. So we hand the
+                    // screens a SessionBoundWifiController that forwards to the session's live
+                    // controller on each call. On API < 29 there's no session (Wi-Fi unsupported);
+                    // fall back to a plain client so construction still succeeds.
+                    val cameraWifiController = remember(vm.wifiSession) {
+                        vm.wifiSession?.let { SessionBoundWifiController(it) } ?: CameraHttpClient()
+                    }
+                    val photoRepository = remember(cameraWifiController) { PhotoRepository(cameraWifiController) }
                     val stickyLookStore = remember { StickyLookStore(appContext) }
                     val galleryViewModel: GalleryViewModel = viewModel(
                         factory = GalleryViewModel.Factory(photoRepository, stickyLookStore),

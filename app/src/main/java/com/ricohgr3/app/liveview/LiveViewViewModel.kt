@@ -5,11 +5,14 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ricohgr3.app.looks.CameraLook
 import com.ricohgr3.app.wifi.CameraWifiController
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -87,6 +90,9 @@ class LiveViewViewModel(
     private val _state = MutableStateFlow(LiveViewUiState())
     val state: StateFlow<LiveViewUiState> = _state.asStateFlow()
 
+    /** The running live-view collector, so a retry can cancel a stale one before restarting. */
+    private var liveviewJob: Job? = null
+
     init {
         loadProps()
         collectLiveview()
@@ -103,20 +109,56 @@ class LiveViewViewModel(
                         model = props.model,
                     )
                 }
+            }.onFailure { e ->
+                // props is best-effort (look/battery/model are decoration), but a failure here is
+                // the first sign the camera is unreachable — record it rather than silently
+                // keeping stale defaults, so the UI isn't misleadingly "fine".
+                _state.update { it.copy(error = it.error ?: (e.message ?: "Camera unreachable")) }
             }
         }
     }
 
+    /**
+     * (Re)start the live-view collector. The MJPEG stream can fail on a transient AP hiccup;
+     * without recovery a single blip permanently freezes the viewfinder. So on stream *error* we
+     * retry with a short backoff, up to [MAX_LIVEVIEW_RETRIES] consecutive failures, then surface a
+     * terminal error the user can [retryLiveview] past manually. A successfully received frame
+     * resets the failure counter. A stream that ends *cleanly* (camera closed it, no exception) is
+     * a legitimate stop — we leave the last frame and do not spin.
+     */
     private fun collectLiveview() {
-        viewModelScope.launch {
-            controller.liveview()
-                .catch { e -> _state.update { it.copy(error = e.message ?: "Live view stopped") } }
-                .collect { bytes ->
-                    _state.update {
-                        it.copy(frame = bytes, frameCount = it.frameCount + 1, error = null)
+        liveviewJob?.cancel()
+        liveviewJob = viewModelScope.launch {
+            var failures = 0
+            while (isActive) {
+                val failed = try {
+                    controller.liveview().collect { bytes ->
+                        failures = 0
+                        _state.update {
+                            it.copy(frame = bytes, frameCount = it.frameCount + 1, error = null)
+                        }
                     }
+                    false // completed without error — a clean end, stop retrying.
+                } catch (e: CancellationException) {
+                    throw e // cooperative cancellation (onCleared / retry) — don't swallow.
+                } catch (e: Exception) {
+                    true // errored — eligible for a backoff retry below.
                 }
+                if (!failed || !isActive) return@launch
+                failures++
+                if (failures >= MAX_LIVEVIEW_RETRIES) {
+                    _state.update { it.copy(error = "Live view stopped — tap to retry.") }
+                    return@launch
+                }
+                delay(RETRY_BACKOFF_MS)
+            }
         }
+    }
+
+    /** Manually restart live view after it gave up (e.g. from a "retry" affordance). */
+    fun retryLiveview() {
+        _state.update { it.copy(error = null) }
+        collectLiveview()
     }
 
     /**
@@ -129,11 +171,15 @@ class LiveViewViewModel(
         _state.update { it.copy(isShooting = true) }
         viewModelScope.launch {
             val result = runCatching { controller.shoot() }
-            val outcome = if (result.getOrNull()?.captured == true) {
-                ShotResult.SUCCESS
-            } else {
-                ShotResult.FAILURE
-            }
+            val shot = result.getOrNull()
+            // Success = the call returned an OK status (errCode null or 200) AND the camera
+            // signalled a capture, either explicitly (captured == true) or by handing back a
+            // captureId. Firmware that omits `captured` but returns a captureId used to be
+            // misreported as a failure. A non-OK errCode (e.g. 503) is always a failure.
+            val ok = shot != null &&
+                (shot.errCode == null || shot.errCode == HTTP_OK) &&
+                (shot.captured == true || shot.captureId != null)
+            val outcome = if (ok) ShotResult.SUCCESS else ShotResult.FAILURE
             _state.update { it.copy(isShooting = false, lastShot = outcome) }
             // A capture may change the camera's active effect; refresh props opportunistically.
             if (outcome == ShotResult.SUCCESS) loadProps()
@@ -154,5 +200,16 @@ class LiveViewViewModel(
             }
             return LiveViewViewModel(controller) as T
         }
+    }
+
+    private companion object {
+        /** The Ricoh API's OK status in its `errCode` field (HTTP-style). */
+        const val HTTP_OK = 200
+
+        /** Consecutive stream failures before giving up and showing a manual-retry error. */
+        const val MAX_LIVEVIEW_RETRIES = 4
+
+        /** Delay between live-view reconnect attempts. */
+        const val RETRY_BACKOFF_MS = 1_000L
     }
 }

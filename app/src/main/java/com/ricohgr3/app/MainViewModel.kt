@@ -15,7 +15,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** Which transport the user has chosen. The GR III's BLE and Wi-Fi planes are mutually exclusive. */
+/**
+ * Which transport the user has chosen. BLE and Wi-Fi were assumed mutually exclusive on the GR III,
+ * but that was concluded with the camera tethered over USB (a confounder that blocks its radios) —
+ * so the exclusivity is currently UNVERIFIED. See [selectWifi] and BLE_WIFI_WAKE_INVESTIGATION.md.
+ */
 enum class Transport { BLUETOOTH, WIFI }
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -39,6 +43,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * steps and yields the bound [com.ricohgr3.app.wifi.CameraWifiController] once connected.
      */
     val wifiSession: CameraWifiSession? = CameraWifiSession.createOrNull(app.applicationContext)
+
+    init {
+        // Keep the join-flow flags consistent with the actual session state:
+        //  - once Connected, the join succeeded → drop the one-shot intent so a later credential
+        //    re-read can't re-trigger an auto-join (bug: intent outliving its action).
+        //  - on Failed/Lost, clear the request guard so BOTH the manual "Retry" button AND the
+        //    automatic LaunchedEffect can attempt a fresh join (bug: only the button could recover).
+        wifiSession?.let { session ->
+            viewModelScope.launch {
+                session.state.collect { s ->
+                    when (s) {
+                        is CameraWifiSession.State.Connected -> _wifiJoinIntent.value = false
+                        is CameraWifiSession.State.Failed,
+                        is CameraWifiSession.State.Lost -> _wifiJoinRequested.value = false
+                        else -> Unit
+                    }
+                }
+            }
+        }
+    }
 
     /**
      * True once we've kicked off a Wi-Fi join for the current BLE-read credentials, so the
@@ -82,7 +106,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Choose Bluetooth: tear down any Wi-Fi session first, then this transport is active. */
+    /**
+     * Choose the Bluetooth transport. We release any Wi-Fi AP session here — not because the two
+     * transports are known to conflict (that assumption is unverified; see [Transport] and
+     * [selectWifi]) but because holding the phone on the camera's internet-less AP while the user
+     * has switched to BLE control serves no purpose and would keep the phone off its normal network.
+     */
     fun selectBluetooth() {
         wifiSession?.disconnect()
         _wifiJoinRequested.value = false
@@ -90,9 +119,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _transport.value = Transport.BLUETOOTH
     }
 
-    /** Choose Wi-Fi: disconnect BLE first (it keeps the camera AP off), then this transport is active. */
+    /**
+     * Choose the Wi-Fi transport.
+     *
+     * We intentionally do NOT tear down BLE here. The earlier "BLE keeps the camera AP off, so they
+     * are mutually exclusive" premise was concluded while the camera was tethered over USB — a
+     * confounder that itself blocks the camera's radios (see BLE_WIFI_WAKE_INVESTIGATION.md). Until
+     * coexistence is confirmed/refuted on-device (camera on battery), we leave BLE connected so a
+     * Wi-Fi session can't be broken by an assumption that may be false. If a specific camera really
+     * does require BLE down for its AP, the join will simply fail and the user can disconnect BLE.
+     */
     fun selectWifi() {
-        ble.disconnect()
         _transport.value = Transport.WIFI
     }
 

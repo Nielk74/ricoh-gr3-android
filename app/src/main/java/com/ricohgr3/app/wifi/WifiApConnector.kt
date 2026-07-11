@@ -54,6 +54,13 @@ class WifiApConnector(context: Context) {
 
     private val activeCallback = AtomicReference<ConnectivityManager.NetworkCallback?>(null)
 
+    /**
+     * Bumped on every [connect]/[disconnect]. Each callback captures the generation live when it
+     * was registered and no-ops if it has since changed — so a late [onLost]/[onAvailable] from a
+     * superseded request can never unbind or resurrect the network a newer request now owns.
+     */
+    private val generation = java.util.concurrent.atomic.AtomicInteger(0)
+
     /** Callbacks for the join lifecycle. All invoked on a binder thread — marshal to UI yourself. */
     interface Listener {
         /** The camera AP is joined and the process is bound to it. Safe to make HTTP calls. */
@@ -74,6 +81,7 @@ class WifiApConnector(context: Context) {
     @SuppressLint("MissingPermission") // CHANGE_NETWORK_STATE is declared in the manifest.
     fun connect(ssid: String, passphrase: String, listener: Listener) {
         disconnect() // idempotent: drop any prior request first.
+        val myGen = generation.incrementAndGet()
 
         val specifier = WifiNetworkSpecifier.Builder()
             .setSsid(ssid)
@@ -90,16 +98,19 @@ class WifiApConnector(context: Context) {
 
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                if (myGen != generation.get()) return // superseded request — don't bind.
                 // Pin this process's sockets to the camera AP.
                 connectivityManager.bindProcessToNetwork(network)
                 listener.onAvailable(network)
             }
 
             override fun onUnavailable() {
+                if (myGen != generation.get()) return
                 listener.onUnavailable()
             }
 
             override fun onLost(network: Network) {
+                if (myGen != generation.get()) return // stale drop — don't unbind the live network.
                 // Best-effort unbind so we don't strand the process on a dead network.
                 connectivityManager.bindProcessToNetwork(null)
                 listener.onLost()
@@ -117,6 +128,7 @@ class WifiApConnector(context: Context) {
      * call when not connected (no-op). ALWAYS call this to restore normal connectivity.
      */
     fun disconnect() {
+        generation.incrementAndGet() // invalidate any in-flight callbacks from a prior connect().
         connectivityManager.bindProcessToNetwork(null)
         activeCallback.getAndSet(null)?.let { cb ->
             runCatching { connectivityManager.unregisterNetworkCallback(cb) }
