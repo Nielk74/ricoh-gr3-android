@@ -16,8 +16,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ricohgr3.app.data.PhotoRepository
+import com.ricohgr3.app.gallery.GalleryViewModel
+import com.ricohgr3.app.looks.StickyLookStore
 import com.ricohgr3.app.nav.AppNavHost
 import com.ricohgr3.app.ui.theme.GrTheme
+import com.ricohgr3.app.wifi.CameraHttpClient
 
 class MainActivity : ComponentActivity() {
 
@@ -28,6 +32,16 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val vm: MainViewModel = viewModel()
 
+                    // Wi-Fi photo layer + shared "edit core" ViewModel, built once per session.
+                    // The Wi-Fi client talks to the camera AP (http://192.168.0.1/v1/); it is
+                    // only reachable once the phone has joined that AP (Phase 4/5 handoff).
+                    val appContext = applicationContext
+                    val photoRepository = remember { PhotoRepository(CameraHttpClient()) }
+                    val stickyLookStore = remember { StickyLookStore(appContext) }
+                    val galleryViewModel: GalleryViewModel = viewModel(
+                        factory = GalleryViewModel.Factory(photoRepository, stickyLookStore),
+                    )
+
                     var granted by remember { mutableStateOf(hasBlePermissions()) }
                     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
                         ActivityResultContracts.RequestMultiplePermissions()
@@ -37,6 +51,8 @@ class MainActivity : ComponentActivity() {
 
                     AppNavHost(
                         viewModel = vm,
+                        galleryViewModel = galleryViewModel,
+                        photoRepository = photoRepository,
                         permissionsGranted = granted,
                         onRequestPermissions = { launcher.launch(requiredPermissions()) },
                     )

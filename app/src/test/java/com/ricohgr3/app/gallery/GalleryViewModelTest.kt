@@ -2,6 +2,7 @@ package com.ricohgr3.app.gallery
 
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoRepository
+import com.ricohgr3.app.looks.CameraLook
 import com.ricohgr3.app.wifi.FakeCameraWifiController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -116,5 +117,81 @@ class GalleryViewModelTest {
         val s = vm.state.value
         assertTrue(s.isSelected(valid))
         assertFalse(s.isSelected(stale))
+    }
+
+    // --- edit core: looks, edited mark, sticky default -------------------------------
+
+    @Test
+    fun `applyLook marks the frame edited and makes the look sticky`() = runTest {
+        val vm = viewModel(FakeCameraWifiController())
+        val id = PhotoId("100RICOH", "R0000001.JPG")
+
+        vm.applyLook(id, CameraLook.POSITIVE_FILM)
+
+        val s = vm.state.value
+        assertTrue(s.isEdited(id))
+        assertEquals(CameraLook.POSITIVE_FILM, s.lookFor(id))
+        assertEquals(1, s.editedCount)
+        // Last-used look sticks for the next frame.
+        assertEquals(CameraLook.POSITIVE_FILM, s.stickyLook)
+    }
+
+    @Test
+    fun `applyLook STANDARD clears the edited mark`() = runTest {
+        val vm = viewModel(FakeCameraWifiController())
+        val id = PhotoId("100RICOH", "R0000001.JPG")
+        vm.applyLook(id, CameraLook.VIVID)
+        assertTrue(vm.state.value.isEdited(id))
+
+        vm.applyLook(id, CameraLook.STANDARD)
+
+        val s = vm.state.value
+        assertFalse(s.isEdited(id))
+        assertEquals(0, s.editedCount)
+        // Standard is still remembered as the sticky look.
+        assertEquals(CameraLook.STANDARD, s.stickyLook)
+    }
+
+    @Test
+    fun `resetLook returns a frame to Standard without changing sticky`() = runTest {
+        val vm = viewModel(FakeCameraWifiController())
+        val id = PhotoId("100RICOH", "R0000001.JPG")
+        vm.applyLook(id, CameraLook.RETRO)
+
+        vm.resetLook(id)
+
+        val s = vm.state.value
+        assertFalse(s.isEdited(id))
+        // resetLook does not touch the sticky look — RETRO remains pre-selected.
+        assertEquals(CameraLook.RETRO, s.stickyLook)
+    }
+
+    @Test
+    fun `applyLookToSelection styles every selected frame and updates sticky`() = runTest {
+        val vm = viewModel(FakeCameraWifiController())
+        val a = PhotoId("100RICOH", "R0000001.JPG")
+        val b = PhotoId("101RICOH", "R0000101.JPG")
+        vm.toggleSelect(a)
+        vm.toggleSelect(b)
+
+        vm.applyLookToSelection(CameraLook.HARD_MONOCHROME)
+
+        val s = vm.state.value
+        assertTrue(s.isEdited(a))
+        assertTrue(s.isEdited(b))
+        assertEquals(2, s.editedCount)
+        assertEquals(CameraLook.HARD_MONOCHROME, s.lookFor(a))
+        assertEquals(CameraLook.HARD_MONOCHROME, s.stickyLook)
+    }
+
+    @Test
+    fun `setStickyLook updates the sticky default without editing any frame`() = runTest {
+        val vm = viewModel(FakeCameraWifiController())
+
+        vm.setStickyLook(CameraLook.BLEACH_BYPASS)
+
+        val s = vm.state.value
+        assertEquals(CameraLook.BLEACH_BYPASS, s.stickyLook)
+        assertEquals(0, s.editedCount)
     }
 }

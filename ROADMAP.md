@@ -92,8 +92,15 @@ Concept artifacts approved; full-minimal Concept-A for single-photo viewer.
 
 - [x] Design language + tokens: Compose theme wired in (`ui/theme/` — `Color.kt` Ricoh-red
       palette, `Type.kt` sans+mono roles, `Theme.kt` light/dark + `GrColors` extended tokens)
-- [ ] Core screens (Concept-A style): connect, live view + shutter, gallery, photo detail, settings
-- [ ] Gallery / contact-sheet grid + full-screen viewer (with edited mark), transfer progress
+- [x] Navigation scaffold: `nav/` NavHost + routes (connect / gallery / viewer / live view / settings)
+- [x] **Gallery / contact-sheet grid** (`gallery/GalleryScreen.kt`): 3-col contact sheet, thumbnail
+      loader, multi-select (long-press), **edited mark** (red dot), RAW badge, sticky batch-apply bar
+- [x] **Full-screen viewer** (`gallery/ViewerScreen.kt`): VIEW-sized load, look strip, press-and-hold
+      before/after, applied-look tag + edited dot, film-rebate metadata, Reset/Apply (updates sticky)
+- [x] Shared **edit core** in `GalleryViewModel`: per-frame `EditState` + sticky look (DataStore),
+      one VM shared gallery↔viewer so a look applied in either shows instantly in the other
+- [ ] Remaining Concept-A screens: connect polish, live view + shutter, settings
+- [ ] Transfer progress UX; on-device thumbnail/photo load against a real GR III
 - [ ] Live-view viewfinder UX (tap-to-focus, exposure controls, minimal chrome)
 - [ ] Onboarding / camera-pairing flow (explain BLE→Wi-Fi handoff simply)
 - [ ] Accessibility pass (contrast, touch targets, TalkBack)
@@ -105,7 +112,9 @@ Decision: **start on-camera, grow in-app**; Auto-Look kept; sticky look + edited
 
 - [ ] **7.1 On-camera looks** (ships first): push GR III `effect` before capture (`efc_posiFilm`,
       `efc_bleachBypass`, `efc_hardMonochrome`, `efc_HDRTone`, `col_vivid`…) via `/v1/params/camera`
-- [ ] **7.2 Look UX in library**: edited mark, sticky default across frames, batch apply, before/after
+- [~] **7.2 Look UX in library**: edited mark ✅, sticky default across frames ✅, batch apply ✅,
+      before/after (press-and-hold) ✅, reset ✅ — all built in Phase 6d/6e. Preview tint is
+      *indicative* (LookSwatch); true per-frame render awaits 7.3. On-device look-push wiring = 7.1.
 - [ ] **7.3 In-app develop engine**: DNG decode + GPU pipeline + film-emulation LUTs (the big one)
 - [ ] **7.4 Auto-Look**: heuristic scene→look (EXIF + thumbnail), opt-in; v2 tiny on-device model
 - [ ] **7.5 Presets & sharing**: save/share edit stacks, apply on import (no cloud)
