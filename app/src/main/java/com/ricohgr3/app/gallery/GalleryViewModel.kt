@@ -7,7 +7,6 @@ import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoItem
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.data.PhotoResult
-import com.ricohgr3.app.looks.CameraLook
 import com.ricohgr3.app.looks.EditState
 import com.ricohgr3.app.looks.StickyLookStore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,7 +28,7 @@ data class GalleryUiState(
     /** Which frames have a look applied, and which — drives the "edited mark". */
     val edits: EditState = EditState(),
     /** Last-used look, pre-selected for the next frames ("sticky default"). */
-    val stickyLook: CameraLook = CameraLook.STANDARD,
+    val stickyLook: String? = null,
 ) {
     val hasSelection: Boolean get() = selected.isNotEmpty()
     val selectionCount: Int get() = selected.size
@@ -38,8 +37,8 @@ data class GalleryUiState(
     /** True if [id] has a non-Standard look applied. */
     fun isEdited(id: PhotoId): Boolean = edits.isEdited(id.toString())
 
-    /** The look applied to [id], or [CameraLook.STANDARD] if none. */
-    fun lookFor(id: PhotoId): CameraLook = edits.lookFor(id.toString())
+    /** The film-stock id applied to [id], or null (Standard) if none. */
+    fun lookFor(id: PhotoId): String? = edits.lookFor(id.toString())
 
     /** Number of frames with a look applied. */
     val editedCount: Int get() = edits.applied.size
@@ -116,11 +115,11 @@ class GalleryViewModel(
     }
 
     /**
-     * Apply [look] to a single [id] and make it the sticky default. Applying
-     * [CameraLook.STANDARD] resets the frame (clears its edited mark) — but Standard is
-     * still remembered as sticky, so "reset the roll" pre-selects Standard next.
+     * Apply film-stock [look] to a single [id] and make it the sticky default. Applying
+     * `null` (Standard) resets the frame (clears its edited mark) — but Standard is still
+     * remembered as sticky, so "reset the roll" pre-selects Standard next.
      */
-    fun applyLook(id: PhotoId, look: CameraLook) {
+    fun applyLook(id: PhotoId, look: String?) {
         _state.update { it.copy(edits = it.edits.apply(id.toString(), look)) }
         persistSticky(look)
     }
@@ -129,7 +128,7 @@ class GalleryViewModel(
      * Apply [look] to every currently selected frame (batch styling) and make it sticky.
      * No-op on the edit map if nothing is selected, but still records the sticky look.
      */
-    fun applyLookToSelection(look: CameraLook) {
+    fun applyLookToSelection(look: String?) {
         _state.update {
             val ids = it.selected.map { id -> id.toString() }
             it.copy(edits = it.edits.applyAll(ids, look))
@@ -143,12 +142,12 @@ class GalleryViewModel(
     }
 
     /** Set the sticky (last-used) look without touching any frame. */
-    fun setStickyLook(look: CameraLook) {
+    fun setStickyLook(look: String?) {
         _state.update { it.copy(stickyLook = look) }
         persistSticky(look)
     }
 
-    private fun persistSticky(look: CameraLook) {
+    private fun persistSticky(look: String?) {
         _state.update { it.copy(stickyLook = look) }
         stickyLookStore?.let { store ->
             viewModelScope.launch { store.setLook(look) }

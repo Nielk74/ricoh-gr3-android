@@ -12,6 +12,9 @@ package com.ricohgr3.app.looks.emulation
  * @property splitTone shadow/highlight tint, applied after the LUT.
  * @property halation red-orange highlight bloom; [Halation.NONE] to disable.
  * @property grain film grain; [Grain.NONE] to disable.
+ * @property swatchTop/[swatchBottom] a representative 2-stop gradient (ARGB `0xFFrrggbb`) for
+ *   the picker chip — an at-a-glance hint of the stock's colour. Plain `Long`s (not Android
+ *   `Color`) so this stays JVM-testable and Android-free.
  */
 data class FilmLook(
     val id: String,
@@ -20,6 +23,8 @@ data class FilmLook(
     val splitTone: SplitTone = SplitTone.NONE,
     val halation: HalationParams = HalationParams.NONE,
     val grain: GrainParams = GrainParams.NONE,
+    val swatchTop: Long = 0xFFECEAE6,
+    val swatchBottom: Long = 0xFFCFCCC6,
 )
 
 /**

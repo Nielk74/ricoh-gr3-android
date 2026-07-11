@@ -32,6 +32,7 @@ object FilmLookCatalog {
         Entry(
             FilmLook(
                 id = "portra400", displayName = "Portra 400", lutAsset = null,
+                swatchTop = 0xFFF3D9B8, swatchBottom = 0xFFB98A63,
                 splitTone = SplitTone(
                     shadowR = 0f, shadowG = 0.01f, shadowB = 0.03f,
                     highR = 0.05f, highG = 0.03f, highB = 0f, amount = 0.45f,
@@ -52,6 +53,7 @@ object FilmLookCatalog {
         Entry(
             FilmLook(
                 id = "portra800", displayName = "Portra 800", lutAsset = null,
+                swatchTop = 0xFFEFC79E, swatchBottom = 0xFF9E6A45,
                 splitTone = SplitTone(
                     shadowR = 0.01f, shadowG = 0.01f, shadowB = 0.02f,
                     highR = 0.06f, highG = 0.035f, highB = 0f, amount = 0.5f,
@@ -72,6 +74,7 @@ object FilmLookCatalog {
         Entry(
             FilmLook(
                 id = "gold200", displayName = "Gold 200", lutAsset = null,
+                swatchTop = 0xFFF6C86A, swatchBottom = 0xFFB4762A,
                 splitTone = SplitTone(
                     shadowR = 0.03f, shadowG = 0.02f, shadowB = 0f,
                     highR = 0.07f, highG = 0.05f, highB = 0f, amount = 0.6f,
@@ -92,6 +95,7 @@ object FilmLookCatalog {
         Entry(
             FilmLook(
                 id = "ektar100", displayName = "Ektar 100", lutAsset = null,
+                swatchTop = 0xFFE86A4A, swatchBottom = 0xFF2E6AB0,
                 grain = GrainParams(amount = 0.025f, size = 1.5f, shadowBias = 0.6f, seed = 100),
             ),
             Model(
@@ -109,6 +113,7 @@ object FilmLookCatalog {
         Entry(
             FilmLook(
                 id = "superia400", displayName = "Superia 400", lutAsset = null,
+                swatchTop = 0xFF6FB48A, swatchBottom = 0xFF3E6E9C,
                 splitTone = SplitTone(
                     shadowR = 0f, shadowG = 0.02f, shadowB = 0.03f,
                     highR = 0f, highG = 0.03f, highB = 0.01f, amount = 0.5f,
@@ -134,6 +139,7 @@ object FilmLookCatalog {
         Entry(
             FilmLook(
                 id = "pro400h", displayName = "Pro 400H", lutAsset = null,
+                swatchTop = 0xFFD9E6D2, swatchBottom = 0xFF8FB0A6,
                 splitTone = SplitTone(
                     shadowR = 0f, shadowG = 0.02f, shadowB = 0.03f,
                     highR = 0.01f, highG = 0.04f, highB = 0.02f, amount = 0.55f,
@@ -154,6 +160,7 @@ object FilmLookCatalog {
         Entry(
             FilmLook(
                 id = "cinestill800t", displayName = "CineStill 800T", lutAsset = null,
+                swatchTop = 0xFF3E8ECF, swatchBottom = 0xFFD84A3A,
                 splitTone = SplitTone(
                     shadowR = 0f, shadowG = 0.02f, shadowB = 0.07f,
                     highR = 0.02f, highG = 0.02f, highB = 0.01f, amount = 0.6f,
@@ -178,6 +185,7 @@ object FilmLookCatalog {
         Entry(
             FilmLook(
                 id = "cinestill400d", displayName = "CineStill 400D", lutAsset = null,
+                swatchTop = 0xFFF0C79A, swatchBottom = 0xFF6C97B4,
                 splitTone = SplitTone(
                     shadowR = 0.01f, shadowG = 0.01f, shadowB = 0.03f,
                     highR = 0.04f, highG = 0.03f, highB = 0f, amount = 0.5f,
@@ -202,6 +210,7 @@ object FilmLookCatalog {
         Entry(
             FilmLook(
                 id = "vision3_500t", displayName = "Vision3 500T", lutAsset = null,
+                swatchTop = 0xFF4E8CC0, swatchBottom = 0xFFD98A4A,
                 splitTone = SplitTone(
                     shadowR = 0f, shadowG = 0.02f, shadowB = 0.06f,
                     highR = 0.06f, highG = 0.03f, highB = 0f, amount = 0.6f,
@@ -225,6 +234,7 @@ object FilmLookCatalog {
         Entry(
             FilmLook(
                 id = "trix400", displayName = "Tri-X 400", lutAsset = null,
+                swatchTop = 0xFFF2F2F2, swatchBottom = 0xFF141414,
                 grain = GrainParams(amount = 0.09f, size = 2.5f, shadowBias = 0.55f, seed = 320),
             ),
             Model(
@@ -240,6 +250,7 @@ object FilmLookCatalog {
         Entry(
             FilmLook(
                 id = "hp5", displayName = "HP5 Plus", lutAsset = null,
+                swatchTop = 0xFFE4E2DE, swatchBottom = 0xFF3A3A3A,
                 grain = GrainParams(amount = 0.075f, size = 2.4f, shadowBias = 0.5f, seed = 405),
             ),
             Model(
@@ -255,4 +266,24 @@ object FilmLookCatalog {
     val ids: List<String> get() = entries.map { it.look.id }
 
     fun entryFor(id: String): Entry? = entries.firstOrNull { it.look.id == id }
+
+    fun lookFor(id: String?): FilmLook? = id?.let { entryFor(it)?.look }
+
+    /** Display name for a stock id, or "Standard" for null/unknown (the as-shot baseline). */
+    fun displayNameFor(id: String?): String = lookFor(id)?.displayName ?: STANDARD_NAME
+
+    /** The [FilmLook.swatchTop]/[FilmLook.swatchBottom] for [id], or the neutral Standard chip. */
+    fun swatchFor(id: String?): Pair<Long, Long> =
+        lookFor(id)?.let { it.swatchTop to it.swatchBottom } ?: (STANDARD_TOP to STANDARD_BOTTOM)
+
+    /**
+     * The picker's ordered list of selectable stock ids, with `null` first for **Standard**
+     * (the as-shot baseline / "no film look"). The gallery and viewer look strips iterate this
+     * so the film stocks are what the user actually sees and taps.
+     */
+    val pickerIds: List<String?> get() = listOf<String?>(null) + ids
+
+    const val STANDARD_NAME = "Standard"
+    const val STANDARD_TOP = 0xFFECEAE6L
+    const val STANDARD_BOTTOM = 0xFFCFCCC6L
 }
