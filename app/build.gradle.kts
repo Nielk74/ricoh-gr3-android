@@ -112,6 +112,9 @@ dependencies {
 
     implementation(libs.androidx.navigation.compose)
 
+    // Persistence for the sticky last-used look (Phase 6c / 7.1).
+    implementation(libs.androidx.datastore.preferences)
+
     // Wi-Fi HTTP /v1 layer: OkHttp transport + kotlinx.serialization JSON parsing.
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)

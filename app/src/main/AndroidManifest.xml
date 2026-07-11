@@ -14,8 +14,10 @@
         tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-    <!-- Location is required for BLE scanning on API 26-30. -->
+    <!-- Location is required for BLE scanning on API 26-30. FINE requires COARSE alongside it. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"
         android:maxSdkVersion="30" />
 
     <!-- Wi-Fi: joining the camera's AP and talking to its HTTP API. -->

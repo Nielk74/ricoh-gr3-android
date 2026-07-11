@@ -16,7 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.ricohgr3.app.ui.CameraScreen
+import com.ricohgr3.app.nav.AppNavHost
 import com.ricohgr3.app.ui.theme.GrTheme
 
 class MainActivity : ComponentActivity() {
@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity() {
                         granted = result.values.all { it }
                     }
 
-                    CameraScreen(
+                    AppNavHost(
                         viewModel = vm,
                         permissionsGranted = granted,
                         onRequestPermissions = { launcher.launch(requiredPermissions()) },
