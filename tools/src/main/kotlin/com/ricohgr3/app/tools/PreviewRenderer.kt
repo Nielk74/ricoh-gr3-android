@@ -36,7 +36,7 @@ fun main(args: Array<String>) {
     // Render at a resolution that stays crisp in the README grid (was 560px → looked pixelated,
     // and per-pixel grain read as digital noise). Develop at this size so grain is fine relative
     // to the image. JPEG q≈0.9 keeps each thumbnail ~150–250 KB.
-    val maxW = 1200
+    val maxW = 1600
     val work = if (src.width > maxW) scaleTo(src, maxW) else toRgb(src)
 
     // Standard (as-shot) baseline first.

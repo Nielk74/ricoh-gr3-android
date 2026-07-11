@@ -147,25 +147,23 @@ object DevelopPipeline {
     }
 
     /**
-     * Physically-motivated film grain: `I_out = I + A(I)·G` per channel, where `G` is
-     * **spatially-correlated, multi-scale, correlated-RGB** grain and `A(I)` is a
-     * **midtone-peaked density response**. Deterministic given [GrainParams.seed]. Exposed for
-     * unit testing. See `research/FILM_EMULATION.md`.
+     * Film grain: `I_out = softlight(I, A(I)·G)`. Deliberately **fine, uniform, single-scale,
+     * monochrome-dominant** — the approach that actually reads as film in smooth areas like sky.
+     * (An earlier multi-octave "clumping" model produced ugly low-frequency blotches in flat
+     * regions; big soft clumps read as stains, not grain. Real fine-grain film in a clear sky is
+     * even and unobtrusive.) Deterministic given [GrainParams.seed]. Exposed for unit testing.
+     * See `research/FILM_EMULATION.md`.
      *
-     * The grain field `G`:
-     *  - a **shared luma** octave (fine) + a **coarser** octave summed for clumping / size
-     *    variety (not one uniform speckle size);
-     *  - plus a small **per-channel independent (chroma)** component so R/G/B are
-     *    correlated-but-distinct — real film grain, not identical mono noise (too flat) nor
-     *    fully-independent RGB (too electronic).
+     * - `G`: one fine grain field (a ~Gaussian noise field lightly blurred by [GrainParams.size]
+     *   for correlation, then renormalised), shared across channels as luma grain, plus a **small**
+     *   per-channel chroma component so R/G/B differ slightly (not identical mono, not electronic).
+     * - `A(I)`: a **midtone-peaked** density response (real grain is strongest in the midtones),
+     *   biasable toward shadows by [GrainParams.shadowBias].
+     * - Composited with a **soft-light** blend (grain modulates around the local tone) rather than
+     *   flat addition (which washes toward grey and looks like digital haze).
      *
-     * The strength `A(I)`:
-     *  - a **hump that peaks in the midtones** and falls off in both the deepest shadows and the
-     *    brightest highlights (real silver-grain density), biasable toward shadows by
-     *    [GrainParams.shadowBias];
-     *  - times a subtle **smooth-region visibility** factor ([GrainParams.smoothBoost]) — grain
-     *    reads slightly stronger in flat/defocused areas than in busy detail. This is a *secondary*
-     *    modulation of visibility, **not** proportional to blur.
+     * [GrainParams.coarseAmount] and [GrainParams.smoothBoost] are honoured if set but default to
+     * off — they were the source of the blotchy-sky look and are not used by the shipped stocks.
      */
     fun applyGrain(
         r: FloatArray, g: FloatArray, b: FloatArray,
@@ -175,58 +173,43 @@ object DevelopPipeline {
         if (n == 0) return
         val rng = Random(gp.seed)
 
-        // --- G: build the correlated, multi-scale grain field, per channel. ---
+        // --- G: one fine grain field (shared luma), optionally a light coarse octave. ---
         val fineR = (gp.size - 1f).roundToInt().coerceAtLeast(0)
-        val coarseR = (gp.size * gp.coarseSizeMul - 1f).roundToInt().coerceAtLeast(0)
-
-        // Shared luma grain = fine octave + coarse octave (clumping / size variety).
         val luma = octave(rng, n, width, height, fineR)
         if (gp.coarseAmount > 0f) {
+            val coarseR = (gp.size * gp.coarseSizeMul - 1f).roundToInt().coerceAtLeast(0)
             val coarse = octave(rng, n, width, height, coarseR)
             val cw = gp.coarseAmount
-            val norm = 1f / kotlin.math.sqrt(1f + cw * cw) // keep unit-ish variance when summing
+            val norm = 1f / kotlin.math.sqrt(1f + cw * cw)
             for (i in 0 until n) luma[i] = (luma[i] + cw * coarse[i]) * norm
         }
 
-        // Per-channel chroma grain: two INDEPENDENT fine octaves (R, B); the G component is
-        // derived as -(chR+chB)/2 so all three correlate-but-differ without a 3rd full buffer
-        // (bounds peak memory — grain runs on the ~6MP edit buffer). chroma=0 → pure mono.
+        // Small per-channel chroma grain: two independent fine octaves (R, B); G = -(R+B)/2 so
+        // channels differ slightly without a 3rd buffer. chroma=0 → pure monochrome grain.
         val c = gp.chroma.coerceIn(0f, 1f)
         val chR: FloatArray?; val chB: FloatArray?
         if (c > 0f) {
             chR = octave(rng, n, width, height, fineR)
             chB = octave(rng, n, width, height, fineR)
         } else { chR = null; chB = null }
-        val lumaMix = 1f - 0.5f * c // as chroma rises, lean a little less on the shared field
+        val lumaMix = 1f - 0.5f * c
 
-        // --- A(I): midtone-peaked density × subtle smooth-region visibility. ---
-        // Local detail: |luma - blurred luma|, so busy areas read as high detail.
         val detail = if (gp.smoothBoost > 0f) localDetail(r, g, b, width, height) else null
 
         for (i in 0 until n) {
             val l = luma(r[i], g[i], b[i])
             var a = grainDensity(l, gp.shadowBias)
-            if (detail != null) {
-                // Smooth (low-detail) regions read grainier; busy regions slightly less. Bounded,
-                // secondary — visibility only, never proportional to blur.
-                a *= 1f + gp.smoothBoost * (0.5f - detail[i]).coerceIn(-0.5f, 0.5f)
-            }
+            if (detail != null) a *= 1f + gp.smoothBoost * (0.5f - detail[i]).coerceIn(-0.5f, 0.5f)
             val amp = gp.amount * a
             val sh = luma[i] * lumaMix
             val cr = chR?.get(i) ?: 0f
             val cb = chB?.get(i) ?: 0f
             val cg = -(cr + cb) * 0.5f
-            // Composite the grain with a SOFT-LIGHT-style blend rather than flat addition. Real
-            // film-grain tools don't add a constant offset (that washes toward grey and reads as
-            // flat digital noise); grain *modulates* the image — the `·x·(1-x)` term makes each
-            // grain darken darks and lighten lights, vanishing at pure black/white. This gives
-            // grain visible texture/contrast instead of a uniform haze. (`4·x·(1-x)` peaks at 1.)
-            val gr = amp * (sh + cr * c)
-            val gg = amp * (sh + cg * c)
-            val gb = amp * (sh + cb * c)
-            r[i] = softLightGrain(r[i], gr)
-            g[i] = softLightGrain(g[i], gg)
-            b[i] = softLightGrain(b[i], gb)
+            // Soft-light composite: grain modulates around the local tone (film texture), not a
+            // flat additive offset (digital haze). See [softLightGrain].
+            r[i] = softLightGrain(r[i], amp * (sh + cr * c))
+            g[i] = softLightGrain(g[i], amp * (sh + cg * c))
+            b[i] = softLightGrain(b[i], amp * (sh + cb * c))
         }
     }
 
