@@ -142,10 +142,23 @@ object DevelopPipeline {
         width: Int, height: Int, gp: GrainParams,
     ) {
         val n = width * height
+        if (n == 0) return
         val rng = Random(gp.seed)
         val noise = FloatArray(n) { (rng.nextFloat() - 0.5f) + (rng.nextFloat() - 0.5f) } // ~Gaussian
         val blurR = (gp.size - 1f).roundToInt().coerceAtLeast(0)
-        if (blurR > 0) gaussianBlur(noise, width, height, blurR)
+        if (blurR > 0) {
+            gaussianBlur(noise, width, height, blurR)
+            // Blurring white noise for spatial correlation ("clumpy" film grain) collapses its
+            // amplitude — a 3-pass box blur of radius 2 cuts the std ~5-8×, which is why grain
+            // used to be invisible. Renormalise the field back to unit std so `amount` means the
+            // same thing regardless of `size`, keeping the correlation but restoring visibility.
+            var sum = 0.0; var sq = 0.0
+            for (v in noise) { sum += v; sq += v.toDouble() * v }
+            val mean = sum / n
+            val std = kotlin.math.sqrt((sq / n - mean * mean).coerceAtLeast(1e-12))
+            val scale = (0.5 / std).toFloat() // target std ≈ the un-blurred field's (~0.41)
+            for (i in 0 until n) noise[i] = ((noise[i] - mean.toFloat()) * scale)
+        }
         for (i in 0 until n) {
             val l = luma(r[i], g[i], b[i])
             // More grain in mid/shadow structure; falls off in bright highlights.
