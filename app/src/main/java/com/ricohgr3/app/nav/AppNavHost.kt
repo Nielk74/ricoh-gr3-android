@@ -25,15 +25,16 @@ import com.ricohgr3.app.gallery.GalleryViewModel
 import com.ricohgr3.app.gallery.ViewerScreen
 import com.ricohgr3.app.liveview.LiveViewScreen
 import com.ricohgr3.app.liveview.LiveViewViewModel
-import com.ricohgr3.app.ui.CameraScreen
+import com.ricohgr3.app.ui.ConnectScreen
 import com.ricohgr3.app.wifi.CameraWifiController
+import com.ricohgr3.app.wifi.CameraWifiSession
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
- * App navigation graph. [Screen.Connect] is the start destination and hosts the existing
- * [CameraScreen]; [Screen.Gallery] and [Screen.Viewer] host the real Phase 6 screens, sharing
- * one [GalleryViewModel] (the "edit core") so a look applied in the viewer shows instantly as
- * an edited mark back in the gallery.
+ * App navigation graph. [Screen.Connect] is the start destination and hosts the unified
+ * BLE→Wi-Fi [ConnectScreen]; [Screen.Gallery] and [Screen.Viewer] host the Phase 6 screens,
+ * sharing one [GalleryViewModel] (the "edit core") so a look applied in the viewer shows
+ * instantly as an edited mark back in the gallery; [Screen.LiveView] hosts the MJPEG viewfinder.
  */
 @Composable
 fun AppNavHost(
@@ -49,11 +50,36 @@ fun AppNavHost(
 ) {
     NavHost(navController = navController, startDestination = Screen.Connect.route) {
         composable(Screen.Connect.route) {
+            val bleState by viewModel.state.collectAsStateWithLifecycle()
+            val session = viewModel.wifiSession
+            val wifiState: CameraWifiSession.State? =
+                if (session != null) session.state.collectAsStateWithLifecycle().value else null
+
+            // Auto-join the camera Wi-Fi once BLE has read the credentials. Guarded inside the
+            // ViewModel so it fires once per credential set, not on every recomposition.
+            val creds = bleState.wlanCredentials
+            LaunchedEffect(creds) {
+                if (creds != null) viewModel.joinWifi(creds.ssid, creds.passphrase)
+            }
+
             ConnectScreen(
-                viewModel = viewModel,
+                ble = bleState,
+                wifi = wifiState,
                 permissionsGranted = permissionsGranted,
+                wifiSupported = viewModel.wifiSession != null,
                 onRequestPermissions = onRequestPermissions,
+                onStartScan = viewModel::startScan,
+                onStopScan = viewModel::stopScan,
+                onConnectDevice = viewModel::connect,
+                onStartWifiHandoff = viewModel::startWifiHandoff,
+                onRetryWifi = {
+                    viewModel.resetWifiJoin()
+                    viewModel.startWifiHandoff()
+                },
+                onDisconnect = viewModel::disconnect,
                 onOpenGallery = { navController.navigate(Screen.Gallery.route) },
+                onOpenLiveView = { navController.navigate(Screen.LiveView.route) },
+                onFireShutter = viewModel::fireShutter,
             )
         }
 
@@ -123,31 +149,6 @@ private fun parsePhotoId(raw: String): PhotoId? {
     val slash = raw.indexOf('/')
     if (slash <= 0 || slash == raw.length - 1) return null
     return PhotoId(folder = raw.substring(0, slash), file = raw.substring(slash + 1))
-}
-
-/** Connect route content: the existing [CameraScreen] plus a hook to open the gallery. */
-@Composable
-private fun ConnectScreen(
-    viewModel: MainViewModel,
-    permissionsGranted: Boolean,
-    onRequestPermissions: () -> Unit,
-    onOpenGallery: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        CameraScreen(
-            viewModel = viewModel,
-            permissionsGranted = permissionsGranted,
-            onRequestPermissions = onRequestPermissions,
-        )
-        OutlinedButton(
-            onClick = onOpenGallery,
-            modifier = Modifier
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 16.dp),
-        ) {
-            Text("Open gallery")
-        }
-    }
 }
 
 @Composable

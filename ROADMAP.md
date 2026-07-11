@@ -58,13 +58,16 @@ Goal: live view + settings + photo transfer over the camera's Wi-Fi AP.
 Transport/data layer built & unit-tested (23 tests green, MockWebServer + fixtures);
 grounded in the cloned OpenAPI spec + community repos. UI wiring is Phase 6.
 
-- [ ] **BLE → wake Wi-Fi**: read WLAN SSID/passphrase/channel via BLE WLAN Control chars; enable camera AP
-- [~] **Android Wi-Fi join**: `WifiApConnector` (`WifiNetworkSpecifier` + `bindProcessToNetwork` + teardown)
-      scaffolded & documented; needs on-device validation (API 29+; no host radio)
+- [x] **BLE → wake Wi-Fi**: WLAN Control service + SSID/passphrase/network-type UUIDs in
+      `RicohGattProfile` (verified against `research/references/.../wlan_control_command/*`);
+      `CameraController.readWlanCredentials()` + `enableWifiAp()` (network-type→AP). On-device: verify.
+- [x] **Android Wi-Fi join**: `WifiApConnector` + `CameraWifiSession` (Idle→Joining→Connected→
+      Lost/Failed state machine, generation-guarded); `CameraHttpClient.forNetwork()` binds OkHttp
+      to the joined `Network`. JVM-tested; radio path needs on-device validation (API 29+).
 - [x] HTTP client (OkHttp) rooted at `http://192.168.0.1/v1/` (`CameraHttpClient`, `NO_PROXY`, interface `CameraWifiController`)
 - [x] `GET /v1/ping`, `GET /v1/props` — parsed into models (fixtures + tests)
-- [~] **Live view**: MJPEG frame splitter (`MjpegFrameParser`, SOI/EOI marker-based) built & tested;
-      Compose rendering + end-to-end stream = Phase 6
+- [x] **Live view**: MJPEG frame splitter (`MjpegFrameParser`) + `LiveViewScreen`/`LiveViewViewModel`
+      (decoded frames + Wi-Fi shutter, Concept-A). End-to-end stream needs on-device validation.
 - [x] **Settings control**: `PUT /v1/params/camera` (`CaptureParams`) — request shape tested; GR III enums
       (`sv`/`tv`/`av`/`xv`/`effect` incl. film sims) documented from `capture_ricoh_gr_iii.yaml`
 - [x] **Capture over Wi-Fi**: `POST /v1/camera/shoot` (empty body per spec — verify on device)
@@ -74,9 +77,17 @@ grounded in the cloned OpenAPI spec + community repos. UI wiring is Phase 6.
 - [ ] Graceful reconnect / AP-drop handling; clear "camera Wi-Fi vs internet" UX
 - [ ] **On-device validation** of the whole Wi-Fi plane (needs physical GR III)
 
-## Phase 5 — Connection & session management  (M)
+## Phase 5 — Connection & session management  (M) — MVP FLOW WIRED
 
-- [ ] Unified connection state machine (disconnected → BLE → Wi-Fi active) across BLE + Wi-Fi
+The **MVP happy path is wired end-to-end**: `ConnectScreen` (Concept-A stepper) drives
+BLE pair → wake+join camera Wi-Fi (auto-joins once BLE reads credentials) → Library / Live
+View entries; `MainViewModel` orchestrates the handoff over `CameraWifiSession`. Falls back
+gracefully (BLE shutter works without Wi-Fi; API<29 shows a "needs Android 10+" note).
+On-device validation against a physical GR III is the remaining gate (no host radio).
+
+- [x] Unified connection flow (disconnected → BLE → Wi-Fi active) surfaced in `ConnectScreen`
+      over `CameraWifiSession.State` + `BleState` — the visible BLE→Wi-Fi state machine
+- [ ] Full unified *state machine* class merging BLE + Wi-Fi (currently orchestrated in the VM)
 - [ ] Remember paired camera (auto-reconnect on app open)
 - [ ] Foreground service for long transfers / keep-alive
 - [ ] Battery + storage indicators (from BLE Camera service)
