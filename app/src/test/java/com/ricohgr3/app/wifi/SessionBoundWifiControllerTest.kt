@@ -34,9 +34,11 @@ class SessionBoundWifiControllerTest {
 
     private class FakeJoiner : WifiApJoiner {
         var listener: WifiApConnector.Listener? = null
+        var adoptResult: Network? = null
         override fun connect(ssid: String, passphrase: String, listener: WifiApConnector.Listener) {
             this.listener = listener
         }
+        override fun adoptCurrentWifi(): Network? = adoptResult
         override fun disconnect() {}
     }
 

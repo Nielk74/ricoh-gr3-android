@@ -62,6 +62,7 @@ fun ConnectScreen(
     onConnectDevice: (String) -> Unit,
     onStartWifiHandoff: () -> Unit,
     onRetryWifi: () -> Unit,
+    onUseCurrentWifi: () -> Unit,
     onDisconnect: () -> Unit,
     onOpenGallery: () -> Unit,
     onOpenLiveView: () -> Unit,
@@ -121,6 +122,7 @@ fun ConnectScreen(
                 hasCachedCreds = hasCachedCreds,
                 onStartWifiHandoff = onStartWifiHandoff,
                 onRetryWifi = onRetryWifi,
+                onUseCurrentWifi = onUseCurrentWifi,
                 onOpenGallery = onOpenGallery,
                 onOpenLiveView = onOpenLiveView,
                 onDisconnect = onDisconnect,
@@ -298,6 +300,7 @@ private fun WifiMode(
     hasCachedCreds: Boolean,
     onStartWifiHandoff: () -> Unit,
     onRetryWifi: () -> Unit,
+    onUseCurrentWifi: () -> Unit,
     onOpenGallery: () -> Unit,
     onOpenLiveView: () -> Unit,
     onDisconnect: () -> Unit,
@@ -319,6 +322,7 @@ private fun WifiMode(
                 hasCachedCreds = hasCachedCreds,
                 onStartWifiHandoff = onStartWifiHandoff,
                 onRetryWifi = onRetryWifi,
+                onUseCurrentWifi = onUseCurrentWifi,
             )
         }
     }
@@ -382,6 +386,7 @@ private fun WifiHandoffSection(
     hasCachedCreds: Boolean,
     onStartWifiHandoff: () -> Unit,
     onRetryWifi: () -> Unit,
+    onUseCurrentWifi: () -> Unit,
 ) {
     when {
         wifi is CameraWifiSession.State.Joining ->
@@ -395,7 +400,8 @@ private fun WifiHandoffSection(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Make sure Wi-Fi is turned on on the camera, then retry.",
+                "Make sure Wi-Fi is turned on at the camera (and, if you joined it yourself in " +
+                    "Android Settings, that it's still connected), then retry.",
                 style = MaterialTheme.typography.labelSmall,
                 color = GrTheme.colors.inkSoft,
             )
@@ -406,6 +412,13 @@ private fun WifiHandoffSection(
                 colors = ButtonDefaults.buttonColors(containerColor = GrTheme.colors.accent),
             ) {
                 Text("Retry Wi-Fi", color = GrTheme.colors.paper)
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onUseCurrentWifi,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) {
+                Text("Use current Wi-Fi", color = GrTheme.colors.ink)
             }
         }
 
@@ -432,6 +445,7 @@ private fun WifiHandoffSection(
                 style = MaterialTheme.typography.labelSmall,
                 color = GrTheme.colors.accent,
             )
+            val canAutoJoin = hasCachedCreds || ble.wlanCredentials != null
             ble.wlanCredentials?.ssid?.takeIf { it.isNotBlank() }?.let { ssid ->
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -442,20 +456,37 @@ private fun WifiHandoffSection(
             } ?: if (!hasCachedCreds) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "No saved network yet — pair once over Bluetooth first so the app can read " +
-                        "the camera's Wi-Fi name/password.",
+                    "No saved network yet — either connect your phone to the camera's Wi-Fi in " +
+                        "Android Settings and tap \"Use current Wi-Fi\", or pair once over " +
+                        "Bluetooth so the app can read the network name/password and join for you.",
                     style = MaterialTheme.typography.labelSmall,
                     color = GrTheme.colors.accent,
                 )
             } else Unit
-            Spacer(Modifier.height(12.dp))
-            Button(
-                onClick = onStartWifiHandoff,
-                enabled = hasCachedCreds || ble.wlanCredentials != null,
+
+            // Primary path: app joins the AP itself using known credentials (BLE-read or cached).
+            if (canAutoJoin) {
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = onStartWifiHandoff,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = GrTheme.colors.accent),
+                ) {
+                    Text("Join camera Wi-Fi", color = GrTheme.colors.paper)
+                }
+            }
+
+            // Always-available escape hatch: the phone may already be on the camera Wi-Fi (joined
+            // manually in Android Settings), in which case no credentials/BLE are needed at all.
+            Spacer(Modifier.height(if (canAutoJoin) 8.dp else 12.dp))
+            OutlinedButton(
+                onClick = onUseCurrentWifi,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = GrTheme.colors.accent),
             ) {
-                Text("Join camera Wi-Fi", color = GrTheme.colors.paper)
+                Text(
+                    if (canAutoJoin) "Already connected? Use current Wi-Fi" else "Use current Wi-Fi",
+                    color = GrTheme.colors.ink,
+                )
             }
         }
     }

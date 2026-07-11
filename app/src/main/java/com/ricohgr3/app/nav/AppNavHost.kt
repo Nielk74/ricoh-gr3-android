@@ -93,6 +93,7 @@ fun AppNavHost(
                 onConnectDevice = viewModel::connect,
                 onStartWifiHandoff = viewModel::joinCameraWifi,
                 onRetryWifi = viewModel::joinCameraWifi,
+                onUseCurrentWifi = viewModel::useCurrentWifi,
                 onDisconnect = viewModel::disconnect,
                 onOpenGallery = { navController.navigate(Screen.Gallery.route) },
                 onOpenLiveView = { navController.navigate(Screen.LiveView.route) },

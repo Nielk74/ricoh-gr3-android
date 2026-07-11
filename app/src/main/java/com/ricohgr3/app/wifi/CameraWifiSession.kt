@@ -21,6 +21,9 @@ interface WifiApJoiner {
     /** See [WifiApConnector.connect]. Non-blocking; results arrive via [listener]. */
     fun connect(ssid: String, passphrase: String, listener: WifiApConnector.Listener)
 
+    /** See [WifiApConnector.adoptCurrentWifi]. Returns the bound network, or null if no Wi-Fi. */
+    fun adoptCurrentWifi(): Network?
+
     /** See [WifiApConnector.disconnect]. Idempotent. */
     fun disconnect()
 }
@@ -30,6 +33,8 @@ interface WifiApJoiner {
 fun WifiApConnector.asJoiner(): WifiApJoiner = object : WifiApJoiner {
     override fun connect(ssid: String, passphrase: String, listener: WifiApConnector.Listener) =
         this@asJoiner.connect(ssid, passphrase, listener)
+
+    override fun adoptCurrentWifi(): Network? = this@asJoiner.adoptCurrentWifi()
 
     override fun disconnect() = this@asJoiner.disconnect()
 }
@@ -114,6 +119,37 @@ class CameraWifiSession(
             override fun onUnavailable() = onUnavailableInternal(myGen)
             override fun onLost() = onLostInternal(myGen)
         })
+    }
+
+    /**
+     * Adopt the Wi-Fi the phone is **already** connected to (the user joined the camera AP manually
+     * in Android Settings) instead of initiating a new join. Binds the process to that network,
+     * then probes it with `/v1/ping` to confirm it's actually the camera before declaring
+     * [State.Connected]. Moves to [State.Joining] while probing; to [State.Failed] if there's no
+     * Wi-Fi or the probe fails (e.g. the connected Wi-Fi isn't the camera). Supersedes any prior
+     * request. Suspends until the probe resolves.
+     */
+    suspend fun adopt() {
+        val myGen: Int
+        val network: Network?
+        synchronized(this) {
+            myGen = ++generation
+            network = joiner.adoptCurrentWifi()
+            _state.value = State.Joining
+        }
+        if (network == null) {
+            setIfCurrent(myGen, State.Failed)
+            return
+        }
+        val controller = controllerFactory(network)
+        val reachable = runCatching { controller.ping() }.isSuccess
+        setIfCurrent(myGen, if (reachable) State.Connected(controller, network) else State.Failed)
+    }
+
+    /** Apply [next] only if [gen] is still the live generation (drops superseded adopt/connect). */
+    @Synchronized
+    private fun setIfCurrent(gen: Int, next: State) {
+        if (gen == generation) _state.value = next
     }
 
     /** Tear down: release the AP and return to [State.Idle]. Safe to call any time. */
