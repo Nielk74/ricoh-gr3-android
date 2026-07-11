@@ -155,6 +155,8 @@ Decision: **start on-camera, grow in-app**; Auto-Look kept; sticky look + edited
 - [ ] Error/telemetry model shared across BLE + HTTP
 - [ ] Consider Nordic BLE library if raw GATT proves fragile across OEMs
 - [ ] Structured logging (behind a debug flag)
+- [ ] **Automated E2E / instrumented tests** — none exist yet; the viewer-open crash was verified
+      manually on an emulator only. Plan in [`docs/VIEWER_CRASH_AND_E2E_TODO.md`](docs/VIEWER_CRASH_AND_E2E_TODO.md).
 
 ## Known risks (from FEASIBILITY.md §5)
 

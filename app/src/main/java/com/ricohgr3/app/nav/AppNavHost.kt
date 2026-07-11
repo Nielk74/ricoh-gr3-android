@@ -110,7 +110,7 @@ fun AppNavHost(
             GalleryScreen(
                 state = state,
                 repository = photoRepository,
-                onOpenPhoto = { id -> navController.navigate(Screen.Viewer.buildRoute(id.toString())) },
+                onOpenPhoto = { id -> navController.navigate(Screen.Viewer.buildRoute(id.toRouteArg())) },
                 onToggleSelect = galleryViewModel::toggleSelect,
                 onClearSelection = galleryViewModel::clearSelection,
                 onApplyLookToSelection = { look ->
@@ -162,12 +162,8 @@ fun AppNavHost(
     }
 }
 
-/** Reconstruct a [PhotoId] from its `folder/file` route argument (see [PhotoId.toString]). */
-private fun parsePhotoId(raw: String): PhotoId? {
-    val slash = raw.indexOf('/')
-    if (slash <= 0 || slash == raw.length - 1) return null
-    return PhotoId(folder = raw.substring(0, slash), file = raw.substring(slash + 1))
-}
+/** Reconstruct a [PhotoId] from its encoded route argument (see [PhotoId.toRouteArg]). */
+private fun parsePhotoId(raw: String): PhotoId? = PhotoId.fromRouteArg(raw)
 
 @Composable
 private fun ViewerError(onBack: () -> Unit) {

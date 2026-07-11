@@ -16,7 +16,11 @@ sealed class Screen(val route: String) {
 
     /** Single-photo viewer. Takes a [PHOTO_ID_ARG] path argument. */
     data object Viewer : Screen("viewer/{$PHOTO_ID_ARG}") {
-        /** Build a concrete viewer route for [photoId]. */
+        /**
+         * Build a concrete viewer route from an **already-encoded** single-segment id
+         * (see `PhotoId.toRouteArg`). The value must not contain a raw `/`, or the
+         * `viewer/{photoId}` route will fail to match.
+         */
         fun buildRoute(photoId: String): String = "viewer/$photoId"
     }
 

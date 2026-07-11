@@ -12,6 +12,68 @@ import com.ricohgr3.app.wifi.PhotoInfo
 data class PhotoId(val folder: String, val file: String) {
     /** `100RICOH/R0000001.JPG` — human-readable, and unique per photo. */
     override fun toString(): String = "$folder/$file"
+
+    /**
+     * Encode this id into a **single** navigation path segment. The `folder/file` shape contains
+     * a `/`, which Navigation-Compose treats as a segment separator — passing it raw makes the
+     * `viewer/{photoId}` route fail to match and crashes navigation. We percent-encode the slash
+     * (and anything else unsafe) so the whole id survives as one opaque segment.
+     *
+     * Pure JVM string logic (no `android.net.Uri`) so it round-trips under unit test.
+     */
+    fun toRouteArg(): String = buildString {
+        // NB: capture `this@PhotoId.toString()` outside the builder lambda — inside `buildString`,
+        // a bare `toString()` resolves to the StringBuilder's (empty) toString, not the id's.
+        for (b in "$folder/$file".encodeToByteArray()) {
+            val c = b.toInt() and 0xFF
+            // RFC 3986 unreserved set — everything else is percent-escaped.
+            if (c.toChar().isUnreservedRouteChar()) append(c.toChar())
+            else append('%').append(HEX[c ushr 4]).append(HEX[c and 0x0F])
+        }
+    }
+
+    companion object {
+        private val HEX = "0123456789ABCDEF".toCharArray()
+
+        private fun Char.isUnreservedRouteChar(): Boolean =
+            this in 'A'..'Z' || this in 'a'..'z' || this in '0'..'9' ||
+                this == '-' || this == '_' || this == '.' || this == '~'
+
+        /**
+         * Inverse of [toRouteArg]. Returns null for a malformed or empty argument (e.g. a bad
+         * percent-escape, or a value with no `folder/file` split) so the caller can show an error
+         * screen instead of crashing.
+         */
+        fun fromRouteArg(raw: String): PhotoId? {
+            if (raw.isEmpty()) return null
+            val decoded = decodePercent(raw) ?: return null
+            val slash = decoded.indexOf('/')
+            if (slash <= 0 || slash == decoded.length - 1) return null
+            return PhotoId(folder = decoded.substring(0, slash), file = decoded.substring(slash + 1))
+        }
+
+        private fun decodePercent(raw: String): String? {
+            val out = java.io.ByteArrayOutputStream(raw.length)
+            var i = 0
+            while (i < raw.length) {
+                when (val ch = raw[i]) {
+                    '%' -> {
+                        if (i + 2 >= raw.length) return null
+                        val hi = Character.digit(raw[i + 1], 16)
+                        val lo = Character.digit(raw[i + 2], 16)
+                        if (hi < 0 || lo < 0) return null
+                        out.write((hi shl 4) or lo)
+                        i += 3
+                    }
+                    else -> {
+                        out.write(ch.code)
+                        i++
+                    }
+                }
+            }
+            return out.toByteArray().decodeToString()
+        }
+    }
 }
 
 /**
