@@ -216,10 +216,32 @@ object DevelopPipeline {
             val cr = chR?.get(i) ?: 0f
             val cb = chB?.get(i) ?: 0f
             val cg = -(cr + cb) * 0.5f
-            r[i] = (r[i] + amp * (sh + cr * c)).coerceIn(0f, 1f)
-            g[i] = (g[i] + amp * (sh + cg * c)).coerceIn(0f, 1f)
-            b[i] = (b[i] + amp * (sh + cb * c)).coerceIn(0f, 1f)
+            // Composite the grain with a SOFT-LIGHT-style blend rather than flat addition. Real
+            // film-grain tools don't add a constant offset (that washes toward grey and reads as
+            // flat digital noise); grain *modulates* the image — the `·x·(1-x)` term makes each
+            // grain darken darks and lighten lights, vanishing at pure black/white. This gives
+            // grain visible texture/contrast instead of a uniform haze. (`4·x·(1-x)` peaks at 1.)
+            val gr = amp * (sh + cr * c)
+            val gg = amp * (sh + cg * c)
+            val gb = amp * (sh + cb * c)
+            r[i] = softLightGrain(r[i], gr)
+            g[i] = softLightGrain(g[i], gg)
+            b[i] = softLightGrain(b[i], gb)
         }
+    }
+
+    /**
+     * Apply a signed grain value [d] to a channel value [x] with a soft-light-style modulation:
+     * `x + d·(4x(1-x))`. The `4x(1-x)` envelope (0 at black/white, 1 at mid-grey) means grain
+     * darkens shadows and lightens highlights *around the local tone* instead of adding a flat
+     * offset — the difference between film-like texture and a washed-out digital haze. Clamped.
+     */
+    private fun softLightGrain(x: Float, d: Float): Float {
+        // Envelope peaks at mid-grey but keeps a floor at the extremes, so highlights/shadows
+        // still carry some grain (real film isn't perfectly clean there) — 0.3 at black/white,
+        // 1.0 at mid-grey.
+        val envelope = 0.3f + 0.7f * (4f * x * (1f - x))
+        return (x + d * envelope).coerceIn(0f, 1f)
     }
 
     /**

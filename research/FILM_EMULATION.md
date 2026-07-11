@@ -90,6 +90,13 @@ Realistic film grain, `I_out = I + A(I)·G`, checked against the film-grain guid
 - **Detail/sharpness**: grain strength is applied **independently of image sharpness**; a bounded
   **secondary** `smoothBoost` makes grain read slightly *more visible* in smooth/defocused regions
   (`|luma − blur(luma)|`), never proportional to blur.
+- **Blend**: grain is composited with a **soft-light-style** modulation (`x + d·envelope`, where
+  `envelope = 0.3 + 0.7·4x(1−x)` peaks at mid-grey), **not** flat addition. This is the key to it
+  reading as film rather than digital haze: real grain darkens darks and lightens lights around
+  the local tone; additive grain (`x + d`) washes everything toward grey and looks washed-out/flat.
+  `chroma` is kept low (~0.12) — high chroma reads as electronic colour speckle. (Research: film
+  grain tools use soft-light/overlay blends, low colour-noise, resolution-scaled grain, not
+  additive Gaussian noise — see IPOL "Realistic Film Grain Rendering" and the AV1 grain model.)
 - **Order/perf**: grain is **last**, in display space, before JPEG compression. Runs off the main
   thread; peak memory bounded (≤ ~4 float buffers over the ~6 MP edit image) to respect the
   no-crash / no-OOM rule.

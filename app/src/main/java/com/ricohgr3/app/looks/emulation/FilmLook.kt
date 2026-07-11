@@ -93,7 +93,7 @@ data class GrainParams(
     val amount: Float,
     val size: Float,
     val shadowBias: Float,
-    val chroma: Float = 0.35f,
+    val chroma: Float = 0.12f,
     val coarseAmount: Float = 0.4f,
     val coarseSizeMul: Float = 2.4f,
     val smoothBoost: Float = 0.3f,
