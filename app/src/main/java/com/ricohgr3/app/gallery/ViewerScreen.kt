@@ -101,8 +101,13 @@ fun ViewerScreen(
                     else saveOriginal(id, repository, exporter)
                 if (outcome.edited) "Saved ${outcome.displayName} to Pictures/GR3"
                 else "Saved to Pictures/GR3"
-            } catch (e: Exception) {
-                "Save failed: ${e.message ?: e::class.simpleName}"
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // never swallow structured-concurrency cancellation
+            } catch (t: Throwable) {
+                // A save must NEVER crash the app. Catch Throwable (not just Exception) so an
+                // OutOfMemoryError from developing a large image is surfaced, not fatal.
+                val reason = if (t is OutOfMemoryError) "not enough memory" else (t.message ?: t::class.simpleName)
+                "Save failed: $reason"
             } finally {
                 saving = false
             }

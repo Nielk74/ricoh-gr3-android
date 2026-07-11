@@ -44,3 +44,25 @@ WLAN `Network Type` write (`0x80`). Full hardware investigation + RE tooling in
 
 BLE cannot be exercised on the CI/build host — it needs a physical GR III and a real Android
 device (emulators have no BLE radio). The build verifies compilation; on-device testing is manual.
+
+## The app must never crash — hard rule
+
+A user action failing is acceptable and must surface a message; the app **crashing is never
+acceptable**. When adding or changing any user-triggered flow, obey all of these:
+
+- **Catch `Throwable`, not just `Exception`, at every user-action boundary** (the coroutine a
+  button launches). `OutOfMemoryError`, `StackOverflowError`, etc. are `Error`s and slip past
+  `catch (Exception)`. Always re-throw `CancellationException` first so structured concurrency
+  still works. Convert everything else into a visible status message — never let it propagate.
+- **Never hold a full-resolution bitmap (or per-pixel buffers over one) on the heap.** The GR III
+  shoots ~24MP; a naive decode plus the develop engine's per-channel float buffers will
+  `OutOfMemoryError`. Decode downsampled with `inSampleSize` to a bounded working resolution
+  (see `PhotoSave.decodeBounded` / `MAX_EDIT_PIXELS`), recycle bitmaps you own, and be explicit
+  about bitmap ownership so nothing is double-recycled or leaked.
+- **Do all image/pixel/network work off the main thread** (`withContext(Dispatchers.Default/IO)`).
+  Heavy work on the UI thread is an ANR, which the user experiences as a crash.
+- **A failure path must leave a status the user can read** ("Save failed: not enough memory"),
+  not a silent no-op and not a stack trace.
+
+When you touch such a flow, mentally walk the worst case (largest image, no memory, camera
+dropped mid-transfer) and confirm it ends in a message, not a crash.

@@ -17,6 +17,8 @@ import com.ricohgr3.app.looks.emulation.DevelopEngine
 import com.ricohgr3.app.looks.emulation.FilmLookLoader
 import com.ricohgr3.app.ui.LookSwatch
 import com.ricohgr3.app.wifi.ImageSize
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Save-to-device flows for the viewer. Both go through the network-bound [PhotoRepository]
@@ -66,20 +68,26 @@ suspend fun saveEdited(
         return saveOriginal(id, repository, exporter)
     }
     val bytes = fetchFull(id, repository)
-    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        ?: throw java.io.IOException("Could not decode ${id.file} for editing")
 
-    // Prefer a real film develop; fall back to the indicative gradient tint.
-    // `DevelopEngine.render` leaves `decoded` untouched, so recycle it after; `applyLookTint`
-    // already consumes and recycles its source, so we must not recycle again in that path.
-    val filmId = loader?.let { CameraLookMapping.filmLookId(look) }
-    val developed = filmId?.let { loader.resolve(it) }
-        ?.let { (film, lut) -> DevelopEngine.render(decoded, film, lut) }
-    val edited = if (developed != null) {
-        decoded.recycle()
-        developed
-    } else {
-        applyLookTint(decoded, look)
+    // The develop runs on the CPU and allocates several full-resolution float buffers per
+    // channel, so a naive 24MP decode blows the heap (OutOfMemoryError). Decode downsampled to
+    // a bounded working resolution, and do all pixel work off the main thread.
+    val edited = withContext(Dispatchers.Default) {
+        val decoded = decodeBounded(bytes, MAX_EDIT_PIXELS)
+            ?: throw java.io.IOException("Could not decode ${id.file} for editing")
+
+        // Prefer a real film develop; fall back to the indicative gradient tint.
+        // `DevelopEngine.render` leaves `decoded` untouched, so recycle it after; `applyLookTint`
+        // already consumes and recycles its source, so we must not recycle again in that path.
+        val filmId = loader?.let { CameraLookMapping.filmLookId(look) }
+        val developed = filmId?.let { loader.resolve(it) }
+            ?.let { (film, lut) -> DevelopEngine.render(decoded, film, lut) }
+        if (developed != null) {
+            decoded.recycle()
+            developed
+        } else {
+            applyLookTint(decoded, look)
+        }
     }
 
     val name = editedName(id.file)
@@ -92,6 +100,35 @@ private suspend fun fetchFull(id: PhotoId, repository: PhotoRepository): ByteArr
         is PhotoResult.Success -> r.value
         is PhotoResult.Error -> throw (r.cause ?: java.io.IOException(r.message))
     }
+
+/**
+ * Ceiling on the working resolution for an on-device develop. The GR III shoots ~24MP; the
+ * CPU pipeline holds several full-res float buffers at once, so we cap the edit buffer to keep
+ * peak heap bounded and avoid `OutOfMemoryError`. ~6MP (e.g. 3000×2000) is far above what an
+ * exported look needs to read as film. Kept generous but safe on low-RAM devices.
+ */
+private const val MAX_EDIT_PIXELS = 6_000_000
+
+/**
+ * Decode [bytes] to an ARGB_8888 bitmap whose pixel count is at most [maxPixels], using
+ * `inSampleSize` so the full image is never fully materialised in memory. Returns null if the
+ * bytes aren't a decodable image.
+ */
+private fun decodeBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
+    val probe = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, probe)
+    if (probe.outWidth <= 0 || probe.outHeight <= 0) return null
+
+    var sample = 1
+    while ((probe.outWidth / sample).toLong() * (probe.outHeight / sample) > maxPixels) {
+        sample *= 2
+    }
+    val opts = BitmapFactory.Options().apply {
+        inSampleSize = sample
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+}
 
 /** Composite the look's indicative vertical-gradient tint onto a copy of [src]. */
 private fun applyLookTint(src: Bitmap, look: CameraLook): Bitmap {
