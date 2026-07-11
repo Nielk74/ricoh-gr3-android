@@ -50,11 +50,11 @@ darktable film simulations, Fuji's in-camera Film Simulation) is some subset of:
    film's anti-halation layer failing at highlights. Implemented as: threshold the
    highlights → Gaussian blur → tint red/orange → screen/add back. Luminance-gated.
 
-6. **Grain.** Luminance-dependent monochrome (or slightly chromatic) noise. Real film grain
-   is *stronger in mid-tones/shadows structure* and correlated (not per-pixel white noise) —
-   good grain is Gaussian noise with spatial correlation (blur the noise slightly) and
-   amplitude modulated by local luminance. Cheap version: per-pixel Gaussian scaled by a
-   luma curve. Better: pre-blur the noise field.
+6. **Grain.** `I_out = I + A(I)·G` (see §2.6 for the shipped model). `G` is spatially-correlated,
+   multi-scale, correlated-RGB grain; `A(I)` is a **midtone-peaked** density response. Real film
+   grain is *strongest in the midtones* (falling off in both deep shadows and highlights),
+   correlated (not per-pixel white noise), varies in size/clumping, and is correlated-but-distinct
+   across R/G/B (identical mono = flat; independent RGB = electronic).
 
 7. **Optional: vignette, soft bloom, slight desaturation of extremes, black/white point.**
 
@@ -73,6 +73,28 @@ don't belong in a pointwise colour map.
 **HaldCLUT** (a PNG that is the identity LUT laid out as an image; apply any edit to the
 Hald PNG in an editor and it *becomes* a LUT). HaldCLUT is attractive here because it ships
 as a plain PNG asset and there are large free, permissively-usable collections.
+
+### 2.6 Grain model (shipped, `DevelopPipeline.applyGrain`)
+
+Realistic film grain, `I_out = I + A(I)·G`, checked against the film-grain guideline:
+
+- **`G` — the grain field**: a shared **luma** octave (fine) plus a **coarser** octave summed in
+  for *clumping and size variety* (not one uniform speckle size). On top, a small **per-channel
+  chroma** component (independent R and B octaves; G = −(R+B)/2) so R/G/B are
+  **correlated-but-distinct** — identical mono grain looks flat, fully-independent RGB looks
+  electronic. Each octave is blurred for spatial correlation then **renormalised** (blurring
+  otherwise collapses amplitude — the old bug that made grain invisible). `chroma=0` ⇒ pure mono.
+- **`A(I)` — the strength**: a **midtone-peaked hump** (`grainDensity`) that falls off in both the
+  deepest shadows *and* the brightest highlights (real silver-grain density), biasable toward the
+  shadows by `shadowBias`. Measured: peak ~0.95 at luma 0.25–0.5, ~0.54 at black, ~0.04 near white.
+- **Detail/sharpness**: grain strength is applied **independently of image sharpness**; a bounded
+  **secondary** `smoothBoost` makes grain read slightly *more visible* in smooth/defocused regions
+  (`|luma − blur(luma)|`), never proportional to blur.
+- **Order/perf**: grain is **last**, in display space, before JPEG compression. Runs off the main
+  thread; peak memory bounded (≤ ~4 float buffers over the ~6 MP edit image) to respect the
+  no-crash / no-OOM rule.
+
+Per-stock midtone amplitude ranges ~3.9/255 (Velvia, finest) → ~7.2/255 (Bleach Bypass, grittiest).
 
 ---
 

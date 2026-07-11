@@ -68,15 +68,35 @@ data class HalationParams(
 }
 
 /**
- * Film grain: luminance-weighted, spatially-correlated monochrome noise. [amount] scales
- * amplitude; [size] blurs the noise field (larger = coarser grain); [shadowBias] makes
- * grain more visible in mid/shadow structure, mirroring real film. [seed] fixes the field
- * for deterministic (testable, non-flickering) output.
+ * Film grain — a physically-motivated model, not uniform digital noise. See
+ * `research/FILM_EMULATION.md` and [DevelopPipeline.applyGrain]. The output is
+ * `I_out = I + A(I)·G`, where `G` is spatially-correlated multi-scale grain and `A(I)` is a
+ * density response that peaks in the **midtones** (as real film does), biasable toward shadows.
+ *
+ * @property amount overall grain strength (amplitude of the fine octave).
+ * @property size blur radius of the fine grain (larger = coarser individual grains).
+ * @property shadowBias shifts the midtone-peaked density response toward the shadows
+ *   (0 = symmetric hump centred on mid-grey; 1 = peak pushed well into the shadows). Grain
+ *   still falls off in both the deepest shadows and the brightest highlights.
+ * @property chroma fraction of the grain that is **per-channel independent** (chromatic),
+ *   layered on the shared luma grain so RGB channels are correlated-but-distinct — avoids the
+ *   "electronic" look of identical or fully-independent RGB noise. 0 = pure monochrome.
+ * @property coarseAmount amplitude of a second, coarser octave summed in for natural clumping
+ *   and size variation (0 = single-scale). Its blur is [size]·[coarseSizeMul].
+ * @property coarseSizeMul how much coarser the second octave is than [size].
+ * @property smoothBoost how much grain reads *more visible* in smooth/defocused regions than in
+ *   busy detail — a subtle **secondary** factor per the film-grain guideline (NOT proportional
+ *   to blur). 0 = uniform. Small values (~0.3) only.
+ * @property seed fixes the field for deterministic (testable, non-flickering) output.
  */
 data class GrainParams(
     val amount: Float,
     val size: Float,
     val shadowBias: Float,
+    val chroma: Float = 0.35f,
+    val coarseAmount: Float = 0.4f,
+    val coarseSizeMul: Float = 2.4f,
+    val smoothBoost: Float = 0.3f,
     val seed: Long = 0L,
 ) {
     val enabled: Boolean get() = amount > 0f

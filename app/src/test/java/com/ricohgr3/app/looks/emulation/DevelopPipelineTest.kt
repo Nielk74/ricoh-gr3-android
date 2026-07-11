@@ -38,6 +38,44 @@ class DevelopPipelineTest {
         assertTrue("grain must be visible (std=$std, ~${std * 255} of 255)", std * 255 > 2f)
     }
 
+    @Test fun grainDensityPeaksInMidtonesAndRollsOffBothEnds() {
+        // Real film grain: A(I) is a hump peaking in the midtones, weaker in the deepest shadows
+        // AND the brightest highlights — not monotonic to black.
+        val mid = DevelopPipeline.grainDensity(0.4f, shadowBias = 0.5f)
+        val deepShadow = DevelopPipeline.grainDensity(0.02f, shadowBias = 0.5f)
+        val highlight = DevelopPipeline.grainDensity(0.95f, shadowBias = 0.5f)
+        assertTrue("peak is in the midtones", mid > deepShadow && mid > highlight)
+        assertTrue("highlights nearly grain-free", highlight < 0.15f)
+        assertTrue("deep shadow rolls off below the mid peak", deepShadow < mid)
+    }
+
+    @Test fun grainIsCorrelatedRgbNotMonochrome() {
+        // The channels must differ (not identical mono noise) yet stay correlated in amplitude.
+        val w = 100; val h = 100; val n = w * h
+        val r = FloatArray(n) { 0.5f }; val g = FloatArray(n) { 0.5f }; val b = FloatArray(n) { 0.5f }
+        DevelopPipeline.applyGrain(r, g, b, w, h,
+            GrainParams(amount = 0.06f, size = 2f, shadowBias = 0.5f, chroma = 0.4f, seed = 3))
+        var identical = 0
+        for (i in 0 until n) if (r[i] == g[i] && g[i] == b[i]) identical++
+        assertTrue("RGB grain must not be identical mono (identical=$identical)", identical < n / 10)
+        // ...but a pure-mono config (chroma=0) MUST put identical noise on all channels.
+        val r2 = FloatArray(n) { 0.5f }; val g2 = FloatArray(n) { 0.5f }; val b2 = FloatArray(n) { 0.5f }
+        DevelopPipeline.applyGrain(r2, g2, b2, w, h,
+            GrainParams(amount = 0.06f, size = 2f, shadowBias = 0.5f, chroma = 0f, coarseAmount = 0f, smoothBoost = 0f, seed = 3))
+        assertTrue("chroma=0 is monochrome", r2.indices.all { r2[it] == g2[it] && g2[it] == b2[it] })
+    }
+
+    @Test fun multiScaleGrainAddsCoarseStructure() {
+        // Adding a coarse octave must change the field vs a single-scale one (same seed).
+        fun run(coarse: Float): FloatArray {
+            val r = FloatArray(96 * 96) { 0.5f }; val g = r.copyOf(); val b = r.copyOf()
+            DevelopPipeline.applyGrain(r, g, b, 96, 96,
+                GrainParams(amount = 0.06f, size = 2f, shadowBias = 0.5f, chroma = 0f, coarseAmount = coarse, smoothBoost = 0f, seed = 5))
+            return r
+        }
+        assertTrue("coarse octave changes the grain", !run(0f).contentEquals(run(0.6f)))
+    }
+
     @Test fun grainSeedChangesOutput() {
         fun run(seed: Long): FloatArray {
             val r = FloatArray(64) { 0.5f }; val g = FloatArray(64) { 0.5f }; val b = FloatArray(64) { 0.5f }
