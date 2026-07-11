@@ -39,6 +39,10 @@ fun main(args: Array<String>) {
     val maxW = 1600
     val work = if (src.width > maxW) scaleTo(src, maxW) else toRgb(src)
 
+    // The same film-grain plate the app uses, so the preview grain matches the on-device look.
+    val grain = loadGrainTexture(File(repo, "app/src/main/assets/grain/grain_35mm.png"))
+    println(if (grain != null) "Loaded grain plate ${grain.size}px" else "No grain plate — synthesised grain")
+
     // Standard (as-shot) baseline first.
     writeJpg(work, File(outDir, "standard.jpg"))
     println("  standard -> standard.jpg")
@@ -46,7 +50,7 @@ fun main(args: Array<String>) {
     for (entry in FilmLookCatalog.entries) {
         val look = entry.look
         val lut = loadLut(look, lutDir)
-        val out = develop(work, look, lut)
+        val out = develop(work, look, lut, grain)
         val name = look.id + ".jpg"
         writeJpg(out, File(outDir, name))
         println("  ${look.displayName} -> $name")
@@ -66,7 +70,12 @@ private fun loadLut(look: FilmLook, lutDir: File): LutCube {
 }
 
 /** Run the real develop pipeline on a copy of [src]; returns a new image. */
-private fun develop(src: BufferedImage, look: FilmLook, lut: LutCube): BufferedImage {
+private fun develop(
+    src: BufferedImage,
+    look: FilmLook,
+    lut: LutCube,
+    grain: com.ricohgr3.app.looks.emulation.GrainTexture?,
+): BufferedImage {
     val w = src.width; val h = src.height; val n = w * h
     val r = FloatArray(n); val g = FloatArray(n); val b = FloatArray(n)
     var i = 0
@@ -77,7 +86,7 @@ private fun develop(src: BufferedImage, look: FilmLook, lut: LutCube): BufferedI
         b[i] = (p and 0xFF) / 255f
         i++
     }
-    DevelopPipeline.apply(r, g, b, w, h, look, lut)
+    DevelopPipeline.apply(r, g, b, w, h, look, lut, grainTexture = grain)
     val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
     i = 0
     for (y in 0 until h) for (x in 0 until w) {
@@ -88,6 +97,18 @@ private fun develop(src: BufferedImage, look: FilmLook, lut: LutCube): BufferedI
         i++
     }
     return out
+}
+
+/** Load the grayscale grain plate PNG into a [com.ricohgr3.app.looks.emulation.GrainTexture]. */
+private fun loadGrainTexture(file: File): com.ricohgr3.app.looks.emulation.GrainTexture? {
+    if (!file.isFile) return null
+    return runCatching {
+        val img = ImageIO.read(file) ?: return null
+        val s = minOf(img.width, img.height)
+        val gray = IntArray(s * s)
+        for (y in 0 until s) for (x in 0 until s) gray[y * s + x] = img.getRGB(x, y) and 0xFF
+        com.ricohgr3.app.looks.emulation.GrainTexture.fromGray(s, gray)
+    }.getOrNull()
 }
 
 private fun toRgb(src: BufferedImage): BufferedImage {

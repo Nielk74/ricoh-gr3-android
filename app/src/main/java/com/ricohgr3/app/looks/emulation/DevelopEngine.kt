@@ -21,7 +21,13 @@ object DevelopEngine {
      * [preGrade] (optional) is a mild base grade applied before the film look, used for RAW/DNG
      * input whose decoded preview is flatter than a camera JPEG (see `PhotoSave`).
      */
-    fun render(src: Bitmap, look: FilmLook, lut: LutCube, preGrade: DevelopPipeline.PreGrade? = null): Bitmap {
+    fun render(
+        src: Bitmap,
+        look: FilmLook,
+        lut: LutCube,
+        preGrade: DevelopPipeline.PreGrade? = null,
+        grainTexture: GrainTexture? = null,
+    ): Bitmap {
         val w = src.width
         val h = src.height
         val n = w * h
@@ -38,7 +44,7 @@ object DevelopEngine {
             bb[i] = (p and 0xFF) / 255f
         }
 
-        DevelopPipeline.apply(rr, gg, bb, w, h, look, lut, preGrade)
+        DevelopPipeline.apply(rr, gg, bb, w, h, look, lut, preGrade, grainTexture)
 
         for (i in 0 until n) {
             val a = pixels[i] and 0xFF000000.toInt()

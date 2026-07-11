@@ -155,7 +155,8 @@ fun ViewerScreen(
             runCatching {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     loader.resolve(stockId)?.let { (film, lut) ->
-                        com.ricohgr3.app.looks.emulation.DevelopEngine.render(src, film, lut)
+                        com.ricohgr3.app.looks.emulation.DevelopEngine
+                            .render(src, film, lut, grainTexture = loader.grainTexture())
                             .asImageBitmap()
                     }
                 }

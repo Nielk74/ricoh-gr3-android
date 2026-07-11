@@ -93,7 +93,7 @@ suspend fun saveEdited(
         // so recycle it after; `applyLookTint` consumes and recycles its source, so we must not
         // recycle again in that path.
         val developed = loader?.resolve(filmLookId)
-            ?.let { (film, lut) -> developForSave(decoded, film, lut, raw = isRaw) }
+            ?.let { (film, lut) -> developForSave(decoded, film, lut, raw = isRaw, grain = loader.grainTexture()) }
         if (developed != null) {
             decoded.recycle()
             developed
@@ -120,8 +120,9 @@ private fun developForSave(
     look: com.ricohgr3.app.looks.emulation.FilmLook,
     lut: com.ricohgr3.app.looks.emulation.LutCube,
     raw: Boolean,
+    grain: com.ricohgr3.app.looks.emulation.GrainTexture?,
 ): android.graphics.Bitmap =
-    DevelopEngine.render(decoded, look, lut, preGrade = if (raw) RawPreGrade else null)
+    DevelopEngine.render(decoded, look, lut, preGrade = if (raw) RawPreGrade else null, grainTexture = grain)
 
 private suspend fun fetchFull(id: PhotoId, repository: PhotoRepository): ByteArray =
     when (val r = repository.downloadPhoto(id, size = ImageSize.FULL)) {

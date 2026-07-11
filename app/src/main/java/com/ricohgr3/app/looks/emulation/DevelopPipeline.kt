@@ -48,6 +48,7 @@ object DevelopPipeline {
         width: Int, height: Int,
         look: FilmLook, lut: LutCube,
         preGrade: PreGrade? = null,
+        grainTexture: GrainTexture? = null,
     ) {
         val n = width * height
         val tmp = FloatArray(3)
@@ -90,9 +91,48 @@ object DevelopPipeline {
         val h = look.halation
         if (h.enabled) applyHalation(r, g, b, width, height, h)
 
-        // 5. Grain (display space, last).
+        // 5. Grain (display space, last). Prefer the real scanned-style grain PLATE overlaid
+        // (looks like film); fall back to synthesised grain only if no plate was supplied.
         val gr = look.grain
-        if (gr.enabled) applyGrain(r, g, b, width, height, gr)
+        if (gr.enabled) {
+            if (grainTexture != null) applyGrainTexture(r, g, b, width, height, gr, grainTexture)
+            else applyGrain(r, g, b, width, height, gr)
+        }
+    }
+
+    /**
+     * Composite a real film-grain **plate** ([tex]) over the image (display space): tile the plate
+     * across the frame, weight it by a **midtone-peaked** density (real grain is strongest in the
+     * midtones, [GrainParams.shadowBias] pushes it toward shadows), and blend it **soft-light**
+     * so grain modulates around the local tone (film texture) rather than adding a flat offset
+     * (digital haze). Monochrome by default with a small [GrainParams.chroma] variation so it's
+     * not perfectly flat. Deterministic (the plate is fixed); [GrainParams.seed] just offsets the
+     * tile origin so different stocks don't share the identical grain position. Exposed for tests.
+     */
+    fun applyGrainTexture(
+        r: FloatArray, g: FloatArray, b: FloatArray,
+        width: Int, height: Int, gp: GrainParams, tex: GrainTexture,
+    ) {
+        // Offset the tile per-seed so stocks don't line up their grain identically.
+        val ox = (gp.seed % tex.size).toInt()
+        val oy = ((gp.seed / 7) % tex.size).toInt()
+        val c = gp.chroma.coerceIn(0f, 1f)
+        var i = 0
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val l = luma(r[i], g[i], b[i])
+                val a = grainDensity(l, gp.shadowBias) * gp.amount
+                val gVal = tex.at(x + ox, y + oy)
+                // Small per-channel variation from neighbouring plate taps (correlated, not
+                // independent RGB) so grain isn't perfectly monochrome but never "electronic".
+                val vr = gVal + c * (tex.at(x + ox + 1, y + oy) - gVal)
+                val vb = gVal + c * (tex.at(x + ox, y + oy + 1) - gVal)
+                r[i] = softLightGrain(r[i], a * vr)
+                g[i] = softLightGrain(g[i], a * gVal)
+                b[i] = softLightGrain(b[i], a * vb)
+                i++
+            }
+        }
     }
 
     /**
