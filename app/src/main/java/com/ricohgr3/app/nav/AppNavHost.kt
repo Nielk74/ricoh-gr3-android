@@ -55,11 +55,23 @@ fun AppNavHost(
             val wifiState: CameraWifiSession.State? =
                 if (session != null) session.state.collectAsStateWithLifecycle().value else null
 
-            // Auto-join the camera Wi-Fi once BLE has read the credentials. Guarded inside the
-            // ViewModel so it fires once per credential set, not on every recomposition.
+            // Join the camera Wi-Fi once BLE has read the credentials — but only after the user
+            // has asked to (wifiJoinIntent), since the camera's Wi-Fi is turned on manually on the
+            // body. Guarded inside the ViewModel so it fires once per credential set.
             val creds = bleState.wlanCredentials
-            LaunchedEffect(creds) {
-                if (creds != null) viewModel.joinWifi(creds.ssid, creds.passphrase)
+            val joinIntent by viewModel.wifiJoinIntent.collectAsStateWithLifecycle()
+
+            // Pre-read the AP credentials once BLE is up so the join prompt can show the SSID.
+            val bleConnected = bleState.connectionState == com.ricohgr3.app.ble.ConnectionState.CONNECTED
+            LaunchedEffect(bleConnected, bleState.wlanControlAvailable) {
+                if (bleConnected && bleState.wlanControlAvailable && creds == null) {
+                    viewModel.readWlanCredentials()
+                }
+            }
+            LaunchedEffect(creds, joinIntent) {
+                if (joinIntent && creds != null && creds.ssid.isNotBlank()) {
+                    viewModel.joinWifi(creds.ssid, creds.passphrase)
+                }
             }
 
             ConnectScreen(
@@ -71,11 +83,8 @@ fun AppNavHost(
                 onStartScan = viewModel::startScan,
                 onStopScan = viewModel::stopScan,
                 onConnectDevice = viewModel::connect,
-                onStartWifiHandoff = viewModel::startWifiHandoff,
-                onRetryWifi = {
-                    viewModel.resetWifiJoin()
-                    viewModel.startWifiHandoff()
-                },
+                onStartWifiHandoff = viewModel::joinCameraWifi,
+                onRetryWifi = viewModel::joinCameraWifi,
                 onDisconnect = viewModel::disconnect,
                 onOpenGallery = { navController.navigate(Screen.Gallery.route) },
                 onOpenLiveView = { navController.navigate(Screen.LiveView.route) },

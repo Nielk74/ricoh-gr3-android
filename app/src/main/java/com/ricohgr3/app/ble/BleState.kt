@@ -48,4 +48,9 @@ data class BleState(
     /** True once the camera acknowledged switching its network type to AP mode. */
     val wifiEnabled: Boolean = false,
     val error: String? = null,
+    /**
+     * Human-readable trace of the last BLE handoff step, shown on-screen for diagnosis when
+     * logcat isn't available. Appended to as the GATT queue progresses.
+     */
+    val debug: String? = null,
 )

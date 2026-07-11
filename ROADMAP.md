@@ -58,9 +58,13 @@ Goal: live view + settings + photo transfer over the camera's Wi-Fi AP.
 Transport/data layer built & unit-tested (23 tests green, MockWebServer + fixtures);
 grounded in the cloned OpenAPI spec + community repos. UI wiring is Phase 6.
 
-- [x] **BLE → wake Wi-Fi**: WLAN Control service + SSID/passphrase/network-type UUIDs in
+- [~] **BLE → wake Wi-Fi**: WLAN Control service + SSID/passphrase/network-type UUIDs in
       `RicohGattProfile` (verified against `research/references/.../wlan_control_command/*`);
-      `CameraController.readWlanCredentials()` + `enableWifiAp()` (network-type→AP). On-device: verify.
+      credential **reads work**. **BLOCKED:** the `enableWifiAp()` network-type→AP *write* is
+      rejected by shipping firmware (1.92 & 2.10) with GATT app error `0x80` — not the real
+      trigger. Hardware-RE'd directly (`research/BLE_WIFI_WAKE_INVESTIGATION.md`, `research/tools/`).
+      **Fallback shipped:** user turns Wi-Fi on at the camera, app auto-joins the AP. Revisit via
+      btsnoop capture / APK decompile of the official app.
 - [x] **Android Wi-Fi join**: `WifiApConnector` + `CameraWifiSession` (Idle→Joining→Connected→
       Lost/Failed state machine, generation-guarded); `CameraHttpClient.forNetwork()` binds OkHttp
       to the joined `Network`. JVM-tested; radio path needs on-device validation (API 29+).
@@ -80,10 +84,11 @@ grounded in the cloned OpenAPI spec + community repos. UI wiring is Phase 6.
 ## Phase 5 — Connection & session management  (M) — MVP FLOW WIRED
 
 The **MVP happy path is wired end-to-end**: `ConnectScreen` (Concept-A stepper) drives
-BLE pair → wake+join camera Wi-Fi (auto-joins once BLE reads credentials) → Library / Live
-View entries; `MainViewModel` orchestrates the handoff over `CameraWifiSession`. Falls back
-gracefully (BLE shutter works without Wi-Fi; API<29 shows a "needs Android 10+" note).
-On-device validation against a physical GR III is the remaining gate (no host radio).
+BLE pair → **user enables Wi-Fi on the camera** → app joins the camera AP → Library / Live
+View entries; `MainViewModel` orchestrates the handoff over `CameraWifiSession`. (Auto BLE
+wake was dropped — the camera rejects it; see Phase 4.) Falls back gracefully (BLE shutter
+works without Wi-Fi; API<29 shows a "needs Android 10+" note). On-device validation against
+a physical GR III is the remaining gate (no host radio).
 
 - [x] Unified connection flow (disconnected → BLE → Wi-Fi active) surfaced in `ConnectScreen`
       over `CameraWifiSession.State` + `BleState` — the visible BLE→Wi-Fi state machine
