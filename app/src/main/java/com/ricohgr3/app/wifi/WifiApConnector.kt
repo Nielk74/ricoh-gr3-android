@@ -107,7 +107,9 @@ class WifiApConnector(context: Context) {
         }
 
         activeCallback.set(callback)
-        connectivityManager.requestNetwork(request, callback)
+        // With a timeout so a wrong passphrase or dismissed system dialog surfaces as
+        // onUnavailable() instead of hanging the "joining…" state indefinitely.
+        connectivityManager.requestNetwork(request, callback, JOIN_TIMEOUT_MS)
     }
 
     /**
@@ -122,6 +124,9 @@ class WifiApConnector(context: Context) {
     }
 
     companion object {
+        /** Max time to wait for the camera AP join before reporting onUnavailable(). */
+        private const val JOIN_TIMEOUT_MS = 30_000
+
         /** True when this device supports the WifiNetworkSpecifier join path (API 29+). */
         fun isSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
 
