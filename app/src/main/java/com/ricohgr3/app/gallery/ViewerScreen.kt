@@ -114,21 +114,52 @@ fun ViewerScreen(
         }
     }
 
+    // The raw (undeveloped) VIEW bitmap, kept so the preview can be re-developed as the picked
+    // look changes and shown as the "before" while holding. `android.graphics.Bitmap` (not
+    // ImageBitmap) because the develop engine reads pixels off it.
+    var rawBitmap by remember(id) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    // The developed preview for the currently-picked look (null = show the raw bitmap).
+    var developedPreview by remember(id) { mutableStateOf<ImageBitmap?>(null) }
+
     LaunchedEffect(id) {
         // A VIEW-sized rendition (720x480, ~500 KiB) is plenty for the viewer and far cheaper
         // than pulling the full-resolution original.
         when (val result = repository.downloadPhoto(id, size = ImageSize.VIEW)) {
             is PhotoResult.Success -> {
                 val bytes = result.value
-                bitmap = runCatching {
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                val raw = runCatching {
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                 }.getOrNull()
+                rawBitmap = raw
+                bitmap = raw?.asImageBitmap()
             }
             is PhotoResult.Error -> error = result.message
         }
         when (val infoResult = repository.photoInfo(id)) {
             is PhotoResult.Success -> info = infoResult.value
             is PhotoResult.Error -> Unit // metadata is best-effort
+        }
+    }
+
+    // Render the REAL film develop onto the small VIEW bitmap whenever the picked look (or the
+    // loaded frame) changes, so the on-screen preview matches what "Save with …" will produce —
+    // not just an indicative tint. Runs off the main thread; failures fall back to the raw frame
+    // (never crash, never block the UI). The develop is on a ~720×480 bitmap, so it's cheap.
+    LaunchedEffect(picked, rawBitmap, filmLookLoader) {
+        val src = rawBitmap
+        val loader = filmLookLoader
+        val stockId = picked
+        developedPreview = if (src == null || loader == null || stockId == null) {
+            null // Standard, or nothing to develop → show the raw frame
+        } else {
+            runCatching {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    loader.resolve(stockId)?.let { (film, lut) ->
+                        com.ricohgr3.app.looks.emulation.DevelopEngine.render(src, film, lut)
+                            .asImageBitmap()
+                    }
+                }
+            }.getOrNull()
         }
     }
 
@@ -151,8 +182,12 @@ fun ViewerScreen(
         ) {
             when {
                 bitmap != null -> PhotoStage(
-                    bitmap = bitmap!!,
+                    // Show the REAL developed preview for the picked look; the raw frame while
+                    // holding "before", or when there's no develop yet (Standard / still
+                    // rendering / fell back).
+                    bitmap = if (!showingBefore) (developedPreview ?: bitmap!!) else bitmap!!,
                     look = picked,
+                    developed = developedPreview != null,
                     showingBefore = showingBefore,
                     onPressChange = { showingBefore = it },
                 )
@@ -298,6 +333,7 @@ private fun ViewerHeader(
 private fun PhotoStage(
     bitmap: ImageBitmap,
     look: String?,
+    developed: Boolean,
     showingBefore: Boolean,
     onPressChange: (Boolean) -> Unit,
 ) {
@@ -321,8 +357,10 @@ private fun PhotoStage(
             contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize(),
         )
-        // Indicative look tint (skipped for Standard and while holding "before").
-        if (!showingBefore && look != null) {
+        // Indicative look tint — ONLY when we couldn't render the real develop (no loader / JVM
+        // fallback). When `developed` is true the bitmap already carries the real look, so no
+        // overlay. Skipped for Standard and while holding "before".
+        if (!showingBefore && look != null && !developed) {
             val stops = LookSwatch.stopsFor(look)
             Box(
                 modifier = Modifier
