@@ -51,6 +51,9 @@ class CameraBleManager(private val context: Context) : CameraController {
     private val scanner get() = adapter?.bluetoothLeScanner
     private var gatt: BluetoothGatt? = null
 
+    /** Main-thread handler for op timeouts (a GATT op that never gets its callback). */
+    private val timeoutHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     /**
      * Serialized queue of GATT operations (Android allows exactly one in flight at a time).
      * Reads and writes MUST share one queue — issuing a write while a read is pending makes
@@ -138,6 +141,7 @@ class CameraBleManager(private val context: Context) : CameraController {
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     g.close()
                     gatt = null
+                    cancelOpTimeout()
                     opQueue.clear()
                     opInFlight = false
                     _state.update {
@@ -157,6 +161,12 @@ class CameraBleManager(private val context: Context) : CameraController {
             }
             val hasShooting = g.getService(RicohGattProfile.SHOOTING_SERVICE) != null
             val hasWlan = g.getService(RicohGattProfile.WLAN_CONTROL_SERVICE) != null
+            Log.d(TAG, "Services discovered: shooting=$hasShooting wlan=$hasWlan; all=" +
+                g.services.joinToString { it.uuid.toString() })
+            g.getService(RicohGattProfile.WLAN_CONTROL_SERVICE)?.let { svc ->
+                val nt = svc.getCharacteristic(RicohGattProfile.WLAN_NETWORK_TYPE)
+                Log.d(TAG, "WLAN Network Type char present=${nt != null} props=${nt?.properties}")
+            }
             _state.update {
                 it.copy(
                     connectionState = ConnectionState.CONNECTED,
@@ -204,6 +214,7 @@ class CameraBleManager(private val context: Context) : CameraController {
             status: Int,
         ) {
             val ok = status == BluetoothGatt.GATT_SUCCESS
+            Log.d(TAG, "onCharacteristicWrite ${characteristic.uuid} status=$status ok=$ok")
             when (characteristic.uuid) {
                 RicohGattProfile.OPERATION_REQUEST -> _state.update {
                     it.copy(
@@ -222,6 +233,7 @@ class CameraBleManager(private val context: Context) : CameraController {
             // Enable-AP goes through the op queue; advance it. (The shutter write is fired
             // directly, not queued, so it's a no-op for the queue when it completes.)
             if (characteristic.uuid == RicohGattProfile.WLAN_NETWORK_TYPE) {
+                cancelOpTimeout()
                 opInFlight = false
                 drainQueue(g)
             }
@@ -250,6 +262,7 @@ class CameraBleManager(private val context: Context) : CameraController {
                 }
             }
         }
+        cancelOpTimeout()
         opInFlight = false
         drainQueue(g)
     }
@@ -268,6 +281,33 @@ class CameraBleManager(private val context: Context) : CameraController {
             )
         }
     }
+
+    /**
+     * Arm a watchdog for the in-flight [op]: if its GATT callback never arrives (e.g. the camera
+     * silently ignores the write, or a pairing prompt is dismissed), unstick the queue and surface
+     * an error rather than hanging "Waking camera Wi-Fi…" forever.
+     */
+    private fun armOpTimeout(g: BluetoothGatt, op: GattOp) {
+        timeoutHandler.removeCallbacksAndMessages(null)
+        timeoutHandler.postDelayed({
+            if (!opInFlight) return@postDelayed
+            Log.w(TAG, "GATT op timed out with no callback: $op")
+            opInFlight = false
+            if (op is GattOp.Write && op.uuid == RicohGattProfile.WLAN_NETWORK_TYPE) {
+                _state.update {
+                    it.copy(
+                        wifiEnabling = false,
+                        error = "Camera didn't acknowledge Wi-Fi wake (BLE write timed out). " +
+                            "Try re-pairing the camera in Android Bluetooth settings.",
+                    )
+                }
+            }
+            drainQueue(g)
+        }, OP_TIMEOUT_MS)
+    }
+
+    /** Cancel the in-flight op watchdog (a callback arrived in time). */
+    private fun cancelOpTimeout() = timeoutHandler.removeCallbacksAndMessages(null)
 
     /**
      * Start the next queued GATT op if none is in flight. Android permits only one op at a time;
@@ -290,26 +330,56 @@ class CameraBleManager(private val context: Context) : CameraController {
                 continue
             }
             opInFlight = true
-            when (op) {
+            val dispatched = when (op) {
                 is GattOp.Read -> g.readCharacteristic(ch)
                 is GattOp.Write -> writeCharacteristicCompat(g, ch, op.value)
+            }
+            Log.d(TAG, "GATT op dispatched: $op accepted=$dispatched")
+            if (dispatched) armOpTimeout(g, op)
+            if (!dispatched) {
+                // Android refused to queue the op (returns false synchronously) — no callback
+                // will ever come, so unstick the queue and surface it instead of hanging.
+                opInFlight = false
+                if (op is GattOp.Write && uuid == RicohGattProfile.WLAN_NETWORK_TYPE) {
+                    _state.update {
+                        it.copy(wifiEnabling = false, error = "Wi-Fi wake write rejected by the OS")
+                    }
+                }
+                continue
             }
             return
         }
     }
 
-    /** Version-agnostic characteristic write (the API-33 signature vs. the deprecated one). */
+    /**
+     * Version-agnostic characteristic write (the API-33 signature vs. the deprecated one).
+     * Returns true if the OS accepted the write for dispatch (a callback will follow), false if
+     * it refused it synchronously (no callback will come).
+     *
+     * The write type is chosen from the characteristic's advertised properties: if it only
+     * supports Write-Without-Response, using WRITE_TYPE_DEFAULT (with response) would wait for an
+     * ack the peripheral never sends — the exact "Waking camera Wi-Fi…" hang. Prefer with-response
+     * when supported, else fall back to no-response.
+     */
     private fun writeCharacteristicCompat(
         g: BluetoothGatt,
         ch: BluetoothGattCharacteristic,
         value: ByteArray,
-    ) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            g.writeCharacteristic(ch, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+    ): Boolean {
+        val supportsWithResponse =
+            ch.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
+        val writeType = if (supportsWithResponse) {
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        } else {
+            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        }
+        Log.d(TAG, "write ${ch.uuid} type=$writeType props=${ch.properties}")
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            g.writeCharacteristic(ch, value, writeType) == BluetoothGatt.GATT_SUCCESS
         } else {
             @Suppress("DEPRECATION")
             run {
-                ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                ch.writeType = writeType
                 ch.value = value
                 g.writeCharacteristic(ch)
             }
@@ -394,11 +464,15 @@ class CameraBleManager(private val context: Context) : CameraController {
 
     override fun close() {
         stopScan()
+        cancelOpTimeout()
         gatt?.close()
         gatt = null
     }
 
     companion object {
         private const val TAG = "CameraBleManager"
+
+        /** Watchdog for a single GATT op that never gets its completion callback. */
+        private const val OP_TIMEOUT_MS = 8_000L
     }
 }
