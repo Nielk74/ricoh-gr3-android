@@ -78,14 +78,16 @@ as a plain PNG asset and there are large free, permissively-usable collections.
 
 Realistic film grain, `I_out = I + A(I)·G`, checked against the film-grain guideline:
 
-- **`G` — the grain field**: one **fine, single-scale** grain octave (a ~Gaussian noise field
-  lightly blurred for correlation, then **renormalised** — blurring otherwise collapses amplitude,
-  the old invisible-grain bug), shared across channels as luma grain, plus a **small per-channel
-  chroma** component (independent R and B octaves; G = −(R+B)/2) so R/G/B differ slightly (~mono,
-  not electronic). **No coarse "clumping" octave**: a multi-octave field produced ugly
-  low-frequency *blotches* in smooth regions (sky) that read as stains, not grain — the
-  `coarseAmount`/`smoothBoost` knobs still exist but default **off**. Real fine-grain film in a
-  clear sky is even and unobtrusive; that's the target.
+- **`G` — the grain field (shipped approach): a real grain PLATE, overlaid.** Synthesising grain
+  per pixel never looked right — additive noise washed out; a multi-octave "clumping" field made
+  ugly low-frequency *blotches* in smooth skies. The fix is what production tools do: composite a
+  fixed, tileable **film-grain plate** (`assets/grain/grain_35mm.png`, a 512² monochrome texture)
+  over the image, tiled to cover the frame (`DevelopPipeline.applyGrainTexture` +
+  `GrainTexture`). Because the plate *is* grain structure, it reads as film. It is **generated**
+  (`tools/generate_grain_plate.py`: wrap-around/toroidal-blurred noise → seamless tile) rather than
+  a third-party scan, so it is unambiguously license-clean to ship. A small per-channel offset
+  (from neighbouring plate taps) keeps it correlated-but-not-pure-mono without looking electronic.
+  The old synthesised path (`applyGrain`) remains as a fallback when no plate is supplied.
 - **`A(I)` — the strength**: a **midtone-peaked hump** (`grainDensity`) that falls off in both the
   deepest shadows *and* the brightest highlights (real silver-grain density), biasable toward the
   shadows by `shadowBias`. Measured: peak ~0.95 at luma 0.25–0.5, ~0.54 at black, ~0.04 near white.

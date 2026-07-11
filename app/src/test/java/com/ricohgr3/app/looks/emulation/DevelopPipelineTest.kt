@@ -76,6 +76,36 @@ class DevelopPipelineTest {
         assertTrue("coarse octave changes the grain", !run(0f).contentEquals(run(0.6f)))
     }
 
+    @Test fun grainTextureOverlayIsVisibleTonePeakedAndDeterministic() {
+        // Build a small non-flat grain plate (a checker-ish deviation) and overlay it.
+        val s = 16
+        val plate = FloatArray(s * s) { (if ((it / s + it % s) % 2 == 0) 0.6f else -0.6f) }
+        val tex = GrainTexture(s, plate)
+        val gp = GrainParams(amount = 0.3f, size = 1f, shadowBias = 0.4f, chroma = 0.2f, seed = 5)
+
+        fun run(level: Float): FloatArray {
+            val n = 32 * 32
+            val r = FloatArray(n) { level }; val g = FloatArray(n) { level }; val b = FloatArray(n) { level }
+            DevelopPipeline.applyGrainTexture(r, g, b, 32, 32, gp, tex)
+            return r
+        }
+        // Midtone grain must be stronger than near-white highlight grain (density is tone-peaked).
+        fun std(a: FloatArray): Float {
+            var m = 0f; for (v in a) m += v; m /= a.size
+            var s2 = 0f; for (v in a) s2 += (v - m) * (v - m); return kotlin.math.sqrt(s2 / a.size)
+        }
+        val mid = std(run(0.5f)); val hi = std(run(0.95f))
+        assertTrue("midtone grain visible ($mid)", mid > 0.01f)
+        assertTrue("highlight grain < midtone ($hi < $mid)", hi < mid)
+
+        // Deterministic (fixed plate + seed), and R differs from G (chroma variation).
+        assertTrue("deterministic", run(0.5f).contentEquals(run(0.5f)))
+        val n = 32 * 32
+        val r = FloatArray(n) { 0.5f }; val g = FloatArray(n) { 0.5f }; val b = FloatArray(n) { 0.5f }
+        DevelopPipeline.applyGrainTexture(r, g, b, 32, 32, gp, tex)
+        assertTrue("chroma makes R differ from G somewhere", r.indices.any { r[it] != g[it] })
+    }
+
     @Test fun grainSeedChangesOutput() {
         fun run(seed: Long): FloatArray {
             val r = FloatArray(64) { 0.5f }; val g = FloatArray(64) { 0.5f }; val b = FloatArray(64) { 0.5f }

@@ -24,6 +24,7 @@ sourceSets {
             "com/ricohgr3/app/tools/**",
             "com/ricohgr3/app/looks/emulation/DevelopPipeline.kt",
             "com/ricohgr3/app/looks/emulation/LutCube.kt",
+            "com/ricohgr3/app/looks/emulation/GrainTexture.kt",
             "com/ricohgr3/app/looks/emulation/FilmLook.kt",
             "com/ricohgr3/app/looks/emulation/FilmLutFactory.kt",
             "com/ricohgr3/app/looks/emulation/FilmLookCatalog.kt",
