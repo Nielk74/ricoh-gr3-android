@@ -30,9 +30,14 @@ The shutter writes `[1, AF]` to characteristic `559644B8-E0BC-4011-929B-5CF91998
 
 ## Roadmap (see FEASIBILITY.md §6)
 
-Next: BLE → read WLAN SSID/passphrase → wake Wi-Fi AP → HTTP `/v1/` (live view MJPEG,
-settings, photo browse/download). Wi-Fi work needs `WifiNetworkSpecifier` to route traffic
-to the camera AP (no internet on that network).
+BLE → read WLAN SSID/passphrase (works) → **user turns Wi-Fi on at the camera** → app joins
+the AP → HTTP `/v1/` (live view MJPEG, settings, photo browse/download). Wi-Fi join uses
+`WifiNetworkSpecifier` to route traffic to the camera AP (no internet on that network).
+
+**Note:** BLE auto-wake of Wi-Fi is NOT possible on shipping firmware — the camera rejects the
+WLAN `Network Type` write (`0x80`). Full hardware investigation + RE tooling in
+`research/BLE_WIFI_WAKE_INVESTIGATION.md` and `research/tools/`. Wi-Fi is enabled manually on
+the camera body for now.
 
 ## Testing note
 

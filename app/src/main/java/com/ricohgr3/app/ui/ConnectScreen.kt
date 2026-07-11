@@ -179,7 +179,7 @@ private fun ConnectSteps(ble: BleState, wifi: CameraWifiSession.State?, wifiSupp
         StepRow(1, "Pair over Bluetooth", bleStatus, detail = ble.deviceInfo?.model)
         StepRow(
             2,
-            if (wifiSupported) "Wake + join camera Wi-Fi" else "Camera Wi-Fi (needs Android 10+)",
+            if (wifiSupported) "Turn on camera Wi-Fi + join" else "Camera Wi-Fi (needs Android 10+)",
             if (wifiSupported) wifiStatus else StepStatus.PENDING,
             detail = wifi.detailText(),
         )
@@ -326,6 +326,12 @@ private fun WifiHandoffSection(
                 color = GrTheme.colors.inkSoft,
             )
             Spacer(Modifier.height(8.dp))
+            Text(
+                "Make sure Wi-Fi is turned on on the camera, then retry.",
+                style = MaterialTheme.typography.labelSmall,
+                color = GrTheme.colors.inkSoft,
+            )
+            Spacer(Modifier.height(8.dp))
             Button(
                 onClick = onRetryWifi,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -335,14 +341,38 @@ private fun WifiHandoffSection(
             }
         }
 
-        ble.wifiEnabling -> BusyRow("Waking camera Wi-Fi…")
-
-        else -> Button(
-            onClick = onStartWifiHandoff,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = GrTheme.colors.accent),
-        ) {
-            Text("Wake + join Wi-Fi", color = GrTheme.colors.paper)
+        // Ready to join: instruct the user to enable Wi-Fi on the camera, then join its AP.
+        // (The camera won't accept an over-BLE "wake Wi-Fi" command on shipping firmware —
+        // see research/BLE_WIFI_WAKE_INVESTIGATION.md — so activation is manual on the body.)
+        else -> {
+            Text(
+                "Turn Wi-Fi on from the camera",
+                style = MaterialTheme.typography.titleMedium,
+                color = GrTheme.colors.ink,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "On the GR III: press the Wireless button (or Playback → transfer) until the " +
+                    "Wi-Fi icon lights up. Then tap Join below.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = GrTheme.colors.inkSoft,
+            )
+            ble.wlanCredentials?.ssid?.takeIf { it.isNotBlank() }?.let { ssid ->
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Camera network: $ssid",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = GrTheme.colors.inkSoft,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = onStartWifiHandoff,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = GrTheme.colors.accent),
+            ) {
+                Text("Join camera Wi-Fi", color = GrTheme.colors.paper)
+            }
         }
     }
 }

@@ -29,12 +29,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _wifiJoinRequested = MutableStateFlow(false)
     val wifiJoinRequested: StateFlow<Boolean> = _wifiJoinRequested.asStateFlow()
 
+    /**
+     * True once the user has asked to join the camera Wi-Fi (tapped "Join camera Wi-Fi"). Gates the
+     * auto-join effect so we don't try to join before the user has turned Wi-Fi on at the camera.
+     */
+    private val _wifiJoinIntent = MutableStateFlow(false)
+    val wifiJoinIntent: StateFlow<Boolean> = _wifiJoinIntent.asStateFlow()
+
     fun startScan() = ble.startScan()
     fun stopScan() = ble.stopScan()
     fun connect(address: String) = ble.connect(address)
     fun disconnect() {
         wifiSession?.disconnect()
         _wifiJoinRequested.value = false
+        _wifiJoinIntent.value = false
         ble.disconnect()
     }
     fun fireShutter(af: Boolean = true) = ble.fireShutter(af)
@@ -46,17 +54,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Read the camera's Wi-Fi SSID/passphrase over BLE (lands in [state].wlanCredentials). */
     fun readWlanCredentials() = ble.readWlanCredentials()
 
-    /** Command the camera to wake its Wi-Fi AP over BLE. */
+    /**
+     * Best-effort BLE command to wake the camera's Wi-Fi AP. NOTE: on shipping GR III firmware
+     * (tested 1.92 and 2.10) the camera *rejects* this Network Type write with GATT app error
+     * 0x80 ("can't in this mode") — it is not the real trigger the official app uses. Kept for
+     * cameras/firmware that may honor it, but the flow no longer depends on it; the user enables
+     * Wi-Fi from the camera instead. See research/BLE_WIFI_WAKE_INVESTIGATION.md.
+     */
     fun enableWifiAp() = ble.enableWifiAp(enable = true)
 
     /**
-     * The full one-tap handoff: read credentials (if needed) and wake the AP. The connect flow
-     * then observes [state] for the credentials + [wifiSession] state and calls [joinWifi] once
-     * they're available.
+     * Prepare the Wi-Fi handoff: read the AP credentials (SSID/passphrase) over BLE — these reads
+     * DO work. We deliberately do NOT issue the enable-AP write here (see [enableWifiAp]); the user
+     * turns Wi-Fi on from the camera. Once credentials are read and the AP is up, the connect flow
+     * joins it via [joinWifi].
      */
     fun startWifiHandoff() {
         readWlanCredentials()
-        enableWifiAp()
+    }
+
+    /**
+     * User tapped "Join camera Wi-Fi" (after enabling Wi-Fi on the camera body). If we already
+     * have credentials, join now; otherwise read them — the connect flow's `LaunchedEffect` joins
+     * once they land. [resetWifiJoin] first so a prior failed/idle attempt can run again.
+     */
+    fun joinCameraWifi() {
+        resetWifiJoin()
+        _wifiJoinIntent.value = true
+        val creds = state.value.wlanCredentials
+        if (creds != null && creds.ssid.isNotBlank()) {
+            joinWifi(creds.ssid, creds.passphrase)
+        } else {
+            readWlanCredentials()
+        }
     }
 
     /**

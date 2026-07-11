@@ -55,6 +55,18 @@ class CameraBleManager(private val context: Context) : CameraController {
     private val timeoutHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     /**
+     * Append [msg] to the on-screen debug trace ([BleState.debug]) AND logcat. Lets us diagnose
+     * the handoff on-device without adb — the ConnectScreen shows the latest lines.
+     */
+    private fun trace(msg: String) {
+        Log.d(TAG, msg)
+        _state.update {
+            val prior = it.debug.orEmpty().lines().takeLast(5).joinToString("\n")
+            it.copy(debug = (if (prior.isBlank()) "" else "$prior\n") + msg)
+        }
+    }
+
+    /**
      * Serialized queue of GATT operations (Android allows exactly one in flight at a time).
      * Reads and writes MUST share one queue — issuing a write while a read is pending makes
      * Android silently drop the write (no callback), which strands the Wi-Fi handoff.
@@ -165,12 +177,9 @@ class CameraBleManager(private val context: Context) : CameraController {
             }
             val hasShooting = g.getService(RicohGattProfile.SHOOTING_SERVICE) != null
             val hasWlan = g.getService(RicohGattProfile.WLAN_CONTROL_SERVICE) != null
-            Log.d(TAG, "Services discovered: shooting=$hasShooting wlan=$hasWlan; all=" +
-                g.services.joinToString { it.uuid.toString() })
-            g.getService(RicohGattProfile.WLAN_CONTROL_SERVICE)?.let { svc ->
-                val nt = svc.getCharacteristic(RicohGattProfile.WLAN_NETWORK_TYPE)
-                Log.d(TAG, "WLAN Network Type char present=${nt != null} props=${nt?.properties}")
-            }
+            val ntProps = g.getService(RicohGattProfile.WLAN_CONTROL_SERVICE)
+                ?.getCharacteristic(RicohGattProfile.WLAN_NETWORK_TYPE)?.properties
+            trace("services: shooting=$hasShooting wlan=$hasWlan netTypeProps=$ntProps")
             _state.update {
                 it.copy(
                     connectionState = ConnectionState.CONNECTED,
@@ -218,7 +227,9 @@ class CameraBleManager(private val context: Context) : CameraController {
             status: Int,
         ) {
             val ok = status == BluetoothGatt.GATT_SUCCESS
-            Log.d(TAG, "onCharacteristicWrite ${characteristic.uuid} status=$status ok=$ok")
+            if (characteristic.uuid == RicohGattProfile.WLAN_NETWORK_TYPE) {
+                trace("write CALLBACK ${opLabel(characteristic.uuid)} status=$status ok=$ok")
+            }
             when (characteristic.uuid) {
                 RicohGattProfile.OPERATION_REQUEST -> _state.update {
                     it.copy(
@@ -291,25 +302,27 @@ class CameraBleManager(private val context: Context) : CameraController {
      * silently ignores the write, or a pairing prompt is dismissed), unstick the queue and surface
      * an error rather than hanging "Waking camera Wi-Fi…" forever.
      */
+    /** Short human label for a queued characteristic, for on-screen traces. */
+    private fun opLabel(uuid: java.util.UUID): String = when (uuid) {
+        RicohGattProfile.WLAN_NETWORK_TYPE -> "Wi-Fi wake write"
+        RicohGattProfile.WLAN_SSID -> "SSID read"
+        RicohGattProfile.WLAN_PASSPHRASE -> "passphrase read"
+        else -> "read $uuid"
+    }
+
     private fun armOpTimeout(g: BluetoothGatt, op: GattOp) {
         timeoutHandler.removeCallbacksAndMessages(null)
         timeoutHandler.postDelayed({
             if (!opInFlight) return@postDelayed
-            Log.w(TAG, "GATT op timed out with no callback: $op")
             opInFlight = false
             // Always surface *something* so we can never sit on a spinner with no feedback.
-            // Name the stuck op so an on-screen report is actionable without logcat.
-            val label = when (op.uuid) {
-                RicohGattProfile.WLAN_NETWORK_TYPE -> "Wi-Fi wake write"
-                RicohGattProfile.WLAN_SSID -> "SSID read"
-                RicohGattProfile.WLAN_PASSPHRASE -> "passphrase read"
-                else -> "BLE op ${op.uuid}"
-            }
+            trace("TIMEOUT ${opLabel(op.uuid)} — no callback in ${OP_TIMEOUT_MS / 1000}s")
             _state.update {
                 it.copy(
                     wifiEnabling = false,
-                    error = "Timed out on $label (no BLE callback in ${OP_TIMEOUT_MS / 1000}s). " +
-                        "Try re-pairing the camera in Android Bluetooth settings.",
+                    error = "Timed out on ${opLabel(op.uuid)} (no BLE callback in " +
+                        "${OP_TIMEOUT_MS / 1000}s). Try re-pairing the camera in Android " +
+                        "Bluetooth settings.",
                 )
             }
             drainQueue(g)
@@ -344,7 +357,7 @@ class CameraBleManager(private val context: Context) : CameraController {
                 is GattOp.Read -> g.readCharacteristic(ch)
                 is GattOp.Write -> writeCharacteristicCompat(g, ch, op.value)
             }
-            Log.d(TAG, "GATT op dispatched: $op accepted=$dispatched")
+            trace("dispatch ${opLabel(op.uuid)} accepted=$dispatched")
             if (dispatched) armOpTimeout(g, op)
             if (!dispatched) {
                 // Android refused to queue the op (returns false synchronously) — no callback
@@ -439,11 +452,13 @@ class CameraBleManager(private val context: Context) : CameraController {
      * results land in [BleState.wlanCredentials] via [handleWlanRead].
      */
     override fun readWlanCredentials() {
-        val g = gatt ?: return
+        val g = gatt ?: run { trace("readCreds: no gatt"); return }
         if (g.getService(RicohGattProfile.WLAN_CONTROL_SERVICE) == null) {
+            trace("readCreds: WLAN service MISSING")
             _state.update { it.copy(error = "WLAN Control service not found") }
             return
         }
+        trace("readCreds: queue SSID+passphrase")
         opQueue.add(GattOp.Read(RicohGattProfile.WLAN_SSID))
         opQueue.add(GattOp.Read(RicohGattProfile.WLAN_PASSPHRASE))
         // drainQueue is a no-op if an op is already in flight; that op's completion
@@ -457,9 +472,14 @@ class CameraBleManager(private val context: Context) : CameraController {
      * [BleState.wifiEnabled] from [onCharacteristicWrite].
      */
     override fun enableWifiAp(enable: Boolean) {
-        val g = gatt ?: return
-        if (g.getService(RicohGattProfile.WLAN_CONTROL_SERVICE) == null) {
-            _state.update { it.copy(error = "WLAN Control service not found") }
+        val g = gatt ?: run { trace("enableWifiAp: no gatt"); return }
+        val ch = g.getService(RicohGattProfile.WLAN_CONTROL_SERVICE)
+            ?.getCharacteristic(RicohGattProfile.WLAN_NETWORK_TYPE)
+        if (ch == null) {
+            trace("enableWifiAp: NetworkType char MISSING")
+            _state.update {
+                it.copy(wifiEnabling = false, error = "WLAN Network Type characteristic not found")
+            }
             return
         }
         pendingWifiEnable = enable
@@ -467,9 +487,9 @@ class CameraBleManager(private val context: Context) : CameraController {
         // Queue the write behind any in-flight/pending reads (e.g. the credential reads from
         // startWifiHandoff). Firing it directly while a read is pending makes Android drop it
         // silently — no onCharacteristicWrite callback — stranding wifiEnabling forever.
+        trace("enableWifiAp=$enable: queue write (props=${ch.properties})")
         opQueue.add(GattOp.Write(RicohGattProfile.WLAN_NETWORK_TYPE, RicohGattProfile.networkTypePayload(enable)))
         drainQueue(g)
-        Log.d(TAG, "Wi-Fi AP enable=$enable queued")
     }
 
     override fun close() {
