@@ -5,261 +5,108 @@ import com.ricohgr3.app.looks.emulation.FilmLutFactory.Model
 import com.ricohgr3.app.looks.emulation.FilmLutFactory.crossTalk
 
 /**
- * The curated film-stock emulation set and their LUTs. Every entry is named after a real
- * photographic stock — this is a deliberately tight, hand-tuned catalog (a good ~11 beats 300
- * auto-generated stocks), chosen to span what a GR III shooter actually reaches for: warm
- * colour negatives, a punchy slide, two tungsten cine stocks with halation, and two classic
- * B&W films.
+ * The film-simulation set and their LUTs. These are the **Fujifilm film simulations** rendered
+ * from real `.cube` 3D LUTs bundled under `assets/luts/` (from `abpy/FujifilmCameraProfiles`),
+ * which give a genuine, high-quality colour response the earlier procedural LUTs couldn't match.
  *
- * Each look pairs a film-density [Model] (baked to a [LutCube] by [FilmLutFactory]) with the
- * parametric spatial layers (split-tone, halation, grain) that make it read as film. The grades
- * are intentionally **strong and clearly film** — the previous set was too subtle.
+ * Each entry points at its `.cube` via [FilmLook.lutAsset] (the loader prefers the asset and only
+ * falls back to the procedural [Model] if the asset is missing/unparseable). The Fuji LUTs were
+ * authored for a linear-ish camera-profile input and bake their own tone curve, so they set
+ * [FilmLook.lutInputGamma] ≈ 1.6 — the pipeline pre-warps the sRGB input by that exponent so
+ * mid-grey lands correctly (feeding raw sRGB washes mids; full linearisation crushes them).
  *
- * When licensed film-stock `.cube` assets are added, set [FilmLook.lutAsset] and the loader
- * prefers the asset over the procedural model.
- *
- * Pure Kotlin (models + params only); asset loading lives in the Android-side loader.
+ * The spatial layers (grain, and halation where a stock warrants it) are layered around the LUT
+ * as before. Pure Kotlin (params only); asset loading lives in the Android-side loader.
  */
 object FilmLookCatalog {
 
-    /** A look plus the colour model used to synthesise its LUT when no asset is provided. */
+    /** A look plus the colour model used to synthesise its LUT **only if the asset is missing**. */
     data class Entry(val look: FilmLook, val model: Model)
 
+    /** Gamma the Fuji `.cube` LUTs expect on their (sRGB) input — see class kdoc. */
+    private const val FUJI_INPUT_GAMMA = 1.6f
+
+    /** Neutral fallback model (used only if a `.cube` asset fails to load). */
+    private val fallbackColour = Model(
+        r = Channel(contrast = 0.35f, shoulder = 0.6f),
+        g = Channel(contrast = 0.35f, shoulder = 0.6f),
+        b = Channel(contrast = 0.35f, shoulder = 0.6f),
+        crossTalk = crossTalk(0.02f),
+        saturation = 1.0f,
+    )
+    private val fallbackMono = Model(
+        r = Channel(contrast = 0.45f, shoulder = 0.55f),
+        g = Channel(contrast = 0.45f, shoulder = 0.55f),
+        b = Channel(contrast = 0.45f, shoulder = 0.55f),
+        saturation = 0f,
+    )
+
+    /** Build a Fuji-sim entry: asset-backed LUT + linear-input gamma + per-sim grain/swatch. */
+    private fun fuji(
+        id: String, name: String,
+        swatchTop: Long, swatchBottom: Long,
+        grain: GrainParams,
+        halation: HalationParams = HalationParams.NONE,
+        splitTone: SplitTone = SplitTone.NONE,
+        model: Model = fallbackColour,
+    ) = Entry(
+        FilmLook(
+            id = id, displayName = name, lutAsset = "luts/$id.cube",
+            splitTone = splitTone, halation = halation, grain = grain,
+            swatchTop = swatchTop, swatchBottom = swatchBottom,
+            lutInputGamma = FUJI_INPUT_GAMMA,
+        ),
+        model,
+    )
+
     val entries: List<Entry> = listOf(
-        // ── Kodak Portra 400 ─────────────────────────────────────────────────────────────
-        // The reference pro colour negative: warm, restrained saturation, luminous skin,
-        // creamy highlight roll-off, gently warm highlights over cool-neutral shadows.
-        Entry(
-            FilmLook(
-                id = "portra400", displayName = "Portra 400", lutAsset = null,
-                swatchTop = 0xFFF3D9B8, swatchBottom = 0xFFB98A63,
-                splitTone = SplitTone(
-                    shadowR = 0f, shadowG = 0.01f, shadowB = 0.03f,
-                    highR = 0.05f, highG = 0.03f, highB = 0f, amount = 0.45f,
-                ),
-                grain = GrainParams(amount = 0.045f, size = 2f, shadowBias = 0.6f, seed = 400),
-            ),
-            Model(
-                r = Channel(contrast = 0.34f, toe = 0.04f, shoulder = 0.7f, gain = 1.06f),
-                g = Channel(contrast = 0.36f, toe = 0.02f, shoulder = 0.65f, gain = 1.0f),
-                b = Channel(contrast = 0.4f, toe = -0.02f, shoulder = 0.55f, gain = 0.94f),
-                crossTalk = crossTalk(0.03f, warm = 0.015f),
-                saturation = 0.92f,
-            ),
-        ),
-        // ── Kodak Portra 800 ─────────────────────────────────────────────────────────────
-        // Faster Portra: warmer and a touch more contrast/saturation, denser shadows, more
-        // grain. The low-light wedding stock.
-        Entry(
-            FilmLook(
-                id = "portra800", displayName = "Portra 800", lutAsset = null,
-                swatchTop = 0xFFEFC79E, swatchBottom = 0xFF9E6A45,
-                splitTone = SplitTone(
-                    shadowR = 0.01f, shadowG = 0.01f, shadowB = 0.02f,
-                    highR = 0.06f, highG = 0.035f, highB = 0f, amount = 0.5f,
-                ),
-                grain = GrainParams(amount = 0.07f, size = 2.2f, shadowBias = 0.6f, seed = 800),
-            ),
-            Model(
-                r = Channel(contrast = 0.4f, toe = 0.02f, shoulder = 0.65f, gain = 1.08f),
-                g = Channel(contrast = 0.42f, toe = 0f, shoulder = 0.6f, gain = 1.0f),
-                b = Channel(contrast = 0.46f, toe = -0.04f, shoulder = 0.5f, gain = 0.9f),
-                crossTalk = crossTalk(0.035f, warm = 0.02f),
-                saturation = 0.98f,
-            ),
-        ),
-        // ── Kodak Gold 200 ───────────────────────────────────────────────────────────────
-        // Consumer gold: warm, sunny, nostalgic. Yellow-forward highlights, punchy but not
-        // vivid, slightly lifted warm shadows.
-        Entry(
-            FilmLook(
-                id = "gold200", displayName = "Gold 200", lutAsset = null,
-                swatchTop = 0xFFF6C86A, swatchBottom = 0xFFB4762A,
-                splitTone = SplitTone(
-                    shadowR = 0.03f, shadowG = 0.02f, shadowB = 0f,
-                    highR = 0.07f, highG = 0.05f, highB = 0f, amount = 0.6f,
-                ),
-                grain = GrainParams(amount = 0.05f, size = 2f, shadowBias = 0.5f, seed = 200),
-            ),
-            Model(
-                r = Channel(contrast = 0.44f, toe = 0.06f, shoulder = 0.55f, gain = 1.1f),
-                g = Channel(contrast = 0.44f, toe = 0.03f, shoulder = 0.5f, gain = 1.0f),
-                b = Channel(contrast = 0.5f, toe = 0f, shoulder = 0.45f, gain = 0.85f),
-                crossTalk = crossTalk(0.04f, warm = 0.03f),
-                saturation = 1.06f,
-            ),
-        ),
-        // ── Kodak Ektar 100 ──────────────────────────────────────────────────────────────
-        // The most saturated colour negative: vivid, high-contrast, clean, near-slide punch
-        // but with negative latitude. Cool-clean whites, deep reds.
-        Entry(
-            FilmLook(
-                id = "ektar100", displayName = "Ektar 100", lutAsset = null,
-                swatchTop = 0xFFE86A4A, swatchBottom = 0xFF2E6AB0,
-                grain = GrainParams(amount = 0.025f, size = 1.5f, shadowBias = 0.6f, seed = 100),
-            ),
-            Model(
-                // Stronger shoulder so the vivid grade rolls highlights off instead of clipping.
-                r = Channel(contrast = 0.46f, toe = -0.03f, shoulder = 0.85f, gain = 1.03f),
-                g = Channel(contrast = 0.46f, toe = -0.03f, shoulder = 0.85f, gain = 1.0f),
-                b = Channel(contrast = 0.48f, toe = -0.04f, shoulder = 0.85f, gain = 0.99f),
-                crossTalk = crossTalk(0.02f),
-                saturation = 1.2f,
-            ),
-        ),
-        // ── Fujifilm Superia 400 ─────────────────────────────────────────────────────────
-        // Classic Fuji consumer neg: green-leaning, cool, punchy, that recognisable Fuji
-        // shift in foliage and skies.
-        Entry(
-            FilmLook(
-                id = "superia400", displayName = "Superia 400", lutAsset = null,
-                swatchTop = 0xFF6FB48A, swatchBottom = 0xFF3E6E9C,
-                splitTone = SplitTone(
-                    shadowR = 0f, shadowG = 0.02f, shadowB = 0.03f,
-                    highR = 0f, highG = 0.03f, highB = 0.01f, amount = 0.5f,
-                ),
-                grain = GrainParams(amount = 0.055f, size = 2f, shadowBias = 0.55f, seed = 401),
-            ),
-            Model(
-                r = Channel(contrast = 0.46f, toe = 0f, shoulder = 0.55f, gain = 0.97f),
-                g = Channel(contrast = 0.46f, toe = 0.01f, shoulder = 0.55f, gain = 1.05f),
-                b = Channel(contrast = 0.48f, toe = 0f, shoulder = 0.5f, gain = 0.99f),
-                // Leak green into red/blue → the Fuji "third colour layer" foliage/sky shift.
-                crossTalk = floatArrayOf(
-                    0.95f, 0.06f, -0.01f,
-                    0.02f, 0.96f, 0.02f,
-                    0f, 0.06f, 0.94f,
-                ),
-                saturation = 1.12f,
-            ),
-        ),
-        // ── Fujifilm Pro 400H ────────────────────────────────────────────────────────────
-        // Discontinued fashion favourite: soft, airy, minty-cool with pastel highlights and
-        // gentle contrast. The bright-and-clean wedding look.
-        Entry(
-            FilmLook(
-                id = "pro400h", displayName = "Pro 400H", lutAsset = null,
-                swatchTop = 0xFFD9E6D2, swatchBottom = 0xFF8FB0A6,
-                splitTone = SplitTone(
-                    shadowR = 0f, shadowG = 0.02f, shadowB = 0.03f,
-                    highR = 0.01f, highG = 0.04f, highB = 0.02f, amount = 0.55f,
-                ),
-                grain = GrainParams(amount = 0.04f, size = 2f, shadowBias = 0.5f, seed = 402),
-            ),
-            Model(
-                r = Channel(contrast = 0.3f, toe = 0.05f, shoulder = 0.75f, gain = 0.99f),
-                g = Channel(contrast = 0.3f, toe = 0.05f, shoulder = 0.72f, gain = 1.03f),
-                b = Channel(contrast = 0.32f, toe = 0.04f, shoulder = 0.7f, gain = 1.0f),
-                crossTalk = crossTalk(0.03f),
-                saturation = 0.9f,
-            ),
-        ),
-        // ── CineStill 800T ───────────────────────────────────────────────────────────────
-        // Tungsten-balanced cine stock shot daylight: strong cyan/teal cast, and the signature
-        // red halation glowing off every highlight (its anti-halation layer is removed).
-        Entry(
-            FilmLook(
-                id = "cinestill800t", displayName = "CineStill 800T", lutAsset = null,
-                swatchTop = 0xFF3E8ECF, swatchBottom = 0xFFD84A3A,
-                splitTone = SplitTone(
-                    shadowR = 0f, shadowG = 0.02f, shadowB = 0.07f,
-                    highR = 0.02f, highG = 0.02f, highB = 0.01f, amount = 0.6f,
-                ),
-                halation = HalationParams(
-                    threshold = 0.68f, radius = 9, strength = 0.6f,
-                    tintR = 1f, tintG = 0.3f, tintB = 0.1f,
-                ),
-                grain = GrainParams(amount = 0.07f, size = 2.5f, shadowBias = 0.5f, seed = 800),
-            ),
-            Model(
-                r = Channel(contrast = 0.44f, toe = 0f, shoulder = 0.55f, gain = 0.9f),
-                g = Channel(contrast = 0.44f, toe = 0.02f, shoulder = 0.55f, gain = 1.0f),
-                b = Channel(contrast = 0.46f, toe = 0.05f, shoulder = 0.6f, gain = 1.12f),
-                crossTalk = crossTalk(0.03f),
-                saturation = 1.02f,
-            ),
-        ),
-        // ── CineStill 400D ───────────────────────────────────────────────────────────────
-        // Daylight cine stock: cleaner and warmer than 800T, holds skin well, softer halation.
-        // A modern, filmic "daylight" look.
-        Entry(
-            FilmLook(
-                id = "cinestill400d", displayName = "CineStill 400D", lutAsset = null,
-                swatchTop = 0xFFF0C79A, swatchBottom = 0xFF6C97B4,
-                splitTone = SplitTone(
-                    shadowR = 0.01f, shadowG = 0.01f, shadowB = 0.03f,
-                    highR = 0.04f, highG = 0.03f, highB = 0f, amount = 0.5f,
-                ),
-                halation = HalationParams(
-                    threshold = 0.75f, radius = 7, strength = 0.4f,
-                    tintR = 1f, tintG = 0.35f, tintB = 0.14f,
-                ),
-                grain = GrainParams(amount = 0.045f, size = 2f, shadowBias = 0.55f, seed = 401),
-            ),
-            Model(
-                r = Channel(contrast = 0.4f, toe = 0.02f, shoulder = 0.6f, gain = 1.03f),
-                g = Channel(contrast = 0.4f, toe = 0.02f, shoulder = 0.6f, gain = 1.0f),
-                b = Channel(contrast = 0.42f, toe = 0f, shoulder = 0.55f, gain = 0.95f),
-                crossTalk = crossTalk(0.03f, warm = 0.01f),
-                saturation = 1.05f,
-            ),
-        ),
-        // ── Kodak Vision3 500T ───────────────────────────────────────────────────────────
-        // The motion-picture negative behind the modern cinema look: wide latitude, gentle
-        // toe, cool tungsten shadows, warm highlights — the "teal & orange" base.
-        Entry(
-            FilmLook(
-                id = "vision3_500t", displayName = "Vision3 500T", lutAsset = null,
-                swatchTop = 0xFF4E8CC0, swatchBottom = 0xFFD98A4A,
-                splitTone = SplitTone(
-                    shadowR = 0f, shadowG = 0.02f, shadowB = 0.06f,
-                    highR = 0.06f, highG = 0.03f, highB = 0f, amount = 0.6f,
-                ),
-                halation = HalationParams(
-                    threshold = 0.78f, radius = 6, strength = 0.3f,
-                    tintR = 1f, tintG = 0.4f, tintB = 0.18f,
-                ),
-                grain = GrainParams(amount = 0.05f, size = 2.2f, shadowBias = 0.55f, seed = 500),
-            ),
-            Model(
-                r = Channel(contrast = 0.36f, toe = 0.05f, shoulder = 0.75f, gain = 0.94f),
-                g = Channel(contrast = 0.36f, toe = 0.04f, shoulder = 0.72f, gain = 1.0f),
-                b = Channel(contrast = 0.38f, toe = 0.06f, shoulder = 0.7f, gain = 1.08f),
-                crossTalk = crossTalk(0.04f, warm = 0.01f),
-                saturation = 1.0f,
-            ),
-        ),
-        // ── Kodak Tri-X 400 ──────────────────────────────────────────────────────────────
-        // The definitive B&W reportage stock: gritty, contrasty, deep blacks, pronounced grain.
-        Entry(
-            FilmLook(
-                id = "trix400", displayName = "Tri-X 400", lutAsset = null,
-                swatchTop = 0xFFF2F2F2, swatchBottom = 0xFF141414,
-                grain = GrainParams(amount = 0.09f, size = 2.5f, shadowBias = 0.55f, seed = 320),
-            ),
-            Model(
-                r = Channel(contrast = 0.55f, toe = -0.05f, shoulder = 0.5f),
-                g = Channel(contrast = 0.55f, toe = -0.05f, shoulder = 0.5f),
-                b = Channel(contrast = 0.55f, toe = -0.05f, shoulder = 0.5f),
-                saturation = 0f,
-            ),
-        ),
-        // ── Ilford HP5 Plus 400 ──────────────────────────────────────────────────────────
-        // The gentler classic B&W: softer contrast than Tri-X, longer grey scale, forgiving
-        // highlights, still that organic grain.
-        Entry(
-            FilmLook(
-                id = "hp5", displayName = "HP5 Plus", lutAsset = null,
-                swatchTop = 0xFFE4E2DE, swatchBottom = 0xFF3A3A3A,
-                grain = GrainParams(amount = 0.075f, size = 2.4f, shadowBias = 0.5f, seed = 405),
-            ),
-            Model(
-                r = Channel(contrast = 0.4f, toe = 0.04f, shoulder = 0.7f),
-                g = Channel(contrast = 0.4f, toe = 0.04f, shoulder = 0.7f),
-                b = Channel(contrast = 0.4f, toe = 0.04f, shoulder = 0.7f),
-                saturation = 0f,
-            ),
-        ),
+        // Provia — the standard: neutral, balanced, faithful colour. Fine grain.
+        fuji("provia", "Provia",
+            swatchTop = 0xFFC9D2DA, swatchBottom = 0xFF6E7A86,
+            grain = GrainParams(amount = 0.035f, size = 1.8f, shadowBias = 0.6f, seed = 10)),
+        // Velvia — vivid, high-saturation, punchy landscape slide.
+        fuji("velvia", "Velvia",
+            swatchTop = 0xFFE0483A, swatchBottom = 0xFF1F6E4A,
+            grain = GrainParams(amount = 0.03f, size = 1.6f, shadowBias = 0.65f, seed = 11)),
+        // Astia — soft, gentle contrast, flattering skin.
+        fuji("astia", "Astia",
+            swatchTop = 0xFFE9CDBE, swatchBottom = 0xFF9E8478,
+            grain = GrainParams(amount = 0.035f, size = 1.8f, shadowBias = 0.55f, seed = 12)),
+        // Classic Chrome — muted, documentary, slightly desaturated with deep tones.
+        fuji("classic_chrome", "Classic Chrome",
+            swatchTop = 0xFFB7B0A2, swatchBottom = 0xFF56514A,
+            grain = GrainParams(amount = 0.045f, size = 2f, shadowBias = 0.55f, seed = 13)),
+        // Classic Neg — colour-negative character: crunchy, teal-shadowed, amber highlights.
+        fuji("classic_neg", "Classic Neg",
+            swatchTop = 0xFFD9A15A, swatchBottom = 0xFF3E5E5A,
+            grain = GrainParams(amount = 0.05f, size = 2f, shadowBias = 0.5f, seed = 14)),
+        // Nostalgic Neg — warm, amber, faded-album highlights with rich shadows.
+        fuji("nostalgic_neg", "Nostalgic Neg",
+            swatchTop = 0xFFD9B37A, swatchBottom = 0xFF6E5238,
+            grain = GrainParams(amount = 0.045f, size = 2f, shadowBias = 0.5f, seed = 15)),
+        // Pro Neg Hi — portrait negative, a touch more contrast.
+        fuji("pro_neg_hi", "Pro Neg Hi",
+            swatchTop = 0xFFDDC3B0, swatchBottom = 0xFF7A6656,
+            grain = GrainParams(amount = 0.04f, size = 1.9f, shadowBias = 0.55f, seed = 16)),
+        // Pro Neg Std — soft, low-contrast studio portrait negative.
+        fuji("pro_neg_std", "Pro Neg Std",
+            swatchTop = 0xFFE2D0C2, swatchBottom = 0xFF8C7A6C,
+            grain = GrainParams(amount = 0.035f, size = 1.9f, shadowBias = 0.5f, seed = 17)),
+        // Eterna — cinema stock: low saturation, gentle contrast, filmic. Soft halation.
+        fuji("eterna", "Eterna",
+            swatchTop = 0xFFB9BCB4, swatchBottom = 0xFF5E635E,
+            grain = GrainParams(amount = 0.045f, size = 2.1f, shadowBias = 0.55f, seed = 18),
+            halation = HalationParams(threshold = 0.8f, radius = 6, strength = 0.25f,
+                tintR = 1f, tintG = 0.45f, tintB = 0.2f)),
+        // Reala Ace — faithful colour with soft tonality; a modern balanced neg.
+        fuji("reala_ace", "Reala Ace",
+            swatchTop = 0xFFCFC9BE, swatchBottom = 0xFF6E6A60,
+            grain = GrainParams(amount = 0.035f, size = 1.8f, shadowBias = 0.55f, seed = 19)),
+        // Bleach Bypass — desaturated, high-contrast, silvery.
+        fuji("bleach_bypass", "Bleach Bypass",
+            swatchTop = 0xFFCDCFC9, swatchBottom = 0xFF3A3E3E,
+            grain = GrainParams(amount = 0.055f, size = 2.1f, shadowBias = 0.5f, seed = 20),
+            model = fallbackMono),
     )
 
     /** Look ids in catalog order. */

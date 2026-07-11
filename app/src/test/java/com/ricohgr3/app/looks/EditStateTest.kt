@@ -17,32 +17,32 @@ class EditStateTest {
 
     @Test
     fun applyMarksFrameEditedAndRecordsLook() {
-        val state = EditState().apply("a", "portra400")
+        val state = EditState().apply("a", "provia")
         assertTrue(state.isEdited("a"))
-        assertEquals("portra400", state.lookFor("a"))
+        assertEquals("provia", state.lookFor("a"))
         assertFalse(state.isEdited("b"))
     }
 
     @Test
     fun applyIsImmutable() {
         val original = EditState()
-        original.apply("a", "ektar100")
+        original.apply("a", "velvia")
         assertFalse("original must be unchanged", original.isEdited("a"))
     }
 
     @Test
     fun applyOverwritesExistingLook() {
         val state = EditState()
-            .apply("a", "ektar100")
-            .apply("a", "trix400")
-        assertEquals("trix400", state.lookFor("a"))
+            .apply("a", "velvia")
+            .apply("a", "bleach_bypass")
+        assertEquals("bleach_bypass", state.lookFor("a"))
         assertEquals(1, state.applied.size)
     }
 
     @Test
     fun applyStandardResetsFrame() {
         val state = EditState()
-            .apply("a", "ektar100")
+            .apply("a", "velvia")
             .apply("a", null)
         assertFalse(state.isEdited("a"))
         assertNull(state.lookFor("a"))
@@ -52,17 +52,17 @@ class EditStateTest {
     @Test
     fun applyAllMarksEveryFrame() {
         val ids = listOf("a", "b", "c")
-        val state = EditState().applyAll(ids, "gold200")
+        val state = EditState().applyAll(ids, "nostalgic_neg")
         for (id in ids) {
             assertTrue(state.isEdited(id))
-            assertEquals("gold200", state.lookFor(id))
+            assertEquals("nostalgic_neg", state.lookFor(id))
         }
     }
 
     @Test
     fun applyAllWithStandardResetsAllTargets() {
         val state = EditState()
-            .applyAll(listOf("a", "b", "c"), "ektar100")
+            .applyAll(listOf("a", "b", "c"), "velvia")
             .applyAll(listOf("a", "b"), null)
         assertFalse(state.isEdited("a"))
         assertFalse(state.isEdited("b"))
@@ -72,14 +72,14 @@ class EditStateTest {
     @Test
     fun resetClearsMark() {
         val state = EditState()
-            .apply("a", "trix400")
+            .apply("a", "bleach_bypass")
             .reset("a")
         assertFalse(state.isEdited("a"))
     }
 
     @Test
     fun resetUnknownIdIsNoOp() {
-        val state = EditState().apply("a", "ektar100")
+        val state = EditState().apply("a", "velvia")
         val after = state.reset("missing")
         assertEquals(state, after)
     }

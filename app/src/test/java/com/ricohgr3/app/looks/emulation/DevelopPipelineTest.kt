@@ -89,11 +89,21 @@ class DevelopPipelineTest {
     }
 
     @Test fun fullLookProducesDifferentiatedOutput() {
-        // The Tri-X look (mono) must desaturate a colourful input.
-        val entry = FilmLookCatalog.entryFor("trix400")!!
-        val lut = FilmLutFactory.build(entry.model)
+        // A mono model must desaturate a colourful input through the full pipeline.
+        val look = FilmLook(id = "mono", displayName = "Mono", lutAsset = null)
+        val lut = FilmLutFactory.build(FilmLutFactory.Model(saturation = 0f))
         val r = floatArrayOf(0.8f); val g = floatArrayOf(0.2f); val b = floatArrayOf(0.2f)
-        DevelopPipeline.apply(r, g, b, 1, 1, entry.look, lut)
+        DevelopPipeline.apply(r, g, b, 1, 1, look, lut)
         assertEquals("mono look neutralises colour", r[0], g[0], 0.05f)
+    }
+
+    @Test fun lutInputGammaPreWarpsBeforeSampling() {
+        // With lutInputGamma != 1, the input is raised to that power before the LUT is sampled.
+        // Use an identity LUT so the output equals the pre-warped input: x^2 for gamma 2.
+        val look = FilmLook(id = "g", displayName = "G", lutAsset = null, lutInputGamma = 2f)
+        val lut = LutCube.identity(33)
+        val r = floatArrayOf(0.5f); val g = floatArrayOf(0.5f); val b = floatArrayOf(0.5f)
+        DevelopPipeline.apply(r, g, b, 1, 1, look, lut)
+        assertEquals("0.5^2 = 0.25 after pre-warp through identity LUT", 0.25f, r[0], 0.02f)
     }
 }
