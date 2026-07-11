@@ -61,7 +61,11 @@ class CameraBleManager(private val context: Context) : CameraController {
      */
     private val opQueue = ArrayDeque<GattOp>()
 
-    /** True while an op is in flight; guards against kicking the queue re-entrantly. */
+    /**
+     * True while an op is in flight; guards against kicking the queue re-entrantly. Volatile
+     * because it's written on GATT binder threads and read by the main-thread timeout runnable.
+     */
+    @Volatile
     private var opInFlight = false
 
     /** The [RicohGattProfile.NetworkType] value of the in-flight enable-AP write. */
@@ -293,14 +297,20 @@ class CameraBleManager(private val context: Context) : CameraController {
             if (!opInFlight) return@postDelayed
             Log.w(TAG, "GATT op timed out with no callback: $op")
             opInFlight = false
-            if (op is GattOp.Write && op.uuid == RicohGattProfile.WLAN_NETWORK_TYPE) {
-                _state.update {
-                    it.copy(
-                        wifiEnabling = false,
-                        error = "Camera didn't acknowledge Wi-Fi wake (BLE write timed out). " +
-                            "Try re-pairing the camera in Android Bluetooth settings.",
-                    )
-                }
+            // Always surface *something* so we can never sit on a spinner with no feedback.
+            // Name the stuck op so an on-screen report is actionable without logcat.
+            val label = when (op.uuid) {
+                RicohGattProfile.WLAN_NETWORK_TYPE -> "Wi-Fi wake write"
+                RicohGattProfile.WLAN_SSID -> "SSID read"
+                RicohGattProfile.WLAN_PASSPHRASE -> "passphrase read"
+                else -> "BLE op ${op.uuid}"
+            }
+            _state.update {
+                it.copy(
+                    wifiEnabling = false,
+                    error = "Timed out on $label (no BLE callback in ${OP_TIMEOUT_MS / 1000}s). " +
+                        "Try re-pairing the camera in Android Bluetooth settings.",
+                )
             }
             drainQueue(g)
         }, OP_TIMEOUT_MS)
