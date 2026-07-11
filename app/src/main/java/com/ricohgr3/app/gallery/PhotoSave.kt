@@ -53,8 +53,17 @@ suspend fun saveOriginal(
  * When the look maps to a client-side film emulation ([CameraLookMapping]) and a [loader] is
  * provided, the frame is genuinely **developed** through the film engine ([DevelopEngine]:
  * LUT + split-tone + halation + grain). Otherwise it falls back to the honest indicative
- * gradient tint that mirrors [PhotoStage]'s on-screen overlay. RAW/DNG originals can't be
- * decoded into a Bitmap, so they fall back to saving the original.
+ * gradient tint that mirrors [PhotoStage]'s on-screen overlay.
+ *
+ * **DNG (RAW) originals** are decoded via the platform DNG decoder ([decodeBounded]) and
+ * developed with a RAW-tuned variant of the pipeline (RAW previews come out flatter/lower
+ * contrast than the camera JPEG, so a mild base grade is applied first — see [developForSave]).
+ * The result is **always saved as JPEG**, because a developed rendition is a finished image, not
+ * raw sensor data — keeping a `.dng` extension on baked pixels would be misleading and most
+ * viewers wouldn't show it. The untouched original DNG is left on the camera.
+ *
+ * If a DNG cannot be decoded on this device (some sensors/firmware produce DNGs the platform
+ * decoder rejects), the original is saved untouched rather than failing the whole action.
  */
 suspend fun saveEdited(
     id: PhotoId,
@@ -63,10 +72,11 @@ suspend fun saveEdited(
     exporter: PhotoExporter,
     loader: FilmLookLoader? = null,
 ): SaveOutcome {
-    // Nothing to bake for Standard, or for RAW that we can't decode into a Bitmap.
-    if (look == CameraLook.STANDARD || id.file.substringAfterLast('.', "").equals("DNG", true)) {
+    // Standard is the as-shot baseline — nothing to bake; keep the pristine original.
+    if (look == CameraLook.STANDARD) {
         return saveOriginal(id, repository, exporter)
     }
+    val isRaw = id.file.substringAfterLast('.', "").equals("DNG", true)
     val bytes = fetchFull(id, repository)
 
     // The develop runs on the CPU and allocates several full-resolution float buffers per
@@ -74,26 +84,46 @@ suspend fun saveEdited(
     // a bounded working resolution, and do all pixel work off the main thread.
     val edited = withContext(Dispatchers.Default) {
         val decoded = decodeBounded(bytes, MAX_EDIT_PIXELS)
-            ?: throw java.io.IOException("Could not decode ${id.file} for editing")
+        if (decoded == null) {
+            // Undecodable DNG on this device → fall back to keeping the raw original rather than
+            // crashing the action. A truly corrupt JPEG is a real error the caller should show.
+            if (isRaw) return@withContext null
+            throw java.io.IOException("Could not decode ${id.file} for editing")
+        }
 
         // Prefer a real film develop; fall back to the indicative gradient tint.
-        // `DevelopEngine.render` leaves `decoded` untouched, so recycle it after; `applyLookTint`
+        // `developForSave` leaves `decoded` untouched, so recycle it after; `applyLookTint`
         // already consumes and recycles its source, so we must not recycle again in that path.
         val filmId = loader?.let { CameraLookMapping.filmLookId(look) }
         val developed = filmId?.let { loader.resolve(it) }
-            ?.let { (film, lut) -> DevelopEngine.render(decoded, film, lut) }
+            ?.let { (film, lut) -> developForSave(decoded, film, lut, raw = isRaw) }
         if (developed != null) {
             decoded.recycle()
             developed
         } else {
             applyLookTint(decoded, look)
         }
-    }
+    } ?: return saveOriginal(id, repository, exporter)
 
+    // DNG develops are finished renditions → always JPEG (see kdoc). JPEG originals keep .jpg.
     val name = editedName(id.file)
     exporter.saveBitmap(edited, name)
     return SaveOutcome(displayName = name, edited = true)
 }
+
+/**
+ * Develop [decoded] through the film [look]/[lut]. For [raw] DNG input, apply a mild base grade
+ * first ([RawPreGrade]) so the flat, low-contrast RAW preview matches the tonal starting point
+ * the film models were tuned against (a camera-JPEG-like base) before the look is layered on.
+ * Leaves [decoded] untouched; returns a new bitmap.
+ */
+private fun developForSave(
+    decoded: android.graphics.Bitmap,
+    look: com.ricohgr3.app.looks.emulation.FilmLook,
+    lut: com.ricohgr3.app.looks.emulation.LutCube,
+    raw: Boolean,
+): android.graphics.Bitmap =
+    DevelopEngine.render(decoded, look, lut, preGrade = if (raw) RawPreGrade else null)
 
 private suspend fun fetchFull(id: PhotoId, repository: PhotoRepository): ByteArray =
     when (val r = repository.downloadPhoto(id, size = ImageSize.FULL)) {
@@ -113,11 +143,18 @@ private const val MAX_EDIT_PIXELS = 6_000_000
  * Decode [bytes] to an ARGB_8888 bitmap whose pixel count is at most [maxPixels], using
  * `inSampleSize` so the full image is never fully materialised in memory. Returns null if the
  * bytes aren't a decodable image.
+ *
+ * JPEG/PNG go through [BitmapFactory]. **DNG** is not decodable by [BitmapFactory] on most
+ * devices, so it falls through to [decodeRawBounded], which uses the platform [ImageDecoder]
+ * DNG path (API 28+). On API 26-27, or if the platform can't decode the DNG, this returns null
+ * and the caller keeps the untouched original.
  */
 private fun decodeBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
     val probe = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, probe)
-    if (probe.outWidth <= 0 || probe.outHeight <= 0) return null
+    if (probe.outWidth <= 0 || probe.outHeight <= 0) {
+        return decodeRawBounded(bytes, maxPixels)
+    }
 
     var sample = 1
     while ((probe.outWidth / sample).toLong() * (probe.outHeight / sample) > maxPixels) {
@@ -127,8 +164,47 @@ private fun decodeBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
         inSampleSize = sample
         inPreferredConfig = Bitmap.Config.ARGB_8888
     }
-    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: decodeRawBounded(bytes, maxPixels)
 }
+
+/**
+ * Decode a RAW/DNG [bytes] via the platform [android.graphics.ImageDecoder] (API 28+),
+ * downsampled so the result is at most [maxPixels] and forced to software ARGB_8888 (the develop
+ * engine reads pixels off the CPU). Returns null on API < 28 or if the platform can't render the
+ * DNG — the caller then keeps the untouched original rather than failing. Never throws.
+ */
+private fun decodeRawBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.P) return null
+    return runCatching {
+        val src = android.graphics.ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes))
+        android.graphics.ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
+            // Force CPU-readable software pixels (HARDWARE bitmaps can't be getPixels'd).
+            decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.isMutableRequired = false
+            val w = info.size.width
+            val h = info.size.height
+            if (w > 0 && h > 0) {
+                var sample = 1
+                while ((w / sample).toLong() * (h / sample) > maxPixels) sample *= 2
+                if (sample > 1) decoder.setTargetSize(w / sample, h / sample)
+            }
+        }.let { bmp ->
+            // Ensure ARGB_8888 for the engine's getPixels/setPixels.
+            if (bmp.config == Bitmap.Config.ARGB_8888) bmp
+            else bmp.copy(Bitmap.Config.ARGB_8888, false).also { bmp.recycle() }
+        }
+    }.getOrNull()
+}
+
+/**
+ * A mild base grade applied to a decoded **RAW/DNG** frame before the film look, so the flat,
+ * low-contrast RAW preview matches the tonal starting point (a camera-JPEG-like base) the film
+ * models were tuned against. Contrast around mid-grey plus a small saturation lift; kept gentle
+ * so it doesn't fight the look layered on top. See [DevelopPipeline.PreGrade].
+ */
+private val RawPreGrade = com.ricohgr3.app.looks.emulation.DevelopPipeline.PreGrade(
+    contrast = 0.18f, saturation = 1.08f,
+)
 
 /** Composite the look's indicative vertical-gradient tint onto a copy of [src]. */
 private fun applyLookTint(src: Bitmap, look: CameraLook): Bitmap {

@@ -17,14 +17,14 @@ object CameraLookMapping {
     /** The film-emulation look id for [look], or null to use the non-film fallback. */
     fun filmLookId(look: CameraLook): String? = when (look) {
         CameraLook.STANDARD -> null
-        CameraLook.VIVID -> "velvia"
-        CameraLook.POSITIVE_FILM -> "portra400"
-        CameraLook.RETRO -> "retrofade"
-        CameraLook.BLEACH_BYPASS -> "cinestill800t"
+        CameraLook.VIVID -> "ektar100"            // vivid, high-sat colour negative
+        CameraLook.POSITIVE_FILM -> "portra400"   // warm, restrained slide/positive look
+        CameraLook.RETRO -> "gold200"             // warm, nostalgic consumer stock
+        CameraLook.BLEACH_BYPASS -> "cinestill800t" // teal cast + halation
         CameraLook.MONOCHROME,
-        CameraLook.SOFT_MONOCHROME,
+        CameraLook.SOFT_MONOCHROME -> "hp5"        // softer B&W
         CameraLook.HARD_MONOCHROME,
-        CameraLook.HIGH_CONTRAST -> "trix400"
+        CameraLook.HIGH_CONTRAST -> "trix400"      // gritty, contrasty B&W
         CameraLook.HDR_TONE,
         CameraLook.CUSTOM1,
         CameraLook.CUSTOM2 -> null

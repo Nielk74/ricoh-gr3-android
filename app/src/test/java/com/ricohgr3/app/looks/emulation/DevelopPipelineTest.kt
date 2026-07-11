@@ -56,6 +56,25 @@ class DevelopPipelineTest {
         assertTrue("peak reduced", plane[8] < 1f)
     }
 
+    @Test fun preGradeAddsContrastAndSaturation() {
+        // The RAW pre-grade must push tones away from mid-grey (contrast) and boost saturation.
+        val r = floatArrayOf(0.7f, 0.3f); val g = floatArrayOf(0.4f, 0.4f); val b = floatArrayOf(0.4f, 0.4f)
+        DevelopPipeline.applyPreGrade(r, g, b, DevelopPipeline.PreGrade(contrast = 0.3f, saturation = 1.3f))
+        // A bright, red-leaning pixel gets brighter+more saturated; a dark neutral gets darker.
+        assertTrue("above-mid lifted", r[0] > 0.7f)
+        assertTrue("below-mid pushed down", r[1] < 0.3f)
+        assertTrue("saturation widened R vs B", (r[0] - b[0]) > (0.7f - 0.4f))
+    }
+
+    @Test fun preGradeNullIsAppliedOnlyWhenRequested() {
+        // apply() with no preGrade must equal the identity path (no accidental base grade).
+        val look = FilmLook(id = "x", displayName = "X", lutAsset = null)
+        val lut = LutCube.identity(9)
+        val r = floatArrayOf(0.6f); val g = floatArrayOf(0.6f); val b = floatArrayOf(0.6f)
+        DevelopPipeline.apply(r, g, b, 1, 1, look, lut, preGrade = null)
+        assertEquals(0.6f, r[0], 1e-3f)
+    }
+
     @Test fun fullLookProducesDifferentiatedOutput() {
         // The Tri-X look (mono) must desaturate a colourful input.
         val entry = FilmLookCatalog.entryFor("trix400")!!

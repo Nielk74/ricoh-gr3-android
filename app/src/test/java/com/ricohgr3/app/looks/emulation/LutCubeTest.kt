@@ -82,4 +82,25 @@ class LutCubeTest {
         assertTrue("black stays near black", black.first < 0.05f)
         assertTrue("white stays near white", white.first > 0.9f)
     }
+
+    @Test fun strongGradeVisiblyShiftsMidtones() {
+        // The remade engine must NOT be subtle: a characterful stock (Ektar) must move a
+        // mid-grey by a clearly visible amount, not a whisper. Guards the "too subtle" regression.
+        val entry = FilmLookCatalog.entryFor("ektar100")!!
+        val lut = FilmLutFactory.build(entry.model)
+        val (r, g, b) = sample(lut, 0.5f, 0.5f, 0.5f)
+        // Contrast around mid-grey pulls a 0.5 grey down noticeably.
+        assertTrue("mid-grey moved by the grade (was $r)", kotlin.math.abs(r - 0.5f) > 0.03f)
+        // A saturated red must saturate further under Ektar (sat > 1).
+        val red = sample(lut, 0.7f, 0.2f, 0.2f)
+        assertTrue("Ektar increases red-green separation", (red.first - red.second) > (0.7f - 0.2f) * 0.5f)
+    }
+
+    @Test fun channelsCanDivergeForColourCrossover() {
+        // CineStill 800T is blue-weighted (cyan cast): a neutral grey must pick up a blue cast.
+        val entry = FilmLookCatalog.entryFor("cinestill800t")!!
+        val lut = FilmLutFactory.build(entry.model)
+        val (r, _, b) = sample(lut, 0.4f, 0.4f, 0.4f)
+        assertTrue("neutral grey gains a cool/blue cast under 800T (b=$b r=$r)", b > r)
+    }
 }

@@ -126,11 +126,54 @@ looks/emulation/
 - Swatch chips (`LookSwatch`) get replaced/augmented by rendering each LUT against a small
   fixed reference thumbnail so the picker shows the *real* look, not a gradient.
 
-### Look set (v1 target)
-Curated, not 300. A tight set that reads as "much better": e.g. Kodak Portra 400,
-Kodak Gold 200, Kodak Ektar 100, Fuji Superia 400, Fuji Pro 400H, Cinestill 800T (with
-strong halation), Ilford HP5 / Tri-X (B&W), plus a couple of "faded/retro" and a punchy
-"Velvia-like". Each = one `.cube` + parametric grain/halation/split-tone.
+### Look set (shipped — emulation names only)
+Curated, not 300, and every entry named after a real stock (no invented "Retro Fade" labels).
+The shipped set (`FilmLookCatalog`): **Portra 400**, **Portra 800**, **Gold 200**, **Ektar 100**,
+**Superia 400**, **Pro 400H**, **CineStill 800T** (strong red halation), **CineStill 400D**,
+**Vision3 500T**, **Tri-X 400**, **HP5 Plus**. Each = a procedural film-density model +
+parametric grain/halation/split-tone.
+
+---
+
+## 4b. The remade colour engine (why the first LUTs were too subtle)
+
+The first `FilmLutFactory` applied a gentle mid-grey S-curve plus per-channel `gain*gamma`
+**in display (sRGB-gamma) space**, with gains ~1.03 — barely perceptible. Colour math in gamma
+space also compresses every operation. The remake (`FilmLutFactory.kt`) fixes both:
+
+- **All tone/colour math in scene-linear light** (sRGB→linear in, linear→sRGB out). The same
+  parameter reads far stronger, and film's characteristic curve / dye coupling are only
+  physically meaningful in linear.
+- **Per-channel characteristic ("density") curves** with *independent* contrast, toe, and
+  shoulder (`FilmLutFactory.Channel`). Divergent per-channel curves are what create a stock's
+  shadow/highlight colour **crossover** (CineStill's cyan shadows, Portra's warm highlights).
+- **A 3×3 dye cross-talk matrix** (`Model.crossTalk`) mixing channels the way real film dye
+  layers couple — colour rotations a per-channel curve can't do (Fuji's foliage/sky shift).
+- **Saturation** around Rec.709 luma (0 = mono for B&W stocks).
+
+The grades are intentionally **strong and clearly film** (the "much better filters" ask), with
+regression tests (`LutCubeTest.strongGradeVisiblyShiftsMidtones`, `channelsCanDivergeForColourCrossover`)
+that fail if a look ever goes back to being a whisper.
+
+### DNG (RAW) develop → JPEG
+`PhotoSave.saveEdited` now develops **DNG** originals too (previously they were saved untouched):
+the DNG is decoded via the platform `ImageDecoder` DNG path (`decodeRawBounded`, API 28+,
+downsampled to `MAX_EDIT_PIXELS`), given a mild **RAW base grade** (`DevelopPipeline.PreGrade`:
+contrast + slight saturation — RAW previews decode flatter than the camera JPEG the models were
+tuned against), then run through the film look. The result is **always saved as JPEG** (a
+developed rendition is a finished image, not sensor data). If a device/firmware DNG can't be
+decoded (API < 28, or the platform rejects it), the untouched original is saved — the action
+never fails or crashes.
+
+### Dead-end "reverse engineering" leads
+Two repos were suggested as RE targets and **neither is usable**: `gitlab.com/antoineklein2000/film`
+and `github.com/Nielk74/film` are both **scraped static copies of the commercial Color.io web app**
+(minified JS + a `ubitmap.wasm` blob). No readable algorithm, no film-stock definitions, and the
+only `luts/*.json` present are (a) broken 404 HTML placeholders and (b) technical colour-space
+transforms (LogC4→Rec709, ACEScct→DWG), **not** film-stock emulations — plus it's third-party
+copyrighted code. They did *confirm* the pipeline shape (tone/density → LUT → halation →
+diffusion → grain), which matches §2. Our LUTs are built from documented film colour science
+instead, license-clean.
 
 ---
 
