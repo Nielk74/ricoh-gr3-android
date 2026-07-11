@@ -125,21 +125,21 @@ class GalleryViewModelTest {
         val vm = viewModel(FakeCameraWifiController())
         val id = PhotoId("100RICOH", "R0000001.JPG")
 
-        vm.applyLook(id, "portra400")
+        vm.applyLook(id, "provia")
 
         val s = vm.state.value
         assertTrue(s.isEdited(id))
-        assertEquals("portra400", s.lookFor(id))
+        assertEquals("provia", s.lookFor(id))
         assertEquals(1, s.editedCount)
         // Last-used look sticks for the next frame.
-        assertEquals("portra400", s.stickyLook)
+        assertEquals("provia", s.stickyLook)
     }
 
     @Test
     fun `applyLook STANDARD clears the edited mark`() = runTest {
         val vm = viewModel(FakeCameraWifiController())
         val id = PhotoId("100RICOH", "R0000001.JPG")
-        vm.applyLook(id, "ektar100")
+        vm.applyLook(id, "velvia")
         assertTrue(vm.state.value.isEdited(id))
 
         vm.applyLook(id, null)
@@ -155,14 +155,14 @@ class GalleryViewModelTest {
     fun `resetLook returns a frame to Standard without changing sticky`() = runTest {
         val vm = viewModel(FakeCameraWifiController())
         val id = PhotoId("100RICOH", "R0000001.JPG")
-        vm.applyLook(id, "gold200")
+        vm.applyLook(id, "nostalgic_neg")
 
         vm.resetLook(id)
 
         val s = vm.state.value
         assertFalse(s.isEdited(id))
         // resetLook does not touch the sticky look — RETRO remains pre-selected.
-        assertEquals("gold200", s.stickyLook)
+        assertEquals("nostalgic_neg", s.stickyLook)
     }
 
     @Test
@@ -173,24 +173,24 @@ class GalleryViewModelTest {
         vm.toggleSelect(a)
         vm.toggleSelect(b)
 
-        vm.applyLookToSelection("trix400")
+        vm.applyLookToSelection("bleach_bypass")
 
         val s = vm.state.value
         assertTrue(s.isEdited(a))
         assertTrue(s.isEdited(b))
         assertEquals(2, s.editedCount)
-        assertEquals("trix400", s.lookFor(a))
-        assertEquals("trix400", s.stickyLook)
+        assertEquals("bleach_bypass", s.lookFor(a))
+        assertEquals("bleach_bypass", s.stickyLook)
     }
 
     @Test
     fun `setStickyLook updates the sticky default without editing any frame`() = runTest {
         val vm = viewModel(FakeCameraWifiController())
 
-        vm.setStickyLook("cinestill800t")
+        vm.setStickyLook("classic_neg")
 
         val s = vm.state.value
-        assertEquals("cinestill800t", s.stickyLook)
+        assertEquals("classic_neg", s.stickyLook)
         assertEquals(0, s.editedCount)
     }
 }

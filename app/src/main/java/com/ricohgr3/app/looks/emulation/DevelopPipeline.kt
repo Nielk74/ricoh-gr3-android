@@ -1,6 +1,7 @@
 package com.ricohgr3.app.looks.emulation
 
 import kotlin.math.exp
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
@@ -28,6 +29,9 @@ object DevelopPipeline {
 
     private const val GAMMA = 2.2f
 
+    /** `x^e` guarded for the `[0,1]` develop domain (negatives → 0). */
+    private fun pow(x: Float, e: Float): Float = if (x <= 0f) 0f else x.toDouble().pow(e.toDouble()).toFloat()
+
     private fun srgbToLinear(c: Float): Float = if (c <= 0f) 0f else exp(GAMMA * kotlin.math.ln(c))
     private fun linearToSrgb(c: Float): Float =
         if (c <= 0f) 0f else exp((1f / GAMMA) * kotlin.math.ln(c.coerceAtMost(1f)))
@@ -51,10 +55,21 @@ object DevelopPipeline {
         // 0. Optional RAW base grade (before the LUT) — lifts a flat DNG to a JPEG-like base.
         if (preGrade != null) applyPreGrade(r, g, b, preGrade)
 
-        // 1–2. Colour LUT (captures tone + colour response + cross-talk together).
-        for (i in 0 until n) {
-            lut.sample(r[i], g[i], b[i], tmp)
-            r[i] = tmp[0]; g[i] = tmp[1]; b[i] = tmp[2]
+        // 1–2. Colour LUT (captures tone + colour response + cross-talk together). Some LUTs
+        // (the bundled Fuji `.cube`s) expect a linear-ish input and bake their own tone curve —
+        // pre-warp the sRGB input by `lutInputGamma` so mid-grey lands right; output is taken as
+        // display-referred. `lutInputGamma == 1` (our procedural LUTs) is a plain pass-through.
+        val g0 = look.lutInputGamma
+        if (g0 == 1f) {
+            for (i in 0 until n) {
+                lut.sample(r[i], g[i], b[i], tmp)
+                r[i] = tmp[0]; g[i] = tmp[1]; b[i] = tmp[2]
+            }
+        } else {
+            for (i in 0 until n) {
+                lut.sample(pow(r[i], g0), pow(g[i], g0), pow(b[i], g0), tmp)
+                r[i] = tmp[0]; g[i] = tmp[1]; b[i] = tmp[2]
+            }
         }
 
         // 3. Split toning (in display space, luminance-weighted).

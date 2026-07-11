@@ -135,7 +135,29 @@ parametric grain/halation/split-tone.
 
 ---
 
-## 4b. The remade colour engine (why the first LUTs were too subtle)
+## 4a. Shipped LUTs: real Fujifilm `.cube` film sims (current)
+
+The procedural LUTs (§4b) were still not good enough ("very bad"). The shipped set now uses **real
+Fujifilm film-simulation `.cube` 3D LUTs** from
+[`abpy/FujifilmCameraProfiles`](https://github.com/abpy/FujifilmCameraProfiles) (32³, sRGB
+variants), bundled under `app/src/main/assets/luts/`. The 11 sims: **Provia, Velvia, Astia,
+Classic Chrome, Classic Neg, Nostalgic Neg, Pro Neg Hi, Pro Neg Std, Eterna, Reala Ace, Bleach
+Bypass**. `FilmLookCatalog` points each entry at its `.cube` via `lutAsset`; the procedural
+`Model` is kept only as a fallback if an asset fails to load.
+
+**Input domain — the key gotcha.** These LUTs were authored for a *linear-ish camera-profile*
+input and bake their own tone curve. Feeding raw sRGB washes mid-grey to ~0.70; a full sRGB→linear
+(`x^2.4`) crushes it to ~0.19. Empirically, pre-warping the sRGB input by **`x^1.6`** lands
+mid-grey at ~0.43 (photographic) — so `FilmLook.lutInputGamma = 1.6` for the Fuji sims and the
+pipeline raises each channel to that power *before* sampling the LUT, taking the LUT output as
+display-referred (no re-encode). Procedural LUTs keep `lutInputGamma = 1` (plain sRGB→sRGB).
+Verified by `FujiLutVerify` (mid-grey band, differentiation, bleach-bypass desaturation).
+
+**Licensing note.** The source repo has **no LICENSE file** and the LUTs are derived from Adobe's
+camera-matching profiles — redistribution rights are unclear. Bundling them is a deliberate,
+user-accepted risk for this app; revisit before any public/store release.
+
+## 4b. The (fallback) procedural colour engine — why the first LUTs were too subtle
 
 The first `FilmLutFactory` applied a gentle mid-grey S-curve plus per-channel `gain*gamma`
 **in display (sRGB-gamma) space**, with gains ~1.03 — barely perceptible. Colour math in gamma

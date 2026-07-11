@@ -15,6 +15,12 @@ package com.ricohgr3.app.looks.emulation
  * @property swatchTop/[swatchBottom] a representative 2-stop gradient (ARGB `0xFFrrggbb`) for
  *   the picker chip — an at-a-glance hint of the stock's colour. Plain `Long`s (not Android
  *   `Color`) so this stays JVM-testable and Android-free.
+ * @property lutInputGamma exponent applied to each channel **before** sampling [lutAsset], and
+ *   the LUT output is taken as-is (display-referred). `1.0` = feed sRGB directly (our procedural
+ *   LUTs, which already map sRGB→sRGB). The bundled Fujifilm `.cube` LUTs were authored for a
+ *   linear-ish camera profile input and bake their own tone curve, so they use ~`1.6`: `x^1.6`
+ *   places mid-grey correctly (feeding raw sRGB washes mids out; full linearisation crushes
+ *   them). See `research/FILM_EMULATION.md`.
  */
 data class FilmLook(
     val id: String,
@@ -25,6 +31,7 @@ data class FilmLook(
     val grain: GrainParams = GrainParams.NONE,
     val swatchTop: Long = 0xFFECEAE6,
     val swatchBottom: Long = 0xFFCFCCC6,
+    val lutInputGamma: Float = 1f,
 )
 
 /**

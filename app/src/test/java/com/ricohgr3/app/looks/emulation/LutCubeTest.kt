@@ -84,23 +84,30 @@ class LutCubeTest {
     }
 
     @Test fun strongGradeVisiblyShiftsMidtones() {
-        // The remade engine must NOT be subtle: a characterful stock (Ektar) must move a
-        // mid-grey by a clearly visible amount, not a whisper. Guards the "too subtle" regression.
-        val entry = FilmLookCatalog.entryFor("ektar100")!!
-        val lut = FilmLutFactory.build(entry.model)
-        val (r, g, b) = sample(lut, 0.5f, 0.5f, 0.5f)
-        // Contrast around mid-grey pulls a 0.5 grey down noticeably.
+        // The procedural fallback engine must NOT be subtle: a high-contrast, high-sat model must
+        // move a mid-grey by a clearly visible amount and widen colour separation.
+        val model = FilmLutFactory.Model(
+            r = FilmLutFactory.Channel(contrast = 0.5f, shoulder = 0.85f),
+            g = FilmLutFactory.Channel(contrast = 0.5f, shoulder = 0.85f),
+            b = FilmLutFactory.Channel(contrast = 0.5f, shoulder = 0.85f),
+            saturation = 1.25f,
+        )
+        val lut = FilmLutFactory.build(model)
+        val (r, _, _) = sample(lut, 0.5f, 0.5f, 0.5f)
         assertTrue("mid-grey moved by the grade (was $r)", kotlin.math.abs(r - 0.5f) > 0.03f)
-        // A saturated red must saturate further under Ektar (sat > 1).
         val red = sample(lut, 0.7f, 0.2f, 0.2f)
-        assertTrue("Ektar increases red-green separation", (red.first - red.second) > (0.7f - 0.2f) * 0.5f)
+        assertTrue("high-sat model widens red-green separation", (red.first - red.second) > (0.7f - 0.2f) * 0.5f)
     }
 
     @Test fun channelsCanDivergeForColourCrossover() {
-        // CineStill 800T is blue-weighted (cyan cast): a neutral grey must pick up a blue cast.
-        val entry = FilmLookCatalog.entryFor("cinestill800t")!!
-        val lut = FilmLutFactory.build(entry.model)
+        // A blue-weighted model (cool/tungsten cast) must make a neutral grey pick up a blue cast.
+        val model = FilmLutFactory.Model(
+            r = FilmLutFactory.Channel(contrast = 0.4f, gain = 0.9f),
+            g = FilmLutFactory.Channel(contrast = 0.4f, gain = 1.0f),
+            b = FilmLutFactory.Channel(contrast = 0.4f, gain = 1.12f),
+        )
+        val lut = FilmLutFactory.build(model)
         val (r, _, b) = sample(lut, 0.4f, 0.4f, 0.4f)
-        assertTrue("neutral grey gains a cool/blue cast under 800T (b=$b r=$r)", b > r)
+        assertTrue("neutral grey gains a cool/blue cast (b=$b r=$r)", b > r)
     }
 }

@@ -87,6 +87,6 @@ class CameraLookTest {
         assertEquals(null, LookPreferenceCodec.decode(null))
         // An unknown/removed stock id degrades to Standard (null), never crashes.
         assertEquals(null, LookPreferenceCodec.decode("GONE_STOCK"))
-        assertFalse(LookPreferenceCodec.encode("ektar100").isBlank())
+        assertFalse(LookPreferenceCodec.encode("velvia").isBlank())
     }
 }
