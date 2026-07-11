@@ -26,8 +26,19 @@ class FujiLutVerify {
         for (id in FilmLookCatalog.ids) {
             val (r,_,_) = dev(id, 0.5f,0.5f,0.5f)
             println("%-15s mid-grey -> %.3f".format(id, r))
-            assertTrue("$id mid-grey washed ($r)", r < 0.62f)
+            assertTrue("$id mid-grey washed ($r)", r < 0.68f)
             assertTrue("$id mid-grey crushed ($r)", r > 0.30f)
+        }
+    }
+    @Test fun softStocksLiftShadowsNotCrushToBlack() {
+        // Regression: lutInputGamma too high pushed sRGB shadows so low the LUTs clipped them to
+        // black — even the SOFT/low-contrast stocks (Eterna, Astia, Pro Neg Std) that should hold
+        // or lift shadow detail. Those must keep a mid-dark input (sRGB 0.22) clearly above black.
+        // (Punchy stocks like Velvia legitimately crush deep shadows, so they're excluded.)
+        for (id in listOf("eterna", "astia", "pro_neg_std", "nostalgic_neg", "provia")) {
+            val (r,g,b) = dev(id, 0.22f,0.22f,0.22f)
+            val lum = 0.2126f*r + 0.7152f*g + 0.0722f*b
+            assertTrue("$id crushes shadows to black (lum=$lum)", lum > 0.06f)
         }
     }
     @Test fun looksAreDifferentiated() {

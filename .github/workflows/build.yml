@@ -30,6 +30,16 @@ jobs:
       - name: Build, lint and test
         run: ./gradlew assembleDebug lint test --stacktrace
 
+      - name: Render film-emulation previews
+        run: ./gradlew :tools:renderPreviews --stacktrace
+
+      - name: Upload film-emulation previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: film-previews
+          path: docs/previews/
+
       - name: Upload lint and test reports
         if: always()
         uses: actions/upload-artifact@v4

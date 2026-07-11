@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "RicohGR3"
 include(":app")
+include(":tools")

@@ -22,3 +22,4 @@ keystore.properties
 
 # Local worktrees / agent scratch
 .claude/
+build/
