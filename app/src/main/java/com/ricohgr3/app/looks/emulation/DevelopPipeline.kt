@@ -147,10 +147,25 @@ object DevelopPipeline {
     }
 
     /**
-     * Luminance-weighted, spatially-correlated monochrome grain. Builds a Gaussian noise
-     * field, blurs it by [GrainParams.size] for correlation (real grain isn't per-pixel
-     * white noise), then adds it scaled by a shadow-biased luminance weight. Deterministic
-     * given [GrainParams.seed]. Exposed for unit testing.
+     * Physically-motivated film grain: `I_out = I + A(I)·G` per channel, where `G` is
+     * **spatially-correlated, multi-scale, correlated-RGB** grain and `A(I)` is a
+     * **midtone-peaked density response**. Deterministic given [GrainParams.seed]. Exposed for
+     * unit testing. See `research/FILM_EMULATION.md`.
+     *
+     * The grain field `G`:
+     *  - a **shared luma** octave (fine) + a **coarser** octave summed for clumping / size
+     *    variety (not one uniform speckle size);
+     *  - plus a small **per-channel independent (chroma)** component so R/G/B are
+     *    correlated-but-distinct — real film grain, not identical mono noise (too flat) nor
+     *    fully-independent RGB (too electronic).
+     *
+     * The strength `A(I)`:
+     *  - a **hump that peaks in the midtones** and falls off in both the deepest shadows and the
+     *    brightest highlights (real silver-grain density), biasable toward shadows by
+     *    [GrainParams.shadowBias];
+     *  - times a subtle **smooth-region visibility** factor ([GrainParams.smoothBoost]) — grain
+     *    reads slightly stronger in flat/defocused areas than in busy detail. This is a *secondary*
+     *    modulation of visibility, **not** proportional to blur.
      */
     fun applyGrain(
         r: FloatArray, g: FloatArray, b: FloatArray,
@@ -159,30 +174,114 @@ object DevelopPipeline {
         val n = width * height
         if (n == 0) return
         val rng = Random(gp.seed)
-        val noise = FloatArray(n) { (rng.nextFloat() - 0.5f) + (rng.nextFloat() - 0.5f) } // ~Gaussian
-        val blurR = (gp.size - 1f).roundToInt().coerceAtLeast(0)
-        if (blurR > 0) {
-            gaussianBlur(noise, width, height, blurR)
-            // Blurring white noise for spatial correlation ("clumpy" film grain) collapses its
-            // amplitude — a 3-pass box blur of radius 2 cuts the std ~5-8×, which is why grain
-            // used to be invisible. Renormalise the field back to unit std so `amount` means the
-            // same thing regardless of `size`, keeping the correlation but restoring visibility.
+
+        // --- G: build the correlated, multi-scale grain field, per channel. ---
+        val fineR = (gp.size - 1f).roundToInt().coerceAtLeast(0)
+        val coarseR = (gp.size * gp.coarseSizeMul - 1f).roundToInt().coerceAtLeast(0)
+
+        // Shared luma grain = fine octave + coarse octave (clumping / size variety).
+        val luma = octave(rng, n, width, height, fineR)
+        if (gp.coarseAmount > 0f) {
+            val coarse = octave(rng, n, width, height, coarseR)
+            val cw = gp.coarseAmount
+            val norm = 1f / kotlin.math.sqrt(1f + cw * cw) // keep unit-ish variance when summing
+            for (i in 0 until n) luma[i] = (luma[i] + cw * coarse[i]) * norm
+        }
+
+        // Per-channel chroma grain: two INDEPENDENT fine octaves (R, B); the G component is
+        // derived as -(chR+chB)/2 so all three correlate-but-differ without a 3rd full buffer
+        // (bounds peak memory — grain runs on the ~6MP edit buffer). chroma=0 → pure mono.
+        val c = gp.chroma.coerceIn(0f, 1f)
+        val chR: FloatArray?; val chB: FloatArray?
+        if (c > 0f) {
+            chR = octave(rng, n, width, height, fineR)
+            chB = octave(rng, n, width, height, fineR)
+        } else { chR = null; chB = null }
+        val lumaMix = 1f - 0.5f * c // as chroma rises, lean a little less on the shared field
+
+        // --- A(I): midtone-peaked density × subtle smooth-region visibility. ---
+        // Local detail: |luma - blurred luma|, so busy areas read as high detail.
+        val detail = if (gp.smoothBoost > 0f) localDetail(r, g, b, width, height) else null
+
+        for (i in 0 until n) {
+            val l = luma(r[i], g[i], b[i])
+            var a = grainDensity(l, gp.shadowBias)
+            if (detail != null) {
+                // Smooth (low-detail) regions read grainier; busy regions slightly less. Bounded,
+                // secondary — visibility only, never proportional to blur.
+                a *= 1f + gp.smoothBoost * (0.5f - detail[i]).coerceIn(-0.5f, 0.5f)
+            }
+            val amp = gp.amount * a
+            val sh = luma[i] * lumaMix
+            val cr = chR?.get(i) ?: 0f
+            val cb = chB?.get(i) ?: 0f
+            val cg = -(cr + cb) * 0.5f
+            r[i] = (r[i] + amp * (sh + cr * c)).coerceIn(0f, 1f)
+            g[i] = (g[i] + amp * (sh + cg * c)).coerceIn(0f, 1f)
+            b[i] = (b[i] + amp * (sh + cb * c)).coerceIn(0f, 1f)
+        }
+    }
+
+    /**
+     * Midtone-peaked grain density `A(I)` on luminance `l∈[0,1]`. A hump centred near mid-grey
+     * that falls off in both the deepest shadows and the brightest highlights (real film grain is
+     * strongest in the midtones). [shadowBias] (0..1) slides the peak toward the shadows and lifts
+     * the shadow side, so a stock can lean grainier in the low-mids without losing the highlight
+     * roll-off. Returns ~[0,1].
+     */
+    fun grainDensity(l: Float, shadowBias: Float): Float {
+        // Peak position: mid-grey at bias 0, moving down toward ~0.3 as bias→1.
+        val peak = 0.5f - 0.2f * shadowBias.coerceIn(0f, 1f)
+        // Asymmetric Gaussian-ish hump: wider on the shadow side when biased.
+        val width = if (l < peak) (0.32f + 0.25f * shadowBias) else 0.30f
+        val d = (l - peak) / width
+        val hump = exp(-0.5f * d * d)
+        // Roll grain off in the brightest highlights (thin negative → little silver) and, more
+        // gently, in the very deepest blacks (dense negative → grain clumps but the printed
+        // black hides it). Both are partial, not hard cuts.
+        val highlightRolloff = (1f - (l - 0.75f).coerceAtLeast(0f) / 0.25f).coerceIn(0.15f, 1f)
+        val shadowRolloff = (0.45f + l / 0.06f).coerceIn(0.45f, 1f) // ~0.45 at black → 1 by luma 0.03
+        return (hump * highlightRolloff * shadowRolloff).coerceIn(0f, 1f)
+    }
+
+    /**
+     * One normalised grain octave: a ~Gaussian white-noise field blurred by [radius] for spatial
+     * correlation (real grain isn't per-pixel white noise), then renormalised back to ~unit std —
+     * blurring otherwise collapses the amplitude (a 3-pass box blur of radius 2 cuts std ~5-8×),
+     * which is what made grain invisible before. Mean-centred.
+     */
+    private fun octave(rng: Random, n: Int, width: Int, height: Int, radius: Int): FloatArray {
+        val f = FloatArray(n) { (rng.nextFloat() - 0.5f) + (rng.nextFloat() - 0.5f) } // ~Gaussian
+        if (radius > 0) {
+            gaussianBlur(f, width, height, radius)
             var sum = 0.0; var sq = 0.0
-            for (v in noise) { sum += v; sq += v.toDouble() * v }
+            for (v in f) { sum += v; sq += v.toDouble() * v }
             val mean = sum / n
             val std = kotlin.math.sqrt((sq / n - mean * mean).coerceAtLeast(1e-12))
             val scale = (0.5 / std).toFloat() // target std ≈ the un-blurred field's (~0.41)
-            for (i in 0 until n) noise[i] = ((noise[i] - mean.toFloat()) * scale)
+            for (i in 0 until n) f[i] = (f[i] - mean.toFloat()) * scale
         }
+        return f
+    }
+
+    /**
+     * A cheap normalised local-detail measure in `[0,1]`: `|luma − blur(luma)|` scaled by a soft
+     * constant, so flat regions → ~0 and busy/edgy regions → higher. Used only to modulate grain
+     * *visibility* subtly (smooth areas read grainier).
+     */
+    private fun localDetail(
+        r: FloatArray, g: FloatArray, b: FloatArray, width: Int, height: Int,
+    ): FloatArray {
+        val n = width * height
+        val lum = FloatArray(n) { luma(r[it], g[it], b[it]) }
+        val blur = lum.copyOf()
+        gaussianBlur(blur, width, height, 2)
+        val out = FloatArray(n)
         for (i in 0 until n) {
-            val l = luma(r[i], g[i], b[i])
-            // More grain in mid/shadow structure; falls off in bright highlights.
-            val w = (1f - l * (1f - gp.shadowBias)).coerceIn(0f, 1f)
-            val d = noise[i] * gp.amount * w
-            r[i] = (r[i] + d).coerceIn(0f, 1f)
-            g[i] = (g[i] + d).coerceIn(0f, 1f)
-            b[i] = (b[i] + d).coerceIn(0f, 1f)
+            // ~0.08 luma delta counts as "full detail"; clamp to [0,1].
+            out[i] = (kotlin.math.abs(lum[i] - blur[i]) / 0.08f).coerceIn(0f, 1f)
         }
+        return out
     }
 
     /**
