@@ -1,6 +1,7 @@
 package com.ricohgr3.app.wifi
 
 import android.net.Network
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -25,12 +26,19 @@ class CameraWifiSessionTest {
         var disconnectCount = 0
         var lastSsid: String? = null
         var lastPassphrase: String? = null
+        var adoptResult: Network? = null
+        var adoptCount = 0
 
         override fun connect(ssid: String, passphrase: String, listener: WifiApConnector.Listener) {
             connectCount++
             lastSsid = ssid
             lastPassphrase = passphrase
             this.listener = listener
+        }
+
+        override fun adoptCurrentWifi(): Network? {
+            adoptCount++
+            return adoptResult
         }
 
         override fun disconnect() {
@@ -200,5 +208,44 @@ class CameraWifiSessionTest {
 
         assertNull(session.controller)
         assertTrue(session.state.value is CameraWifiSession.State.Failed)
+    }
+
+    // --- adopt(): reuse a Wi-Fi the phone is already connected to -------------------------------
+
+    @Test
+    fun adoptConnectsWhenCurrentWifiReachesTheCamera() = runTest {
+        val joiner = FakeWifiApJoiner().apply { adoptResult = stubNetwork() }
+        // fakeController.ping() succeeds by default -> the adopted network is the camera.
+        val session = newSession(joiner)
+
+        session.adopt()
+
+        assertEquals(1, joiner.adoptCount)
+        assertTrue(session.state.value is CameraWifiSession.State.Connected)
+        assertSame(fakeController, session.controller)
+    }
+
+    @Test
+    fun adoptFailsWhenNoWifiIsConnected() = runTest {
+        val joiner = FakeWifiApJoiner().apply { adoptResult = null } // no Wi-Fi at all
+        val session = newSession(joiner)
+
+        session.adopt()
+
+        assertTrue(session.state.value is CameraWifiSession.State.Failed)
+        assertNull(session.controller)
+    }
+
+    @Test
+    fun adoptFailsWhenCurrentWifiIsNotTheCamera() = runTest {
+        // Wi-Fi is present but the probe fails -> it's some other network, not the camera.
+        val probeFails = FakeCameraWifiController().apply { failWith = java.io.IOException("no camera") }
+        val joiner = FakeWifiApJoiner().apply { adoptResult = stubNetwork() }
+        val session = CameraWifiSession(joiner = joiner, controllerFactory = { probeFails })
+
+        session.adopt()
+
+        assertTrue(session.state.value is CameraWifiSession.State.Failed)
+        assertNull(session.controller)
     }
 }

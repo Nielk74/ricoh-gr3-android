@@ -124,6 +124,42 @@ class WifiApConnector(context: Context) {
     }
 
     /**
+     * Adopt a Wi-Fi network the phone is **already** connected to (e.g. the user joined the camera
+     * AP manually in Android Settings), rather than initiating a new [WifiNetworkSpecifier] join.
+     *
+     * Returns the bound [Network] if a currently-connected Wi-Fi network was found and the process
+     * was bound to it, or null if there is no connected Wi-Fi at all. Binding here is what lets the
+     * app's sockets reach the camera's internet-less AP even though the system keeps a different
+     * default network — the same reason [connect] binds. The caller should then probe the camera
+     * (e.g. `/v1/ping`) to confirm the adopted network is actually the camera and not some other
+     * Wi-Fi, and call [disconnect] to release it.
+     *
+     * Note: this does NOT verify the network is the camera — it only finds *a* Wi-Fi network. The
+     * probe is the caller's responsibility (a non-camera Wi-Fi will simply fail the ping).
+     */
+    @SuppressLint("MissingPermission") // ACCESS_NETWORK_STATE is declared in the manifest.
+    fun adoptCurrentWifi(): Network? {
+        // Prefer the active network if it's Wi-Fi; else scan all networks for a Wi-Fi transport.
+        val wifiNetwork = connectivityManager.activeNetwork
+            ?.takeIf { it.hasWifi() }
+            ?: connectivityManager.allNetworks.firstOrNull { it.hasWifi() }
+            ?: return null
+
+        // Adopting an existing network supersedes any prior request/adopt, so bump the generation
+        // to invalidate stale callbacks, and drop any WifiNetworkSpecifier request we own.
+        generation.incrementAndGet()
+        activeCallback.getAndSet(null)?.let { cb ->
+            runCatching { connectivityManager.unregisterNetworkCallback(cb) }
+        }
+        connectivityManager.bindProcessToNetwork(wifiNetwork)
+        return wifiNetwork
+    }
+
+    private fun Network.hasWifi(): Boolean =
+        connectivityManager.getNetworkCapabilities(this)
+            ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+
+    /**
      * Release the camera AP: unbind the process and unregister the network callback. Safe to
      * call when not connected (no-op). ALWAYS call this to restore normal connectivity.
      */

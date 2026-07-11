@@ -182,6 +182,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * User is already on the camera's Wi-Fi (joined it manually in Android Settings) and taps
+     * "Use current Wi-Fi". Adopt the phone's existing Wi-Fi connection and probe it for the camera
+     * — no credentials and no BLE pairing needed. On success the session goes Connected; if the
+     * connected Wi-Fi isn't the camera, it goes Failed and the user can turn to the join path.
+     */
+    fun useCurrentWifi() {
+        val session = wifiSession ?: return
+        _wifiJoinIntent.value = true
+        _wifiJoinRequested.value = true // this is the active attempt; block the auto-join effect.
+        viewModelScope.launch { session.adopt() }
+    }
+
     /** True if we can join Wi-Fi without a BLE session (credentials are cached). */
     fun hasCachedCredentials(): Boolean = cachedCredentials.value?.ssid?.isNotBlank() == true
 
