@@ -1,38 +1,40 @@
 package com.ricohgr3.app.looks
 
 /**
- * Which photos currently have a look applied, and which look.
+ * Which photos currently have a film look applied, and which look.
  *
- * Drives the "edited mark" UX rule (PHASE7-LOOKS.md §7.2): any frame with a non-[STANDARD]
- * look shows a red dot on its thumbnail / in the viewer. Applying [CameraLook.STANDARD]
- * clears the mark — Standard is the as-shot baseline, i.e. "not edited".
+ * A look is identified by its **film-stock id** (`FilmLookCatalog` ids like `"portra400"`), or
+ * `null` for the as-shot baseline ("Standard" — not edited). Applying `null` clears the mark.
+ *
+ * Drives the "edited mark" UX rule (PHASE7-LOOKS.md §7.2): any frame with a non-null look shows
+ * a red dot on its thumbnail / in the viewer.
  *
  * Immutable and pure Kotlin (no Android): every mutator returns a new [EditState], so it is
  * JVM-unit-testable and safe to expose as Compose state.
  *
- * @property applied photo id -> the look applied to it. Ids mapped to [CameraLook.STANDARD]
+ * @property applied photo id -> the film-stock id applied to it. Ids mapped to Standard (`null`)
  *   are never stored (they are "not edited"), so the map only ever holds edited frames.
  */
 data class EditState(
-    val applied: Map<String, CameraLook> = emptyMap(),
+    val applied: Map<String, String> = emptyMap(),
 ) {
-    /** True if [id] has a non-Standard look applied. */
+    /** True if [id] has a (non-Standard) film look applied. */
     fun isEdited(id: String): Boolean = applied.containsKey(id)
 
-    /** The look applied to [id], or [CameraLook.STANDARD] if none. */
-    fun lookFor(id: String): CameraLook = applied[id] ?: CameraLook.STANDARD
+    /** The film-stock id applied to [id], or `null` (Standard) if none. */
+    fun lookFor(id: String): String? = applied[id]
 
     /**
-     * Apply [look] to [id]. Applying [CameraLook.STANDARD] resets the frame (clears its
-     * edited mark) rather than storing a Standard entry.
+     * Apply film-stock [look] to [id]. Applying `null` (Standard) resets the frame (clears its
+     * edited mark) rather than storing an entry.
      */
-    fun apply(id: String, look: CameraLook): EditState =
-        if (look == CameraLook.STANDARD) reset(id)
+    fun apply(id: String, look: String?): EditState =
+        if (look == null) reset(id)
         else copy(applied = applied + (id to look))
 
-    /** Apply [look] to every id in [ids] (Standard resets each, as in [apply]). */
-    fun applyAll(ids: Collection<String>, look: CameraLook): EditState =
-        if (look == CameraLook.STANDARD) {
+    /** Apply [look] to every id in [ids] (`null` resets each, as in [apply]). */
+    fun applyAll(ids: Collection<String>, look: String?): EditState =
+        if (look == null) {
             copy(applied = applied - ids.toSet())
         } else {
             copy(applied = applied + ids.associateWith { look })

@@ -11,8 +11,6 @@ import com.ricohgr3.app.data.PhotoExporter
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.data.PhotoResult
-import com.ricohgr3.app.looks.CameraLook
-import com.ricohgr3.app.looks.emulation.CameraLookMapping
 import com.ricohgr3.app.looks.emulation.DevelopEngine
 import com.ricohgr3.app.looks.emulation.FilmLookLoader
 import com.ricohgr3.app.ui.LookSwatch
@@ -50,10 +48,10 @@ suspend fun saveOriginal(
  * Download the full-resolution original, composite the applied [look]'s indicative tint over it
  * (matching the on-screen preview), and save the result as a new JPEG so the original is kept.
  *
- * When the look maps to a client-side film emulation ([CameraLookMapping]) and a [loader] is
- * provided, the frame is genuinely **developed** through the film engine ([DevelopEngine]:
- * LUT + split-tone + halation + grain). Otherwise it falls back to the honest indicative
- * gradient tint that mirrors [PhotoStage]'s on-screen overlay.
+ * [filmLookId] is a [com.ricohgr3.app.looks.emulation.FilmLookCatalog] stock id (or `null` for
+ * Standard). When a [loader] is provided the frame is genuinely **developed** through the film
+ * engine ([DevelopEngine]: LUT + split-tone + halation + grain). Without a loader (the JVM path)
+ * it falls back to the honest indicative gradient tint that mirrors [PhotoStage]'s overlay.
  *
  * **DNG (RAW) originals** are decoded via the platform DNG decoder ([decodeBounded]) and
  * developed with a RAW-tuned variant of the pipeline (RAW previews come out flatter/lower
@@ -67,13 +65,13 @@ suspend fun saveOriginal(
  */
 suspend fun saveEdited(
     id: PhotoId,
-    look: CameraLook,
+    filmLookId: String?,
     repository: PhotoRepository,
     exporter: PhotoExporter,
     loader: FilmLookLoader? = null,
 ): SaveOutcome {
-    // Standard is the as-shot baseline — nothing to bake; keep the pristine original.
-    if (look == CameraLook.STANDARD) {
+    // Standard (null) is the as-shot baseline — nothing to bake; keep the pristine original.
+    if (filmLookId == null) {
         return saveOriginal(id, repository, exporter)
     }
     val isRaw = id.file.substringAfterLast('.', "").equals("DNG", true)
@@ -91,17 +89,17 @@ suspend fun saveEdited(
             throw java.io.IOException("Could not decode ${id.file} for editing")
         }
 
-        // Prefer a real film develop; fall back to the indicative gradient tint.
-        // `developForSave` leaves `decoded` untouched, so recycle it after; `applyLookTint`
-        // already consumes and recycles its source, so we must not recycle again in that path.
-        val filmId = loader?.let { CameraLookMapping.filmLookId(look) }
-        val developed = filmId?.let { loader.resolve(it) }
+        // Develop the selected film stock directly. `developForSave` leaves `decoded` untouched,
+        // so recycle it after; `applyLookTint` consumes and recycles its source, so we must not
+        // recycle again in that path.
+        val developed = loader?.resolve(filmLookId)
             ?.let { (film, lut) -> developForSave(decoded, film, lut, raw = isRaw) }
         if (developed != null) {
             decoded.recycle()
             developed
         } else {
-            applyLookTint(decoded, look)
+            // No loader (JVM path) or unknown stock → honest indicative gradient tint.
+            applyLookTint(decoded, filmLookId)
         }
     } ?: return saveOriginal(id, repository, exporter)
 
@@ -206,9 +204,9 @@ private val RawPreGrade = com.ricohgr3.app.looks.emulation.DevelopPipeline.PreGr
     contrast = 0.18f, saturation = 1.08f,
 )
 
-/** Composite the look's indicative vertical-gradient tint onto a copy of [src]. */
-private fun applyLookTint(src: Bitmap, look: CameraLook): Bitmap {
-    val stops = LookSwatch.stopsFor(look)
+/** Composite the film stock's indicative vertical-gradient tint onto a copy of [src]. */
+private fun applyLookTint(src: Bitmap, filmLookId: String?): Bitmap {
+    val stops = LookSwatch.stopsFor(filmLookId)
     val out = src.copy(Bitmap.Config.ARGB_8888, true)
     val canvas = Canvas(out)
     val paint = Paint().apply {

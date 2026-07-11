@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -23,18 +22,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.ricohgr3.app.looks.CameraLook
+import com.ricohgr3.app.looks.emulation.FilmLookCatalog
 import com.ricohgr3.app.ui.theme.GrTheme
 
 /**
- * Horizontal, tappable strip of every [CameraLook]. The [selected] look is ringed in the
- * Ricoh-red accent; tapping a swatch calls [onSelect]. Shared by the gallery's batch-apply
- * bar and the viewer's per-frame picker so the two stay visually identical.
+ * Horizontal, tappable strip of every **film stock** (Portra 400, CineStill 800T, …) plus a
+ * leading "Standard" (as-shot) chip. The [selected] stock — a [FilmLookCatalog] id, or `null`
+ * for Standard — is ringed in the Ricoh-red accent; tapping a chip calls [onSelect]. Shared by
+ * the gallery's batch-apply bar and the viewer's per-frame picker so the two stay identical.
  */
 @Composable
 fun LookStrip(
-    selected: CameraLook,
-    onSelect: (CameraLook) -> Unit,
+    selected: String?,
+    onSelect: (String?) -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
 ) {
@@ -43,11 +43,12 @@ fun LookStrip(
         contentPadding = contentPadding,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        items(CameraLook.entries) { look ->
+        items(FilmLookCatalog.pickerIds) { id ->
             LookChip(
-                look = look,
-                isSelected = look == selected,
-                onClick = { onSelect(look) },
+                id = id,
+                label = FilmLookCatalog.displayNameFor(id),
+                isSelected = id == selected,
+                onClick = { onSelect(id) },
             )
         }
     }
@@ -56,11 +57,12 @@ fun LookStrip(
 /** One swatch + label. Selected chips get an accent ring; others a hairline. */
 @Composable
 private fun LookChip(
-    look: CameraLook,
+    id: String?,
+    label: String,
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
-    val stops = LookSwatch.stopsFor(look)
+    val stops = LookSwatch.stopsFor(id)
     val ring = if (isSelected) GrTheme.colors.accent else GrTheme.colors.hair
     val ringWidth = if (isSelected) 2.dp else 1.dp
 
@@ -79,7 +81,7 @@ private fun LookChip(
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = look.displayName,
+            text = label,
             style = MaterialTheme.typography.labelSmall,
             color = if (isSelected) GrTheme.colors.accent else GrTheme.colors.inkSoft,
             textAlign = TextAlign.Center,

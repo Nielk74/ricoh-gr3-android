@@ -41,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoItem
 import com.ricohgr3.app.data.PhotoRepository
-import com.ricohgr3.app.looks.CameraLook
 import com.ricohgr3.app.ui.LookStrip
 import com.ricohgr3.app.ui.PhotoThumbnail
 import com.ricohgr3.app.ui.theme.GrTheme
@@ -63,8 +62,8 @@ fun GalleryScreen(
     onOpenPhoto: (PhotoId) -> Unit,
     onToggleSelect: (PhotoId) -> Unit,
     onClearSelection: () -> Unit,
-    onApplyLookToSelection: (CameraLook) -> Unit,
-    onStickyLookChange: (CameraLook) -> Unit,
+    onApplyLookToSelection: (String?) -> Unit,
+    onStickyLookChange: (String?) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -262,9 +261,9 @@ private fun ContactFrame(
 @Composable
 private fun BatchApplyBar(
     selectionCount: Int,
-    stickyLook: CameraLook,
-    onStickyLookChange: (CameraLook) -> Unit,
-    onApply: (CameraLook) -> Unit,
+    stickyLook: String?,
+    onStickyLookChange: (String?) -> Unit,
+    onApply: (String?) -> Unit,
 ) {
     Column(
         modifier = Modifier

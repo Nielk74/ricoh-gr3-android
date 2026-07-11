@@ -2,6 +2,7 @@ package com.ricohgr3.app.looks
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -11,58 +12,58 @@ class EditStateTest {
     fun emptyStateHasNoEditedFrames() {
         val state = EditState()
         assertFalse(state.isEdited("R0000001.JPG"))
-        assertEquals(CameraLook.STANDARD, state.lookFor("R0000001.JPG"))
+        assertNull(state.lookFor("R0000001.JPG"))
     }
 
     @Test
     fun applyMarksFrameEditedAndRecordsLook() {
-        val state = EditState().apply("a", CameraLook.POSITIVE_FILM)
+        val state = EditState().apply("a", "portra400")
         assertTrue(state.isEdited("a"))
-        assertEquals(CameraLook.POSITIVE_FILM, state.lookFor("a"))
+        assertEquals("portra400", state.lookFor("a"))
         assertFalse(state.isEdited("b"))
     }
 
     @Test
     fun applyIsImmutable() {
         val original = EditState()
-        original.apply("a", CameraLook.VIVID)
+        original.apply("a", "ektar100")
         assertFalse("original must be unchanged", original.isEdited("a"))
     }
 
     @Test
     fun applyOverwritesExistingLook() {
         val state = EditState()
-            .apply("a", CameraLook.VIVID)
-            .apply("a", CameraLook.MONOCHROME)
-        assertEquals(CameraLook.MONOCHROME, state.lookFor("a"))
+            .apply("a", "ektar100")
+            .apply("a", "trix400")
+        assertEquals("trix400", state.lookFor("a"))
         assertEquals(1, state.applied.size)
     }
 
     @Test
     fun applyStandardResetsFrame() {
         val state = EditState()
-            .apply("a", CameraLook.VIVID)
-            .apply("a", CameraLook.STANDARD)
+            .apply("a", "ektar100")
+            .apply("a", null)
         assertFalse(state.isEdited("a"))
-        assertEquals(CameraLook.STANDARD, state.lookFor("a"))
+        assertNull(state.lookFor("a"))
         assertTrue("Standard entries are not stored", state.applied.isEmpty())
     }
 
     @Test
     fun applyAllMarksEveryFrame() {
         val ids = listOf("a", "b", "c")
-        val state = EditState().applyAll(ids, CameraLook.RETRO)
+        val state = EditState().applyAll(ids, "gold200")
         for (id in ids) {
             assertTrue(state.isEdited(id))
-            assertEquals(CameraLook.RETRO, state.lookFor(id))
+            assertEquals("gold200", state.lookFor(id))
         }
     }
 
     @Test
     fun applyAllWithStandardResetsAllTargets() {
         val state = EditState()
-            .applyAll(listOf("a", "b", "c"), CameraLook.VIVID)
-            .applyAll(listOf("a", "b"), CameraLook.STANDARD)
+            .applyAll(listOf("a", "b", "c"), "ektar100")
+            .applyAll(listOf("a", "b"), null)
         assertFalse(state.isEdited("a"))
         assertFalse(state.isEdited("b"))
         assertTrue("untouched frame keeps its look", state.isEdited("c"))
@@ -71,14 +72,14 @@ class EditStateTest {
     @Test
     fun resetClearsMark() {
         val state = EditState()
-            .apply("a", CameraLook.HARD_MONOCHROME)
+            .apply("a", "trix400")
             .reset("a")
         assertFalse(state.isEdited("a"))
     }
 
     @Test
     fun resetUnknownIdIsNoOp() {
-        val state = EditState().apply("a", CameraLook.VIVID)
+        val state = EditState().apply("a", "ektar100")
         val after = state.reset("missing")
         assertEquals(state, after)
     }

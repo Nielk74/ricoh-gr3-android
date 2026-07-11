@@ -187,6 +187,16 @@ instead, license-clean.
   in-camera JPEGs (unchanged), client-side film emulation for developing/exporting any
   captured frame. UI should make the distinction legible.
 
+### UI: film stocks ARE the picker (not the camera effect enum) — done
+The gallery/viewer look picker (`LookStrip`) now lists the **film stocks directly** — Standard +
+the 11 `FilmLookCatalog` stocks — so the user sees and taps "Portra 400", "CineStill 800T", etc.
+The whole edit layer (`EditState`, `StickyLookStore`/`LookPreferenceCodec`, `GalleryViewModel`,
+`ViewerScreen`, `PhotoSave.saveEdited`) is keyed on the **film-stock id (`String?`; null =
+Standard)**. `CameraLook` (the camera's `col_vivid`/`efc_*` enum) is now used **only** by the
+live-capture screen (pre-capture control over Wi-Fi); the old `CameraLookMapping` (camera-look →
+film-look translation) is deleted. Each `FilmLook` carries a 2-stop `swatchTop`/`swatchBottom`
+for its picker chip.
+
 ---
 
 ## Sources

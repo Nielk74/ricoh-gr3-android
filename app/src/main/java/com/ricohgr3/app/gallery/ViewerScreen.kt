@@ -41,7 +41,7 @@ import com.ricohgr3.app.data.PhotoExporter
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.data.PhotoResult
-import com.ricohgr3.app.looks.CameraLook
+import com.ricohgr3.app.looks.emulation.FilmLookCatalog
 import kotlinx.coroutines.launch
 import com.ricohgr3.app.ui.LookStrip
 import com.ricohgr3.app.ui.LookSwatch
@@ -68,9 +68,9 @@ fun ViewerScreen(
     repository: PhotoRepository,
     exporter: PhotoExporter,
     filmLookLoader: com.ricohgr3.app.looks.emulation.FilmLookLoader? = null,
-    appliedLook: CameraLook,
-    stickyLook: CameraLook,
-    onApplyLook: (CameraLook) -> Unit,
+    appliedLook: String?,
+    stickyLook: String?,
+    onApplyLook: (String?) -> Unit,
     onResetLook: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -80,7 +80,7 @@ fun ViewerScreen(
     var error by remember(id) { mutableStateOf<String?>(null) }
     // The picker starts on the frame's current look, or the sticky default if unedited.
     var picked by remember(id) {
-        mutableStateOf(if (appliedLook == CameraLook.STANDARD) stickyLook else appliedLook)
+        mutableStateOf(appliedLook ?: stickyLook)
     }
     var showingBefore by remember { mutableStateOf(false) }
 
@@ -135,7 +135,7 @@ fun ViewerScreen(
     Column(modifier = modifier.fillMaxSize().background(GrTheme.colors.paper)) {
         ViewerHeader(
             id = id,
-            isEdited = appliedLook != CameraLook.STANDARD,
+            isEdited = appliedLook != null,
             appliedLook = appliedLook,
             onBack = onBack,
         )
@@ -196,7 +196,7 @@ fun ViewerScreen(
             appliedLook = appliedLook,
             onApply = { onApplyLook(picked) },
             onReset = {
-                picked = CameraLook.STANDARD
+                picked = null
                 onResetLook()
             },
         )
@@ -219,7 +219,7 @@ fun ViewerScreen(
  */
 @Composable
 private fun SaveBar(
-    picked: CameraLook,
+    picked: String?,
     saving: Boolean,
     status: String?,
     onSaveOriginal: () -> Unit,
@@ -243,9 +243,9 @@ private fun SaveBar(
             Text("Save original", color = GrTheme.colors.ink)
         }
         Spacer(Modifier.weight(1f))
-        if (picked != CameraLook.STANDARD) {
+        if (picked != null) {
             TextButton(onClick = onSaveEdited, enabled = !saving) {
-                Text("Save with ${picked.displayName}", color = GrTheme.colors.accent)
+                Text("Save with ${FilmLookCatalog.displayNameFor(picked)}", color = GrTheme.colors.accent)
             }
         }
     }
@@ -263,7 +263,7 @@ private fun SaveBar(
 private fun ViewerHeader(
     id: PhotoId,
     isEdited: Boolean,
-    appliedLook: CameraLook,
+    appliedLook: String?,
     onBack: () -> Unit,
 ) {
     Row(
@@ -283,7 +283,7 @@ private fun ViewerHeader(
                     )
                 }
             }
-            val tag = if (isEdited) appliedLook.displayName else "As shot"
+            val tag = if (isEdited) FilmLookCatalog.displayNameFor(appliedLook) else "As shot"
             Text(tag, style = MaterialTheme.typography.labelSmall, color = GrTheme.colors.inkSoft)
         }
         TextButton(onClick = onBack) { Text("Done", color = GrTheme.colors.accent) }
@@ -297,7 +297,7 @@ private fun ViewerHeader(
 @Composable
 private fun PhotoStage(
     bitmap: ImageBitmap,
-    look: CameraLook,
+    look: String?,
     showingBefore: Boolean,
     onPressChange: (Boolean) -> Unit,
 ) {
@@ -322,7 +322,7 @@ private fun PhotoStage(
             modifier = Modifier.fillMaxSize(),
         )
         // Indicative look tint (skipped for Standard and while holding "before").
-        if (!showingBefore && look != CameraLook.STANDARD) {
+        if (!showingBefore && look != null) {
             val stops = LookSwatch.stopsFor(look)
             Box(
                 modifier = Modifier
@@ -342,7 +342,7 @@ private fun Modifier.matchImageOverlay(): Modifier = this.fillMaxSize()
 
 /** Film-edge metadata readout: frame id and, when known, the exposure triad. */
 @Composable
-private fun MetadataRebate(id: PhotoId, info: PhotoInfo?, look: CameraLook) {
+private fun MetadataRebate(id: PhotoId, info: PhotoInfo?, look: String?) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -374,8 +374,8 @@ private fun formatExposure(info: PhotoInfo): String {
 
 @Composable
 private fun ViewerActions(
-    picked: CameraLook,
-    appliedLook: CameraLook,
+    picked: String?,
+    appliedLook: String?,
     onApply: () -> Unit,
     onReset: () -> Unit,
 ) {
@@ -386,7 +386,7 @@ private fun ViewerActions(
     ) {
         TextButton(
             onClick = onReset,
-            enabled = appliedLook != CameraLook.STANDARD || picked != CameraLook.STANDARD,
+            enabled = appliedLook != null || picked != null,
         ) {
             Text("Reset", color = GrTheme.colors.inkSoft)
         }
@@ -394,7 +394,7 @@ private fun ViewerActions(
         // Applying makes `picked` sticky, so the next frame opens pre-set to it.
         TextButton(onClick = onApply, enabled = picked != appliedLook) {
             Text(
-                text = if (picked == CameraLook.STANDARD) "Apply" else "Apply ${picked.displayName}",
+                text = if (picked == null) "Apply" else "Apply ${FilmLookCatalog.displayNameFor(picked)}",
                 color = GrTheme.colors.accent,
             )
         }

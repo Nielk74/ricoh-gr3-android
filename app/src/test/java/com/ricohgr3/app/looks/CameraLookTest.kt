@@ -77,12 +77,16 @@ class CameraLookTest {
     }
 
     @Test
-    fun preferenceCodecRoundTrips() {
-        for (look in CameraLook.entries) {
-            assertEquals(look, LookPreferenceCodec.decode(LookPreferenceCodec.encode(look)))
+    fun preferenceCodecRoundTripsFilmStockIds() {
+        // The sticky store now persists film-stock ids (null = Standard).
+        for (id in com.ricohgr3.app.looks.emulation.FilmLookCatalog.ids) {
+            assertEquals(id, LookPreferenceCodec.decode(LookPreferenceCodec.encode(id)))
         }
-        assertEquals(CameraLook.STANDARD, LookPreferenceCodec.decode(null))
-        assertEquals(CameraLook.STANDARD, LookPreferenceCodec.decode("GONE_LOOK"))
-        assertFalse(LookPreferenceCodec.encode(CameraLook.VIVID).isBlank())
+        // Standard (null) round-trips through the empty string.
+        assertEquals(null, LookPreferenceCodec.decode(LookPreferenceCodec.encode(null)))
+        assertEquals(null, LookPreferenceCodec.decode(null))
+        // An unknown/removed stock id degrades to Standard (null), never crashes.
+        assertEquals(null, LookPreferenceCodec.decode("GONE_STOCK"))
+        assertFalse(LookPreferenceCodec.encode("ektar100").isBlank())
     }
 }
