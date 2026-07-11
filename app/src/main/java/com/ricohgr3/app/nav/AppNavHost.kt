@@ -74,12 +74,20 @@ fun AppNavHost(
                 }
             }
 
+            val transport by viewModel.transport.collectAsStateWithLifecycle()
+            val cachedCreds by viewModel.cachedCredentials.collectAsStateWithLifecycle()
+
             ConnectScreen(
                 ble = bleState,
                 wifi = wifiState,
+                transport = transport,
+                hasCachedCreds = cachedCreds?.ssid?.isNotBlank() == true,
                 permissionsGranted = permissionsGranted,
                 wifiSupported = viewModel.wifiSession != null,
                 onRequestPermissions = onRequestPermissions,
+                onSelectBluetooth = viewModel::selectBluetooth,
+                onSelectWifi = viewModel::selectWifi,
+                onChangeTransport = viewModel::clearTransport,
                 onStartScan = viewModel::startScan,
                 onStopScan = viewModel::stopScan,
                 onConnectDevice = viewModel::connect,
