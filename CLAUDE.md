@@ -30,14 +30,15 @@ The shutter writes `[1, AF]` to characteristic `559644B8-E0BC-4011-929B-5CF91998
 
 ## Roadmap (see FEASIBILITY.md §6)
 
-BLE → read WLAN SSID/passphrase (works) → **user turns Wi-Fi on at the camera** → app joins
-the AP → HTTP `/v1/` (live view MJPEG, settings, photo browse/download). Wi-Fi join uses
-`WifiNetworkSpecifier` to route traffic to the camera AP (no internet on that network).
+**BLE and Wi-Fi are mutually exclusive** on the GR III — an active BLE control session keeps the
+camera's Wi-Fi AP off. So the connect flow is a **transport chooser**: Bluetooth (shutter/control)
+OR Wi-Fi (live view/transfer). Wi-Fi path: user turns Wi-Fi on at the camera → app joins the AP →
+HTTP `/v1/` via `WifiNetworkSpecifier`. Credentials read during a BLE pairing are cached
+(`CameraCredentialStore`) so Wi-Fi mode joins without BLE.
 
 **Note:** BLE auto-wake of Wi-Fi is NOT possible on shipping firmware — the camera rejects the
 WLAN `Network Type` write (`0x80`). Full hardware investigation + RE tooling in
-`research/BLE_WIFI_WAKE_INVESTIGATION.md` and `research/tools/`. Wi-Fi is enabled manually on
-the camera body for now.
+`research/BLE_WIFI_WAKE_INVESTIGATION.md` and `research/tools/`.
 
 ## Testing note
 

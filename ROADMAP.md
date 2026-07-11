@@ -83,12 +83,14 @@ grounded in the cloned OpenAPI spec + community repos. UI wiring is Phase 6.
 
 ## Phase 5 — Connection & session management  (M) — MVP FLOW WIRED
 
-The **MVP happy path is wired end-to-end**: `ConnectScreen` (Concept-A stepper) drives
-BLE pair → **user enables Wi-Fi on the camera** → app joins the camera AP → Library / Live
-View entries; `MainViewModel` orchestrates the handoff over `CameraWifiSession`. (Auto BLE
-wake was dropped — the camera rejects it; see Phase 4.) Falls back gracefully (BLE shutter
-works without Wi-Fi; API<29 shows a "needs Android 10+" note). On-device validation against
-a physical GR III is the remaining gate (no host radio).
+**Transport chooser** — BLE and Wi-Fi are **mutually exclusive** on the GR III (an active BLE
+control session keeps the camera's Wi-Fi AP off, which is why the BLE wake write is rejected).
+`ConnectScreen` now lets the user pick: **Bluetooth** (pair → remote shutter/control) or
+**Wi-Fi** (user turns Wi-Fi on at the camera → app joins the AP → Library / Live View).
+Switching tears down the other transport. Wi-Fi credentials read during a BLE pairing are
+**cached** (`CameraCredentialStore`, DataStore) so Wi-Fi mode can join later without BLE.
+`MainViewModel` owns the `Transport` state + `CameraWifiSession`. API<29 disables the Wi-Fi
+card. On-device validation against a physical GR III is the remaining gate (no host radio).
 
 - [x] Unified connection flow (disconnected → BLE → Wi-Fi active) surfaced in `ConnectScreen`
       over `CameraWifiSession.State` + `BleState` — the visible BLE→Wi-Fi state machine

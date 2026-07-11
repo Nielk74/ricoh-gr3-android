@@ -2,18 +2,36 @@ package com.ricohgr3.app
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.ricohgr3.app.ble.CameraBleManager
 import com.ricohgr3.app.ble.CameraController
+import com.ricohgr3.app.ble.WlanCredentials
+import com.ricohgr3.app.wifi.CameraCredentialStore
 import com.ricohgr3.app.wifi.CameraWifiSession
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+/** Which transport the user has chosen. The GR III's BLE and Wi-Fi planes are mutually exclusive. */
+enum class Transport { BLUETOOTH, WIFI }
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val ble: CameraController = CameraBleManager(app.applicationContext)
 
     val state = ble.state
+
+    /** Persisted camera Wi-Fi credentials (cached from a BLE pairing) for BLE-free Wi-Fi joins. */
+    private val credentialStore = CameraCredentialStore(app.applicationContext)
+    val cachedCredentials: StateFlow<WlanCredentials?> =
+        credentialStore.credentialsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** The chosen transport. Null until the user picks one on the chooser. */
+    private val _transport = MutableStateFlow<Transport?>(null)
+    val transport: StateFlow<Transport?> = _transport.asStateFlow()
 
     /**
      * The Wi-Fi AP session (null on API < 29, where [CameraWifiSession] is unsupported). Owns the
@@ -49,6 +67,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun bluetoothEnabled() = ble.isBluetoothEnabled()
 
+    // --- Transport selection ----------------------------------------------------------
+    // BLE and Wi-Fi are mutually exclusive on the GR III, so choosing one tears down the other.
+
+    init {
+        // Cache the AP credentials whenever a BLE session reads them, so Wi-Fi mode can join
+        // later without BLE (the two transports can't be up at once).
+        viewModelScope.launch {
+            state.collect { s ->
+                s.wlanCredentials?.let { creds ->
+                    if (creds.ssid.isNotBlank()) credentialStore.save(creds)
+                }
+            }
+        }
+    }
+
+    /** Choose Bluetooth: tear down any Wi-Fi session first, then this transport is active. */
+    fun selectBluetooth() {
+        wifiSession?.disconnect()
+        _wifiJoinRequested.value = false
+        _wifiJoinIntent.value = false
+        _transport.value = Transport.BLUETOOTH
+    }
+
+    /** Choose Wi-Fi: disconnect BLE first (it keeps the camera AP off), then this transport is active. */
+    fun selectWifi() {
+        ble.disconnect()
+        _transport.value = Transport.WIFI
+    }
+
+    /** Return to the transport chooser, disconnecting everything. */
+    fun clearTransport() {
+        disconnect()
+        _transport.value = null
+    }
+
     // --- BLE → Wi-Fi handoff orchestration -------------------------------------------
 
     /** Read the camera's Wi-Fi SSID/passphrase over BLE (lands in [state].wlanCredentials). */
@@ -74,20 +127,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * User tapped "Join camera Wi-Fi" (after enabling Wi-Fi on the camera body). If we already
-     * have credentials, join now; otherwise read them — the connect flow's `LaunchedEffect` joins
-     * once they land. [resetWifiJoin] first so a prior failed/idle attempt can run again.
+     * User tapped "Join camera Wi-Fi" (after enabling Wi-Fi on the camera body). Uses credentials
+     * from the live BLE session if present, else the [cachedCredentials] saved from a prior BLE
+     * pairing (the usual Wi-Fi-mode case, where BLE is disconnected). Falls back to reading over
+     * BLE only if a session is up and we have nothing cached.
      */
     fun joinCameraWifi() {
         resetWifiJoin()
         _wifiJoinIntent.value = true
-        val creds = state.value.wlanCredentials
+        val creds = state.value.wlanCredentials?.takeIf { it.ssid.isNotBlank() }
+            ?: cachedCredentials.value
         if (creds != null && creds.ssid.isNotBlank()) {
             joinWifi(creds.ssid, creds.passphrase)
         } else {
+            // Nothing cached — need a BLE session to read them first.
             readWlanCredentials()
         }
     }
+
+    /** True if we can join Wi-Fi without a BLE session (credentials are cached). */
+    fun hasCachedCredentials(): Boolean = cachedCredentials.value?.ssid?.isNotBlank() == true
 
     /**
      * Join the camera AP using the BLE-read [ssid]/[passphrase]. Idempotent for a given
