@@ -174,11 +174,9 @@ class CameraHttpClient(
 
         /**
          * Build a client whose sockets are opened on [network] (the camera AP), via
-         * [Network.getSocketFactory]. This is a belt-and-suspenders complement to
-         * [WifiApConnector]'s process-wide `bindProcessToNetwork`: even if the process binding is
-         * ever cleared or another network becomes default, this client still routes to the camera.
-         * The DNS is left at OkHttp's default — irrelevant here since the camera is reached by its
-         * literal IP (`192.168.0.1`), not a hostname.
+         * [Network.getSocketFactory]. Only camera requests use this socket factory; the rest of the
+         * app stays on Android's normal internet route. DNS is left at OkHttp's default — irrelevant
+         * here since the camera is reached by its literal IP (`192.168.0.1`), not a hostname.
          */
         fun clientForNetwork(network: Network): OkHttpClient = defaultClientBuilder()
             .socketFactory(network.socketFactory)
@@ -187,7 +185,7 @@ class CameraHttpClient(
         /**
          * Create a [CameraHttpClient] whose OkHttp sockets are pinned to [network]. Use this when
          * you have the camera's joined [Network] from [WifiApConnector.Listener.onAvailable] and
-         * want routing guaranteed independent of the process-wide binding.
+         * want camera-only routing without changing the process's default network.
          *
          * @param baseUrl override for tests; defaults to `http://192.168.0.1/v1/`.
          */

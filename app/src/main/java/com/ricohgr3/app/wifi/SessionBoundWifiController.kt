@@ -13,8 +13,10 @@ import kotlinx.coroutines.flow.emptyFlow
  * Wi-Fi [android.net.Network] — and that only exists *after* [CameraWifiSession] reaches
  * `Connected`, and is rebuilt on every reconnect. Handing the screens a plain, unbound
  * [CameraHttpClient] (as an earlier version did) meant their requests were never routed onto the
- * camera AP's network via its socket factory — they worked only by luck of the process-wide
- * `bindProcessToNetwork`, and broke the moment that binding was cleared (e.g. on `onLost`).
+ * camera AP's network via its socket factory — they worked only by luck of a process-wide network
+ * override, and broke the moment that override was cleared (e.g. on `onLost`). That global override
+ * also stranded unrelated internet requests on the camera's internet-less AP, so it is intentionally
+ * no longer used.
  *
  * This delegate closes that gap: it resolves the *live* bound controller from the session on each
  * call, so a single stable instance can be injected into the screens up front while the actual

@@ -13,7 +13,7 @@ import org.junit.Test
  * [FakeWifiApJoiner] captures the [WifiApConnector.Listener] and lets the test drive
  * onAvailable/onUnavailable/onLost synchronously.
  *
- * The real [android.net.Network]-binding path (bindProcessToNetwork + socketFactory) is
+ * The real Android network-selection path (`WifiNetworkSpecifier` + network socket factory) is
  * on-device-only and is NOT exercised here — see [WifiApConnector] manual test steps. We inject a
  * [FakeCameraWifiController] via `controllerFactory` so no [android.net.Network] method is called.
  */
@@ -86,9 +86,16 @@ class CameraWifiSessionTest {
     }
 
     @Test
-    fun onAvailableMovesToConnectedWithBoundController() {
+    fun onAvailableMovesToConnectedAndScopesControllerToCameraNetwork() {
         val joiner = FakeWifiApJoiner()
-        val session = newSession(joiner)
+        var controllerNetwork: Network? = null
+        val session = CameraWifiSession(
+            joiner = joiner,
+            controllerFactory = { network ->
+                controllerNetwork = network
+                fakeController
+            },
+        )
         session.connect("GR", "pw")
         val network = stubNetwork()
 
@@ -98,6 +105,7 @@ class CameraWifiSessionTest {
         assertTrue(state is CameraWifiSession.State.Connected)
         state as CameraWifiSession.State.Connected
         assertSame(network, state.network)
+        assertSame(network, controllerNetwork)
         assertSame(fakeController, state.controller)
         assertSame(fakeController, session.controller)
     }

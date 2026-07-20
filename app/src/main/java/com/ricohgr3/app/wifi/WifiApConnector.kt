@@ -12,8 +12,8 @@ import androidx.annotation.RequiresApi
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Joins the camera's own Wi-Fi access point and routes the app's traffic to it, so HTTP
- * requests reach `http://192.168.0.1/` even though that network has NO internet.
+ * Joins the camera's own Wi-Fi access point and exposes its [Network], so camera HTTP
+ * requests can reach `http://192.168.0.1/` even though that network has NO internet.
  *
  * ## How it works (API 29+)
  * The camera AP is internet-less. On modern Android you cannot just "switch Wi-Fi" and expect
@@ -23,27 +23,28 @@ import java.util.concurrent.atomic.AtomicReference
  *      the camera's WLAN Control service — see the roadmap).
  *   2. Ask [ConnectivityManager.requestNetwork] for a Wi-Fi network matching that specifier,
  *      WITHOUT the `NET_CAPABILITY_INTERNET` requirement (the AP has none).
- *   3. When granted, call [ConnectivityManager.bindProcessToNetwork] so every socket in this
- *      process (including OkHttp) is pinned to the camera AP. The phone's normal connectivity
- *      (mobile data) stays up for the rest of the system.
+ *   3. Pass the granted [Network] to [CameraHttpClient.forNetwork], which pins only camera HTTP
+ *      sockets to the AP through [Network.getSocketFactory]. The process remains on Android's
+ *      normal internet network, so unrelated traffic such as GitHub update checks keeps working.
  *
  * ## Teardown
- * [disconnect] unbinds the process and unregisters the callback, releasing the AP so the phone
- * returns to its normal default network. ALWAYS call it (e.g. from `onCleared`/`onStop`).
+ * [disconnect] unregisters the callback and releases the requested AP. ALWAYS call it (e.g. from
+ * `onCleared`/`onStop`).
  *
  * ## API-level note
  * [WifiNetworkSpecifier] requires **API 29 (Android 10)**. The app's `minSdk` is 26; on API
  * 26–28 this class throws from [connect] — the caller must gate on [isSupported]. (A legacy
- * pre-29 path would need the deprecated `WifiManager.enableNetwork` + `bindProcessToNetwork`
- * and is out of scope for this scaffold — see TODO below.)
+ * pre-29 path would need the deprecated `WifiManager.enableNetwork` APIs and is out of scope for
+ * this scaffold — see TODO below.)
  *
  * ## Manual test steps (cannot be unit-tested on the host — needs a real device + camera)
  *  1. Wake the camera AP (via BLE WLAN Control, or manually on the camera) and note SSID/key.
  *  2. Ensure the phone has mobile data ON so you can prove the split: internet keeps working.
  *  3. Call [connect] with the SSID/passphrase; accept the system "join this Wi-Fi?" dialog.
  *  4. On [onAvailable], hit `GET http://192.168.0.1/v1/ping` via [CameraHttpClient] — expect 200.
- *  5. Confirm a normal internet request from another app still succeeds (default net intact).
- *  6. Call [disconnect]; confirm `/v1/ping` now fails and the app's default network is restored.
+ *  5. While still connected, run the in-app GitHub update check — it must use the normal default
+ *     network and must not fail DNS resolution against the camera AP.
+ *  6. Call [disconnect]; confirm `/v1/ping` now fails.
  */
 @RequiresApi(Build.VERSION_CODES.Q)
 class WifiApConnector(context: Context) {
@@ -63,7 +64,7 @@ class WifiApConnector(context: Context) {
 
     /** Callbacks for the join lifecycle. All invoked on a binder thread — marshal to UI yourself. */
     interface Listener {
-        /** The camera AP is joined and the process is bound to it. Safe to make HTTP calls. */
+        /** The camera AP is joined. Use this [Network] to create a network-scoped HTTP client. */
         fun onAvailable(network: Network)
 
         /** The join failed or was declined by the user. */
@@ -98,9 +99,7 @@ class WifiApConnector(context: Context) {
 
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                if (myGen != generation.get()) return // superseded request — don't bind.
-                // Pin this process's sockets to the camera AP.
-                connectivityManager.bindProcessToNetwork(network)
+                if (myGen != generation.get()) return // superseded request — don't publish it.
                 listener.onAvailable(network)
             }
 
@@ -110,9 +109,7 @@ class WifiApConnector(context: Context) {
             }
 
             override fun onLost(network: Network) {
-                if (myGen != generation.get()) return // stale drop — don't unbind the live network.
-                // Best-effort unbind so we don't strand the process on a dead network.
-                connectivityManager.bindProcessToNetwork(null)
+                if (myGen != generation.get()) return // stale drop — don't replace live state.
                 listener.onLost()
             }
         }
@@ -127,12 +124,10 @@ class WifiApConnector(context: Context) {
      * Adopt a Wi-Fi network the phone is **already** connected to (e.g. the user joined the camera
      * AP manually in Android Settings), rather than initiating a new [WifiNetworkSpecifier] join.
      *
-     * Returns the bound [Network] if a currently-connected Wi-Fi network was found and the process
-     * was bound to it, or null if there is no connected Wi-Fi at all. Binding here is what lets the
-     * app's sockets reach the camera's internet-less AP even though the system keeps a different
-     * default network — the same reason [connect] binds. The caller should then probe the camera
-     * (e.g. `/v1/ping`) to confirm the adopted network is actually the camera and not some other
-     * Wi-Fi, and call [disconnect] to release it.
+     * Returns the [Network] if a currently-connected Wi-Fi network was found, or null if there is
+     * no connected Wi-Fi at all. The caller creates a network-scoped camera client from it, then
+     * probes `/v1/ping` to confirm it is actually the camera and not some other Wi-Fi. The app's
+     * normal internet traffic is deliberately left on Android's default network.
      *
      * Note: this does NOT verify the network is the camera — it only finds *a* Wi-Fi network. The
      * probe is the caller's responsibility (a non-camera Wi-Fi will simply fail the ping).
@@ -151,7 +146,6 @@ class WifiApConnector(context: Context) {
         activeCallback.getAndSet(null)?.let { cb ->
             runCatching { connectivityManager.unregisterNetworkCallback(cb) }
         }
-        connectivityManager.bindProcessToNetwork(wifiNetwork)
         return wifiNetwork
     }
 
@@ -160,12 +154,11 @@ class WifiApConnector(context: Context) {
             ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
 
     /**
-     * Release the camera AP: unbind the process and unregister the network callback. Safe to
-     * call when not connected (no-op). ALWAYS call this to restore normal connectivity.
+     * Release the camera AP request and unregister its callback. Safe to call when not connected
+     * (no-op). Camera requests stop immediately because the session drops its scoped controller.
      */
     fun disconnect() {
         generation.incrementAndGet() // invalidate any in-flight callbacks from a prior connect().
-        connectivityManager.bindProcessToNetwork(null)
         activeCallback.getAndSet(null)?.let { cb ->
             runCatching { connectivityManager.unregisterNetworkCallback(cb) }
         }
@@ -178,7 +171,7 @@ class WifiApConnector(context: Context) {
         /** True when this device supports the WifiNetworkSpecifier join path (API 29+). */
         fun isSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
 
-        // TODO(scaffold): pre-API-29 fallback (WifiManager.addNetwork/enableNetwork +
-        // bindProcessToNetwork) is not implemented; API 26–28 devices cannot join the AP yet.
+        // TODO(scaffold): pre-API-29 fallback (WifiManager.addNetwork/enableNetwork) is not
+        // implemented; API 26–28 devices cannot join the AP yet.
     }
 }

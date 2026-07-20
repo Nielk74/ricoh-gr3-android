@@ -143,7 +143,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Choose the Bluetooth transport. We release any Wi-Fi AP session here — not because the two
      * transports are known to conflict (that assumption is unverified; see [Transport] and
      * [selectWifi]) but because holding the phone on the camera's internet-less AP while the user
-     * has switched to BLE control serves no purpose and would keep the phone off its normal network.
+     * has switched to BLE control serves no purpose and needlessly keeps the AP request alive.
      */
     fun selectBluetooth() {
         wifiSession?.disconnect()

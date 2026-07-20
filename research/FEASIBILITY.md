@@ -129,7 +129,7 @@ See [`references/ricoh-gr-bluetooth-api/`](references/ricoh-gr-bluetooth-api/) �
 | Risk | Severity | Mitigation |
 |------|----------|-----------|
 | Reverse-engineered protocol is unofficial → could change with firmware updates | Medium | Pin to current firmware; the `/v1/` API has been stable across GR III lifetime; degrade gracefully |
-| Android Wi-Fi AP switching UX is clunky (must join camera SSID, which has no internet) | Medium | Use `WifiNetworkSpecifier` / `bindProcessToNetwork` (Android 10+) to route only our traffic to the camera AP |
+| Android Wi-Fi AP switching UX is clunky (must join camera SSID, which has no internet) | Medium | Use `WifiNetworkSpecifier` plus a camera-only `Network.socketFactory` (Android 10+) so update checks stay on the normal internet route |
 | BLE bonding/pairing quirks per Android OEM | Low–Med | Use a robust BLE lib (Nordic); handle re-bonding |
 | No official GR III SDK support / no vendor docs | Low | Community specs are detailed enough; we depend on `references/`, not on Ricoh |
 | Live view latency / MJPEG decode load | Low | MJPEG is trivial to decode; acceptable for a companion app |

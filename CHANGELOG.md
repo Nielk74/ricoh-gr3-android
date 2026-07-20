@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.9.1 — 2026-07-21
+
+- Kept GitHub update checks and other internet requests on Android's normal network while a camera
+  Wi-Fi session is active; only camera API sockets are now routed through the internet-less AP.
+
 ## v0.9.0 — 2026-07-20
 
 - Added a preset-first **Auto import** page that scans the connected camera and saves the whole
