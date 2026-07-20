@@ -47,16 +47,19 @@ data class FilmLook(
  * highlights alone; the transform then preserves luminance. This is intentionally a local
  * foliage-colour response rather than a global green-channel or hue rotation.
  *
- * @property cyanShift how far eligible greens move toward cyan-green (`0` = disabled; values
- *   around `0.15` are deliberately subtle).
+ * @property cyanShift how far eligible greens rotate toward cyan-green (`0` = disabled,
+ *   `1` = reach the bounded cyan-green target).
+ * @property saturationBoost additional chroma inside the same foliage mask (`0.2` = up to 20%
+ *   at calibrated layer strength), gamut-compressed around the original luminance.
  */
 data class FoliageToneParams(
     val cyanShift: Float,
+    val saturationBoost: Float = 0f,
 ) {
-    val enabled: Boolean get() = cyanShift > 0f
+    val enabled: Boolean get() = cyanShift > 0f || saturationBoost > 0f
 
     companion object {
-        val NONE = FoliageToneParams(cyanShift = 0f)
+        val NONE = FoliageToneParams(cyanShift = 0f, saturationBoost = 0f)
     }
 }
 
@@ -93,14 +96,17 @@ data class SkinToneParams(
  *
  * @property cyanShift how far eligible blue sky moves toward cyan (`0` = disabled, values around
  *   `0.2` are deliberately subtle).
+ * @property saturationBoost additional chroma inside the connected-sky mask, applied without
+ *   changing sky luminance.
  */
 data class SkyToneParams(
     val cyanShift: Float,
+    val saturationBoost: Float = 0f,
 ) {
-    val enabled: Boolean get() = cyanShift > 0f
+    val enabled: Boolean get() = cyanShift > 0f || saturationBoost > 0f
 
     companion object {
-        val NONE = SkyToneParams(cyanShift = 0f)
+        val NONE = SkyToneParams(cyanShift = 0f, saturationBoost = 0f)
     }
 }
 

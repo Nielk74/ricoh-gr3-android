@@ -219,6 +219,7 @@ object DevelopPipeline {
             applyFoliageCyanShift(
                 r, g, b,
                 cyanShift = foliage.cyanShift * layerMix,
+                saturationBoost = foliage.saturationBoost * layerMix,
             )
         }
 
@@ -229,6 +230,7 @@ object DevelopPipeline {
             applySkyCyanShift(
                 r, g, b, width, height,
                 cyanShift = sky.cyanShift * layerMix,
+                saturationBoost = sky.saturationBoost * layerMix,
             )
         }
 
@@ -369,22 +371,26 @@ object DevelopPipeline {
      * The mask accepts a bounded yellow-green/green hue range with useful chroma and midtone
      * detail. Skin and warm objects have red as their dominant channel, existing cyan is outside
      * the hue window, and near-neutrals fail the saturation gate. Blue is raised in proportion to
-     * the green-blue gap and red is eased slightly, then the original Rec.709 luminance is restored
-     * so foliage colour changes without changing scene exposure.
+     * its hue is rotated toward a bounded cyan-green target while retaining the original chroma;
+     * a separate saturation control then expands that chroma. The result is gamut-compressed
+     * around the original Rec.709 luminance, so foliage can read clearly cooler and richer without
+     * changing scene exposure.
      */
     fun applyFoliageCyanShift(
         r: FloatArray,
         g: FloatArray,
         b: FloatArray,
         cyanShift: Float,
+        saturationBoost: Float = 0f,
     ) {
-        val amount = cyanShift.coerceIn(0f, 0.30f)
-        if (amount <= 0f) return
+        val hueAmount = cyanShift.coerceIn(0f, 1f)
+        val saturationAmount = saturationBoost.coerceIn(0f, 0.50f)
+        if (hueAmount <= 0f && saturationAmount <= 0f) return
 
+        val shifted = FloatArray(3)
         for (i in r.indices) {
             val weight = foliageGreenLikelihood(r[i], g[i], b[i])
-            val mix = amount * weight
-            if (mix <= 0f) continue
+            if (weight <= 0f) continue
 
             val rr = r[i]
             val gg = g[i]
@@ -392,35 +398,49 @@ object DevelopPipeline {
             val oldLuma = luma(rr, gg, bb)
             if (oldLuma <= 0f) continue
 
-            val greenBlueGap = (gg - bb).coerceAtLeast(0f)
-            val warmGreenGap = (rr - bb).coerceAtLeast(0f)
-            val targetR = rr - warmGreenGap * mix * 0.12f
-            val targetB = bb + greenBlueGap * mix
-            val targetLuma = luma(targetR, gg, targetB)
-            val scale = oldLuma / targetLuma.coerceAtLeast(1e-5f)
-            r[i] = (targetR * scale).coerceIn(0f, 1f)
-            g[i] = (gg * scale).coerceIn(0f, 1f)
-            b[i] = (targetB * scale).coerceIn(0f, 1f)
+            val max = maxOf(rr, gg, bb)
+            val min = minOf(rr, gg, bb)
+            val delta = max - min
+            if (delta <= 0f || max <= 0f) continue
+            val saturation = delta / max
+            val hue = 60f * ((bb - rr) / delta + 2f)
+            val hueMix = hueAmount * weight
+            val shiftedHue = hue + (FOLIAGE_TARGET_HUE - hue) * hueMix
+            hsvToRgb(shiftedHue, saturation, max, shifted)
+
+            writeLumaMatchedChroma(
+                r = r,
+                g = g,
+                b = b,
+                index = i,
+                targetR = shifted[0],
+                targetG = shifted[1],
+                targetB = shifted[2],
+                outputLuma = oldLuma,
+                chromaScale = 1f + saturationAmount * weight,
+            )
         }
     }
 
-    /** Soft likelihood for useful vegetation colour (roughly HSV 60–170°). */
+    private const val FOLIAGE_TARGET_HUE = 160f
+
+    /** Soft likelihood for useful vegetation colour (roughly HSV 52–176°). */
     private fun foliageGreenLikelihood(r: Float, g: Float, b: Float): Float {
         val max = maxOf(r, g, b)
         val min = minOf(r, g, b)
         val delta = max - min
         if (g < max || max < 0.08f || delta < 0.025f) return 0f
         val saturation = delta / max.coerceAtLeast(1e-5f)
-        if (saturation < 0.07f) return 0f
+        if (saturation < 0.05f) return 0f
 
         val hue = 60f * ((b - r) / delta + 2f)
         val hueWeight =
-            smoothstep(58f, 78f, hue) * (1f - smoothstep(142f, 170f, hue))
-        val saturationWeight = smoothstep(0.07f, 0.24f, saturation)
+            smoothstep(52f, 70f, hue) * (1f - smoothstep(150f, 176f, hue))
+        val saturationWeight = smoothstep(0.05f, 0.18f, saturation)
         val light = luma(r, g, b)
         val lightWeight =
-            smoothstep(0.05f, 0.18f, light) * (1f - smoothstep(0.80f, 0.96f, light))
-        val greenDominance = smoothstep(0.01f, 0.09f, g - maxOf(r, b))
+            smoothstep(0.035f, 0.12f, light) * (1f - smoothstep(0.84f, 0.97f, light))
+        val greenDominance = smoothstep(0.005f, 0.055f, g - maxOf(r, b))
         return (
             hueWeight * saturationWeight * lightWeight * greenDominance
             ).coerceIn(0f, 1f)
@@ -432,8 +452,9 @@ object DevelopPipeline {
      * A row-wise connected-component pass accepts only blue/cyan pixels whose region reaches the
      * top edge. This low-memory scan is deliberately semantic enough to reject isolated blue
      * clothing, glasses, signs, and interior objects, while avoiding a full-frame flood-fill
-     * buffer on a 6 MP Android export. The hue move raises green only in eligible pixels, then
-     * restores the original luminance so the operation changes sky colour rather than exposure.
+     * buffer on a 6 MP Android export. The hue move raises green only in eligible pixels; a
+     * separate chroma expansion increases sky saturation. Both are gamut-compressed around the
+     * original luminance so the operation changes sky colour rather than exposure.
      */
     fun applySkyCyanShift(
         r: FloatArray,
@@ -442,9 +463,15 @@ object DevelopPipeline {
         width: Int,
         height: Int,
         cyanShift: Float,
+        saturationBoost: Float = 0f,
     ) {
-        val amount = cyanShift.coerceIn(0f, 0.45f)
-        if (amount <= 0f || width <= 0 || height <= 0) return
+        val hueAmount = cyanShift.coerceIn(0f, 0.45f)
+        val saturationAmount = saturationBoost.coerceIn(0f, 0.50f)
+        if (
+            (hueAmount <= 0f && saturationAmount <= 0f) ||
+            width <= 0 ||
+            height <= 0
+        ) return
 
         var previousConnected = BooleanArray(width)
         var currentConnected = BooleanArray(width)
@@ -479,24 +506,32 @@ object DevelopPipeline {
                 for (column in start..end) {
                     currentConnected[column] = true
                     val index = row + column
-                    val mix = amount * weights[column]
-                    if (mix <= 0f) continue
+                    val weight = weights[column]
+                    val hueMix = hueAmount * weight
+                    val chromaScale = 1f + saturationAmount * weight
+                    if (hueMix <= 0f && chromaScale <= 1f) continue
                     val rr = r[index]
                     val gg = g[index]
                     val bb = b[index]
                     val oldLuma = luma(rr, gg, bb)
                     val blueGreenGap = (bb - gg).coerceAtLeast(0f)
-                    if (oldLuma <= 0f || blueGreenGap <= 0f) continue
+                    if (oldLuma <= 0f) continue
 
-                    // Raising G and slightly easing B rotates blue toward cyan. Luminance is put
-                    // back exactly so a blue sky does not become a brighter cyan sky.
-                    val targetG = gg + blueGreenGap * mix
-                    val targetB = bb - blueGreenGap * mix * 0.08f
-                    val targetLuma = luma(rr, targetG, targetB)
-                    val scale = oldLuma / targetLuma.coerceAtLeast(1e-5f)
-                    r[index] = (rr * scale).coerceIn(0f, 1f)
-                    g[index] = (targetG * scale).coerceIn(0f, 1f)
-                    b[index] = (targetB * scale).coerceIn(0f, 1f)
+                    // Raising G and slightly easing B rotates blue toward cyan. Chroma is then
+                    // expanded around the old luminance, with a gamut limit instead of clipping.
+                    val targetG = gg + blueGreenGap * hueMix
+                    val targetB = bb - blueGreenGap * hueMix * 0.08f
+                    writeLumaMatchedChroma(
+                        r = r,
+                        g = g,
+                        b = b,
+                        index = index,
+                        targetR = rr,
+                        targetG = targetG,
+                        targetB = targetB,
+                        outputLuma = oldLuma,
+                        chromaScale = chromaScale,
+                    )
                 }
             }
 
@@ -504,6 +539,63 @@ object DevelopPipeline {
             previousConnected = currentConnected
             currentConnected = swap
         }
+    }
+
+    /**
+     * Put [targetR]/[targetG]/[targetB]'s hue/chroma around [outputLuma], then expand chroma by
+     * [chromaScale]. One shared gamut scale keeps every channel in range without clipping them
+     * independently, so hue and exact Rec.709 luminance survive the saturation boost.
+     */
+    private fun writeLumaMatchedChroma(
+        r: FloatArray,
+        g: FloatArray,
+        b: FloatArray,
+        index: Int,
+        targetR: Float,
+        targetG: Float,
+        targetB: Float,
+        outputLuma: Float,
+        chromaScale: Float,
+    ) {
+        val targetLuma = luma(targetR, targetG, targetB)
+        val dr = targetR - targetLuma
+        val dg = targetG - targetLuma
+        val db = targetB - targetLuma
+        var scale = chromaScale.coerceIn(0f, 1.60f)
+        scale = minOf(
+            scale,
+            chromaLimit(outputLuma, dr),
+            chromaLimit(outputLuma, dg),
+            chromaLimit(outputLuma, db),
+        )
+        r[index] = (outputLuma + dr * scale).coerceIn(0f, 1f)
+        g[index] = (outputLuma + dg * scale).coerceIn(0f, 1f)
+        b[index] = (outputLuma + db * scale).coerceIn(0f, 1f)
+    }
+
+    private fun chromaLimit(luma: Float, delta: Float): Float = when {
+        delta > 0f -> (1f - luma) / delta
+        delta < 0f -> luma / -delta
+        else -> Float.POSITIVE_INFINITY
+    }
+
+    /** HSV-to-RGB conversion into caller-owned [out], avoiding per-pixel allocations. */
+    private fun hsvToRgb(hue: Float, saturation: Float, value: Float, out: FloatArray) {
+        val h = ((hue % 360f) + 360f) % 360f / 60f
+        val chroma = value * saturation.coerceIn(0f, 1f)
+        val x = chroma * (1f - abs(h % 2f - 1f))
+        val m = value - chroma
+        when (h.toInt().coerceIn(0, 5)) {
+            0 -> { out[0] = chroma; out[1] = x; out[2] = 0f }
+            1 -> { out[0] = x; out[1] = chroma; out[2] = 0f }
+            2 -> { out[0] = 0f; out[1] = chroma; out[2] = x }
+            3 -> { out[0] = 0f; out[1] = x; out[2] = chroma }
+            4 -> { out[0] = x; out[1] = 0f; out[2] = chroma }
+            else -> { out[0] = chroma; out[1] = 0f; out[2] = x }
+        }
+        out[0] += m
+        out[1] += m
+        out[2] += m
     }
 
     private const val SKY_CONNECT_THRESHOLD = 0.03f

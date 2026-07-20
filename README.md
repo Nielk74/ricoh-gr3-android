@@ -91,9 +91,11 @@ Important details:
 - **Natural portraits:** an on-device face detector gates a chromaticity mask. Complexions are
   protected without globally desaturating red fabric, wood, hair, glasses, beard detail, or warm
   light.
-- **Portra colour:** only eligible, top-connected blue sky moves toward cyan. Vegetation-range
-  yellow-greens also receive a smaller cyan-green move; skin, neutrals, deep shadows, pale
-  highlights, and existing cyan are excluded. Both transforms preserve luminance.
+- **Portra colour:** eligible, top-connected blue sky moves toward cyan and receives a selective
+  saturation lift. Vegetation-range yellow-greens receive a more pronounced, bounded rotation
+  toward cyan-green plus their own saturation lift; skin, neutrals, deep shadows, pale highlights,
+  and existing cyan are excluded. Both transforms preserve luminance and compress chroma into the
+  available gamut rather than clipping channels.
 - **Halation:** generated from highlight-edge spill in linear light rather than a uniform bloom.
   CineStill 800T uses the strong red fringe associated with its rem-jet-free character; cinema
   stocks remain warmer and more restrained.

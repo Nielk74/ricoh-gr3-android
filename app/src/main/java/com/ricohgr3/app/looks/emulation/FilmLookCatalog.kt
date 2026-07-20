@@ -112,8 +112,14 @@ object FilmLookCatalog {
                 highR = 0.030f, highG = 0.017f, highB = 0f,
                 amount = 0.78f,
             ),
-            skyTone = SkyToneParams(cyanShift = 0.22f),
-            foliageTone = FoliageToneParams(cyanShift = 0.14f),
+            skyTone = SkyToneParams(
+                cyanShift = 0.22f,
+                saturationBoost = 0.20f,
+            ),
+            foliageTone = FoliageToneParams(
+                cyanShift = 0.56f,
+                saturationBoost = 0.20f,
+            ),
             grain = grain(amount = 0.058f, size = 1.65f, clumping = 0.13f, seed = 400),
             model = Model(
                 r = Channel(contrast = 0.23f, toe = 0.035f, shoulder = 0.82f, gain = 1.035f),
@@ -146,8 +152,14 @@ object FilmLookCatalog {
                 highR = 0.035f, highG = 0.018f, highB = 0f,
                 amount = 0.82f,
             ),
-            skyTone = SkyToneParams(cyanShift = 0.25f),
-            foliageTone = FoliageToneParams(cyanShift = 0.16f),
+            skyTone = SkyToneParams(
+                cyanShift = 0.25f,
+                saturationBoost = 0.24f,
+            ),
+            foliageTone = FoliageToneParams(
+                cyanShift = 0.62f,
+                saturationBoost = 0.24f,
+            ),
             grain = grain(amount = 0.088f, size = 1.95f, clumping = 0.22f, seed = 800),
             model = Model(
                 r = Channel(contrast = 0.28f, toe = 0.025f, shoulder = 0.78f, gain = 1.045f),

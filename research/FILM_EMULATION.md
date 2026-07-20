@@ -29,13 +29,15 @@ display-referred photographs:
    the rendered luminance, preserving face lighting and texture. If face detection fails, the
    correction fails closed instead of becoming a global warm-colour key.
 5. Split toning is luminance-neutral. Portra's blue-to-cyan response is limited to blue regions
-   connected to the top frame edge, so it changes sky rather than clothing/signage. A separate
-   hue/chroma/luminance gate moves vegetation-range yellow-greens slightly toward cyan-green while
-   excluding skin, neutrals, existing cyan, deep shadows, and pale highlights. Both selective
-   transforms restore the original luminance. Halation is a linear-light, edge-only spill whose
-   radius follows output size; the bright source core is subtracted so flat highlights do not
-   turn red. CineStill uses a high-threshold red fringe while the quieter cinema stocks retain
-   warmer, weaker spill.
+   connected to the top frame edge, so it changes sky rather than clothing/signage, and a separate
+   control selectively expands sky chroma. A foliage hue/chroma/luminance gate rotates
+   vegetation-range yellow-greens toward a bounded 160-degree cyan-green target and independently
+   expands their chroma while excluding skin, neutrals, existing cyan, deep shadows, and pale
+   highlights. Both transforms retain the original luminance and use common-scale gamut
+   compression rather than per-channel clipping. Halation is a linear-light, edge-only spill
+   whose radius follows output size; the bright source core is subtracted so flat highlights do
+   not turn red. CineStill uses a high-threshold red fringe while the quieter cinema stocks
+   retain warmer, weaker spill.
 6. Grain perturbs optical-density-like luminance from a deterministic, non-tiling coordinate
    field correlated only across immediate neighbours. A bounded zero-mean cubic crystal term
    gives fast stocks heavier, irregular density tails without a blurred low-frequency layer. It

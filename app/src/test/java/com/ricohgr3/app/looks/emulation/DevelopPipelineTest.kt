@@ -448,12 +448,26 @@ class DevelopPipelineTest {
         val objectIndex = 6 * width + 3
         val skyLumaBefore =
             0.2126f * r[skyIndex] + 0.7152f * g[skyIndex] + 0.0722f * b[skyIndex]
+        val skyChromaBefore =
+            maxOf(r[skyIndex], g[skyIndex], b[skyIndex]) -
+                minOf(r[skyIndex], g[skyIndex], b[skyIndex])
         val objectBefore = Triple(r[objectIndex], g[objectIndex], b[objectIndex])
-        DevelopPipeline.applySkyCyanShift(r, g, b, width, height, cyanShift = 0.30f)
+        DevelopPipeline.applySkyCyanShift(
+            r, g, b, width, height,
+            cyanShift = 0.30f,
+            saturationBoost = 0.25f,
+        )
         val skyLumaAfter =
             0.2126f * r[skyIndex] + 0.7152f * g[skyIndex] + 0.0722f * b[skyIndex]
+        val skyChromaAfter =
+            maxOf(r[skyIndex], g[skyIndex], b[skyIndex]) -
+                minOf(r[skyIndex], g[skyIndex], b[skyIndex])
 
         assertTrue("connected blue sky moves toward cyan", g[skyIndex] > 0.48f)
+        assertTrue(
+            "connected blue sky gains visible saturation ($skyChromaBefore -> $skyChromaAfter)",
+            skyChromaAfter > skyChromaBefore + 0.05f,
+        )
         assertEquals("sky hue move keeps exposure", skyLumaBefore, skyLumaAfter, 1e-5f)
         assertEquals("isolated blue object's red stays untouched", objectBefore.first, r[objectIndex], 0f)
         assertEquals("isolated blue object's green stays untouched", objectBefore.second, g[objectIndex], 0f)
@@ -466,12 +480,32 @@ class DevelopPipelineTest {
         val b = floatArrayOf(0.12f, 0.24f, 0.45f, 0.48f)
         val originals = r.indices.map { Triple(r[it], g[it], b[it]) }
         val foliageLumaBefore = 0.2126f * r[0] + 0.7152f * g[0] + 0.0722f * b[0]
+        val foliageChromaBefore = maxOf(r[0], g[0], b[0]) - minOf(r[0], g[0], b[0])
+        fun greenHue(red: Float, green: Float, blue: Float): Float {
+            val delta = maxOf(red, green, blue) - minOf(red, green, blue)
+            return 60f * ((blue - red) / delta + 2f)
+        }
+        val foliageHueBefore = greenHue(r[0], g[0], b[0])
 
-        DevelopPipeline.applyFoliageCyanShift(r, g, b, cyanShift = 0.18f)
+        DevelopPipeline.applyFoliageCyanShift(
+            r, g, b,
+            cyanShift = 0.55f,
+            saturationBoost = 0.25f,
+        )
 
         val foliageLumaAfter = 0.2126f * r[0] + 0.7152f * g[0] + 0.0722f * b[0]
+        val foliageChromaAfter = maxOf(r[0], g[0], b[0]) - minOf(r[0], g[0], b[0])
+        val foliageHueAfter = greenHue(r[0], g[0], b[0])
         assertTrue("vegetation green moves toward cyan-green", b[0] > originals[0].third + 0.05f)
         assertTrue("warm component is restrained", r[0] < originals[0].first)
+        assertTrue(
+            "foliage hue shift must be clearly visible ($foliageHueBefore -> $foliageHueAfter)",
+            foliageHueAfter > foliageHueBefore + 25f,
+        )
+        assertTrue(
+            "foliage gains saturation ($foliageChromaBefore -> $foliageChromaAfter)",
+            foliageChromaAfter > foliageChromaBefore + 0.05f,
+        )
         assertEquals("foliage hue move keeps exposure", foliageLumaBefore, foliageLumaAfter, 1e-5f)
         for (index in 1..3) {
             assertEquals("skin/neutral/cyan red stays untouched", originals[index].first, r[index], 0f)
@@ -481,10 +515,16 @@ class DevelopPipelineTest {
     }
 
     @Test fun onlyPortraStocksEnableSelectiveFoliageAndSkyResponses() {
-        assertTrue(FilmLookCatalog.entryFor("portra400")!!.look.skyTone.enabled)
-        assertTrue(FilmLookCatalog.entryFor("portra800")!!.look.skyTone.enabled)
-        assertTrue(FilmLookCatalog.entryFor("portra400")!!.look.foliageTone.enabled)
-        assertTrue(FilmLookCatalog.entryFor("portra800")!!.look.foliageTone.enabled)
+        val portra400 = FilmLookCatalog.entryFor("portra400")!!.look
+        val portra800 = FilmLookCatalog.entryFor("portra800")!!.look
+        assertTrue(portra400.skyTone.enabled)
+        assertTrue(portra800.skyTone.enabled)
+        assertTrue(portra400.foliageTone.enabled)
+        assertTrue(portra800.foliageTone.enabled)
+        assertTrue(portra400.skyTone.saturationBoost > 0f)
+        assertTrue(portra400.foliageTone.saturationBoost > 0f)
+        assertTrue(portra800.skyTone.saturationBoost > portra400.skyTone.saturationBoost)
+        assertTrue(portra800.foliageTone.cyanShift > portra400.foliageTone.cyanShift)
         assertTrue(!FilmLookCatalog.entryFor("cinestill800t")!!.look.skyTone.enabled)
         assertTrue(!FilmLookCatalog.entryFor("vision3_250d")!!.look.skyTone.enabled)
         assertTrue(!FilmLookCatalog.entryFor("cinestill800t")!!.look.foliageTone.enabled)

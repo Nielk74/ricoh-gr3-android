@@ -91,7 +91,7 @@ Research + design: **`research/FILM_EMULATION.md`**.
       `FilmLutFactory` (per-channel negative density → dye-layer coupling → independent positive
       print/scan characteristic), `DevelopPipeline` (adaptive tone/mix → luminance-neutral
       split-tone → face-gated, luminance-preserving complexion naturalisation → selective Portra
-      foliage colour → connected-sky colour → stock-coloured edge-only halation → non-tiling,
+      foliage hue/saturation → connected-sky hue/saturation → stock-coloured edge-only halation → non-tiling,
       clumped ISO-aware density grain), and `DevelopEngine` (Bitmap glue + bundled on-device ML
       Kit face bounds). The 11-stock catalog includes
       Portra 400/800, Gold, Ektar, Superia, CineStill/Vision3, Eterna, Tri-X, and HP5.
