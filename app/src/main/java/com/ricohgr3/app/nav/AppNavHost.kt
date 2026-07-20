@@ -21,8 +21,10 @@ import com.ricohgr3.app.MainViewModel
 import com.ricohgr3.app.data.PhotoExporter
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoRepository
+import com.ricohgr3.app.gallery.AutoImportScreen
 import com.ricohgr3.app.gallery.GalleryScreen
 import com.ricohgr3.app.gallery.GalleryViewModel
+import com.ricohgr3.app.gallery.TransferViewModel
 import com.ricohgr3.app.gallery.ViewerScreen
 import com.ricohgr3.app.liveview.LiveViewScreen
 import com.ricohgr3.app.liveview.LiveViewViewModel
@@ -42,6 +44,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 fun AppNavHost(
     viewModel: MainViewModel,
     galleryViewModel: GalleryViewModel,
+    transferViewModel: TransferViewModel,
     photoRepository: PhotoRepository,
     photoExporter: PhotoExporter,
     filmLookLoader: com.ricohgr3.app.looks.emulation.FilmLookLoader,
@@ -100,14 +103,37 @@ fun AppNavHost(
                 onUseCurrentWifi = viewModel::useCurrentWifi,
                 onDisconnect = viewModel::disconnect,
                 onOpenGallery = { navController.navigate(Screen.Gallery.route) },
+                onOpenAutoImport = { navController.navigate(Screen.AutoImport.route) },
                 onOpenLiveView = { navController.navigate(Screen.LiveView.route) },
                 onOpenAppUpdate = { navController.navigate(Screen.AppUpdate.route) },
                 onFireShutter = viewModel::fireShutter,
             )
         }
 
+        composable(Screen.AutoImport.route) {
+            val settings by galleryViewModel.state.collectAsStateWithLifecycle()
+            val transfer by transferViewModel.state.collectAsStateWithLifecycle()
+            AutoImportScreen(
+                settings = settings,
+                transfer = transfer,
+                onLookChange = galleryViewModel::setStickyLook,
+                onIntensityChange = galleryViewModel::setStickyIntensity,
+                onRenderingIntentChange = galleryViewModel::setStickyRenderingIntent,
+                onQualityChange = galleryViewModel::setEditedExportQuality,
+                onStart = transferViewModel::startAutoImport,
+                onCancel = transferViewModel::cancel,
+                onRetry = transferViewModel::retry,
+                onDismiss = {
+                    transferViewModel.dismiss()
+                    navController.popBackStack()
+                },
+                onBack = { navController.popBackStack() },
+            )
+        }
+
         composable(Screen.Gallery.route) {
             val state by galleryViewModel.state.collectAsStateWithLifecycle()
+            val transfer by transferViewModel.state.collectAsStateWithLifecycle()
             // Load the roll the first time the gallery is shown.
             LaunchedEffect(Unit) {
                 if (state.photos.isEmpty() && !state.isLoading) galleryViewModel.refresh()
@@ -120,11 +146,30 @@ fun AppNavHost(
                 onClearSelection = galleryViewModel::clearSelection,
                 onApplyLookToSelection = { look, intensity, renderingIntent ->
                     galleryViewModel.applyLookToSelection(look, intensity, renderingIntent)
-                    galleryViewModel.clearSelection()
                 },
                 onStickyLookChange = galleryViewModel::setStickyLook,
                 onStickyIntensityChange = galleryViewModel::setStickyIntensity,
                 onStickyRenderingIntentChange = galleryViewModel::setStickyRenderingIntent,
+                onEditedExportQualityChange = galleryViewModel::setEditedExportQuality,
+                transfer = transfer,
+                onSaveSelection = { preset ->
+                    // Keep the gallery's edited marks in sync with exactly what is being exported.
+                    galleryViewModel.applyLookToSelection(
+                        preset.look,
+                        preset.intensity,
+                        preset.renderingIntent,
+                    )
+                    val orderedSelection = state.photos
+                        .map { it.id }
+                        .filter { it in state.selected }
+                    transferViewModel.startSelection(orderedSelection, preset)
+                },
+                onCancelTransfer = transferViewModel::cancel,
+                onRetryTransfer = transferViewModel::retry,
+                onDismissTransfer = {
+                    transferViewModel.dismiss()
+                    galleryViewModel.clearSelection()
+                },
                 onBack = { navController.popBackStack() },
             )
         }

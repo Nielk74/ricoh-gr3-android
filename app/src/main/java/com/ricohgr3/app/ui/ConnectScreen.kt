@@ -69,6 +69,7 @@ fun ConnectScreen(
     onUseCurrentWifi: () -> Unit,
     onDisconnect: () -> Unit,
     onOpenGallery: () -> Unit,
+    onOpenAutoImport: () -> Unit,
     onOpenLiveView: () -> Unit,
     onOpenAppUpdate: () -> Unit,
     onFireShutter: (Boolean) -> Unit,
@@ -152,6 +153,7 @@ fun ConnectScreen(
                 onRetryWifi = onRetryWifi,
                 onUseCurrentWifi = onUseCurrentWifi,
                 onOpenGallery = onOpenGallery,
+                onOpenAutoImport = onOpenAutoImport,
                 onOpenLiveView = onOpenLiveView,
                 onDisconnect = onDisconnect,
             )
@@ -330,12 +332,17 @@ private fun WifiMode(
     onRetryWifi: () -> Unit,
     onUseCurrentWifi: () -> Unit,
     onOpenGallery: () -> Unit,
+    onOpenAutoImport: () -> Unit,
     onOpenLiveView: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         if (wifi is CameraWifiSession.State.Connected) {
-            ReadySection(onOpenGallery = onOpenGallery, onOpenLiveView = onOpenLiveView)
+            ReadySection(
+                onOpenGallery = onOpenGallery,
+                onOpenAutoImport = onOpenAutoImport,
+                onOpenLiveView = onOpenLiveView,
+            )
             Spacer(Modifier.weight(1f))
             OutlinedButton(
                 onClick = onDisconnect,
@@ -521,7 +528,11 @@ private fun WifiHandoffSection(
 }
 
 @Composable
-private fun ReadySection(onOpenGallery: () -> Unit, onOpenLiveView: () -> Unit) {
+private fun ReadySection(
+    onOpenGallery: () -> Unit,
+    onOpenAutoImport: () -> Unit,
+    onOpenLiveView: () -> Unit,
+) {
     Text(
         "Camera ready",
         style = MaterialTheme.typography.titleMedium,
@@ -534,6 +545,10 @@ private fun ReadySection(onOpenGallery: () -> Unit, onOpenLiveView: () -> Unit) 
         colors = ButtonDefaults.buttonColors(containerColor = GrTheme.colors.accent),
     ) {
         Text("Library", color = GrTheme.colors.paper, style = MaterialTheme.typography.titleMedium)
+    }
+    Spacer(Modifier.height(10.dp))
+    OutlinedButton(onClick = onOpenAutoImport, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+        Text("Auto import", color = GrTheme.colors.accent)
     }
     Spacer(Modifier.height(10.dp))
     OutlinedButton(onClick = onOpenLiveView, modifier = Modifier.fillMaxWidth().height(56.dp)) {

@@ -14,6 +14,9 @@ sealed class Screen(val route: String) {
     /** Photo gallery (contact sheet). Real screen lands in a later phase. */
     data object Gallery : Screen("gallery")
 
+    /** Preset-first whole-roll transfer with live item progress. */
+    data object AutoImport : Screen("auto-import")
+
     /** Single-photo viewer. Takes a [PHOTO_ID_ARG] path argument. */
     data object Viewer : Screen("viewer/{$PHOTO_ID_ARG}") {
         /**

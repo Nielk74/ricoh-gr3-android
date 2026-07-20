@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.9.0 — 2026-07-20
+
+- Added a preset-first **Auto import** page that scans the connected camera and saves the whole
+  roll with one original/film-look, rendering-intent, intensity, and edited-quality choice.
+- Added **Save selected** to the library's batch panel, keeping the existing multi-select look
+  workflow while baking the same settings into every selected copy.
+- Added shared, item-by-item transfer progress with current filename, saved/failed/remaining
+  counts, safe pause/continue, per-frame failure isolation, and retry of failed frames only.
+
 ## v0.8.1 — 2026-07-20
 
 - Added a persisted **Edited export** quality selector with Compact (up to 1.5 MP / JPEG 92),

@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.gallery.GalleryViewModel
+import com.ricohgr3.app.gallery.TransferViewModel
 import com.ricohgr3.app.looks.StickyLookStore
 import com.ricohgr3.app.nav.AppNavHost
 import com.ricohgr3.app.ui.theme.GrTheme
@@ -66,6 +67,13 @@ class MainActivity : ComponentActivity() {
                     val galleryViewModel: GalleryViewModel = viewModel(
                         factory = GalleryViewModel.Factory(photoRepository, stickyLookStore),
                     )
+                    val transferViewModel: TransferViewModel = viewModel(
+                        factory = TransferViewModel.Factory(
+                            photoRepository,
+                            photoExporter,
+                            filmLookLoader,
+                        ),
+                    )
 
                     var granted by remember { mutableStateOf(hasBlePermissions()) }
                     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -97,6 +105,7 @@ class MainActivity : ComponentActivity() {
                             AppNavHost(
                                 viewModel = vm,
                                 galleryViewModel = galleryViewModel,
+                                transferViewModel = transferViewModel,
                                 photoRepository = photoRepository,
                                 photoExporter = photoExporter,
                                 filmLookLoader = filmLookLoader,

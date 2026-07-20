@@ -23,11 +23,13 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -40,14 +42,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.ricohgr3.app.data.EditedExportQuality
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoItem
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.looks.emulation.RenderingIntent
-import com.ricohgr3.app.ui.LookStrip
 import com.ricohgr3.app.ui.PhotoThumbnail
 import com.ricohgr3.app.ui.theme.GrTheme
-import kotlin.math.roundToInt
 
 /**
  * The **hero** screen: a 3-column contact sheet of every frame on the camera.
@@ -70,14 +71,23 @@ fun GalleryScreen(
     onStickyLookChange: (String?) -> Unit,
     onStickyIntensityChange: (Float) -> Unit,
     onStickyRenderingIntentChange: (RenderingIntent) -> Unit,
+    onEditedExportQualityChange: (EditedExportQuality) -> Unit,
+    transfer: TransferUiState,
+    onSaveSelection: (TransferPreset) -> Unit,
+    onCancelTransfer: () -> Unit,
+    onRetryTransfer: () -> Unit,
+    onDismissTransfer: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize().background(GrTheme.colors.paper)) {
+        val selectionTransferVisible =
+            transfer.source == TransferSource.SELECTION && transfer.phase != TransferPhase.IDLE
         GalleryHeader(
             count = state.photos.size,
             editedCount = state.editedCount,
             selectionCount = state.selectionCount,
+            selectionLocked = selectionTransferVisible,
             onClearSelection = onClearSelection,
             onBack = onBack,
         )
@@ -94,6 +104,7 @@ fun GalleryScreen(
                     photos = state.photos,
                     state = state,
                     repository = repository,
+                    interactionEnabled = !selectionTransferVisible,
                     onOpenPhoto = onOpenPhoto,
                     onToggleSelect = onToggleSelect,
                 )
@@ -102,7 +113,7 @@ fun GalleryScreen(
 
         // Batch-apply bar slides up whenever frames are selected.
         AnimatedVisibility(
-            visible = state.hasSelection,
+            visible = state.hasSelection || selectionTransferVisible,
             enter = slideInVertically { it },
             exit = slideOutVertically { it },
         ) {
@@ -111,10 +122,17 @@ fun GalleryScreen(
                 stickyLook = state.stickyLook,
                 stickyIntensity = state.stickyIntensity,
                 stickyRenderingIntent = state.stickyRenderingIntent,
+                editedExportQuality = state.editedExportQuality,
                 onStickyLookChange = onStickyLookChange,
                 onStickyIntensityChange = onStickyIntensityChange,
                 onStickyRenderingIntentChange = onStickyRenderingIntentChange,
+                onEditedExportQualityChange = onEditedExportQualityChange,
                 onApply = onApplyLookToSelection,
+                transfer = transfer,
+                onSave = onSaveSelection,
+                onCancelTransfer = onCancelTransfer,
+                onRetryTransfer = onRetryTransfer,
+                onDismissTransfer = onDismissTransfer,
             )
         }
     }
@@ -125,6 +143,7 @@ private fun GalleryHeader(
     count: Int,
     editedCount: Int,
     selectionCount: Int,
+    selectionLocked: Boolean,
     onClearSelection: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -148,8 +167,16 @@ private fun GalleryHeader(
             Text(text = meta, style = MaterialTheme.typography.bodyMedium, color = GrTheme.colors.ink)
         }
         if (selectionCount > 0) {
-            TextButton(onClick = onClearSelection) {
-                Text("$selectionCount selected  ✕", color = GrTheme.colors.accent)
+            if (selectionLocked) {
+                Text(
+                    "$selectionCount selected",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = GrTheme.colors.inkSoft,
+                )
+            } else {
+                TextButton(onClick = onClearSelection) {
+                    Text("$selectionCount selected  ✕", color = GrTheme.colors.accent)
+                }
             }
         } else {
             TextButton(onClick = onBack) { Text("Back", color = GrTheme.colors.inkSoft) }
@@ -162,6 +189,7 @@ private fun ContactSheet(
     photos: List<PhotoItem>,
     state: GalleryUiState,
     repository: PhotoRepository,
+    interactionEnabled: Boolean,
     onOpenPhoto: (PhotoId) -> Unit,
     onToggleSelect: (PhotoId) -> Unit,
 ) {
@@ -179,6 +207,7 @@ private fun ContactSheet(
                 isSelected = state.isSelected(item.id),
                 isEdited = state.isEdited(item.id),
                 selecting = state.hasSelection,
+                interactionEnabled = interactionEnabled,
                 onOpen = { onOpenPhoto(item.id) },
                 onToggleSelect = { onToggleSelect(item.id) },
             )
@@ -195,6 +224,7 @@ private fun ContactFrame(
     isSelected: Boolean,
     isEdited: Boolean,
     selecting: Boolean,
+    interactionEnabled: Boolean,
     onOpen: () -> Unit,
     onToggleSelect: () -> Unit,
 ) {
@@ -209,6 +239,7 @@ private fun ContactFrame(
             // Tap opens the viewer; while multi-selecting, tap toggles selection instead.
             // Long-press enters (or extends) multi-select.
             .combinedClickable(
+                enabled = interactionEnabled,
                 onClick = { if (selecting) onToggleSelect() else onOpen() },
                 onLongClick = onToggleSelect,
             ),
@@ -265,8 +296,8 @@ private fun ContactFrame(
 }
 
 /**
- * Sticky batch-apply bar. Shows the selection count, a [LookStrip] pre-selected to the sticky
- * look, and an Apply button that styles every selected frame with the chosen look.
+ * Sticky batch panel. Shows the selection count, look and quality controls, plus separate actions
+ * to apply the edit state or develop and save every selected frame.
  */
 @Composable
 private fun BatchApplyBar(
@@ -274,10 +305,17 @@ private fun BatchApplyBar(
     stickyLook: String?,
     stickyIntensity: Float,
     stickyRenderingIntent: RenderingIntent,
+    editedExportQuality: EditedExportQuality,
     onStickyLookChange: (String?) -> Unit,
     onStickyIntensityChange: (Float) -> Unit,
     onStickyRenderingIntentChange: (RenderingIntent) -> Unit,
+    onEditedExportQualityChange: (EditedExportQuality) -> Unit,
     onApply: (String?, Float, RenderingIntent) -> Unit,
+    transfer: TransferUiState,
+    onSave: (TransferPreset) -> Unit,
+    onCancelTransfer: () -> Unit,
+    onRetryTransfer: () -> Unit,
+    onDismissTransfer: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -285,132 +323,103 @@ private fun BatchApplyBar(
             .background(GrTheme.colors.paperEdge),
     ) {
         HorizontalDivider(color = GrTheme.colors.hair)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = if (stickyLook == null) {
-                    "RESET LOOK"
-                } else {
-                    "APPLY LOOK  ·  ${(stickyIntensity * 100f).roundToInt()}%  ·  " +
-                        stickyRenderingIntent.batchLabel
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = GrTheme.colors.inkSoft,
-                modifier = Modifier.weight(1f),
+        if (transfer.source == TransferSource.SELECTION && transfer.phase != TransferPhase.IDLE) {
+            TransferProgressPanel(
+                state = transfer,
+                onCancel = onCancelTransfer,
+                onRetry = onRetryTransfer,
+                onDismiss = onDismissTransfer,
+                modifier = Modifier.padding(12.dp),
             )
-            TextButton(
-                onClick = {
-                    onApply(stickyLook, stickyIntensity, stickyRenderingIntent)
-                },
+        } else {
+            val anotherTransferActive = transfer.isActive
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "BATCH PROCESS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = GrTheme.colors.inkSoft,
+                    )
+                    Text(
+                        "$selectionCount selected · choose one finish",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = GrTheme.colors.ink,
+                    )
+                }
                 Text(
-                    if (stickyLook == null) {
-                        "Reset $selectionCount  →"
-                    } else {
-                        "Apply to $selectionCount  →"
-                    },
-                    color = GrTheme.colors.accent,
-                )
-            }
-        }
-        LookStrip(
-            selected = stickyLook,
-            onSelect = onStickyLookChange,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-        )
-        if (stickyLook != null) {
-            BatchRenderingIntentControl(
-                value = stickyRenderingIntent,
-                onValueChange = onStickyRenderingIntentChange,
-            )
-            BatchIntensityControl(
-                value = stickyIntensity,
-                onValueChange = onStickyIntensityChange,
-            )
-        }
-    }
-}
-
-@Composable
-private fun BatchRenderingIntentControl(
-    value: RenderingIntent,
-    onValueChange: (RenderingIntent) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "RENDERING",
-            style = MaterialTheme.typography.labelSmall,
-            color = GrTheme.colors.inkSoft,
-        )
-        Spacer(Modifier.weight(1f))
-        RenderingIntent.entries.forEach { intent ->
-            TextButton(onClick = { onValueChange(intent) }) {
-                Text(
-                    intent.batchLabel,
+                    editedExportQuality.displayName.uppercase(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (intent == value) {
-                        GrTheme.colors.accent
-                    } else {
-                        GrTheme.colors.inkSoft
-                    },
+                    color = if (stickyLook == null) GrTheme.colors.inkSoft else GrTheme.colors.accent,
                 )
+            }
+            TransferPresetEditor(
+                look = stickyLook,
+                intensity = stickyIntensity,
+                renderingIntent = stickyRenderingIntent,
+                quality = editedExportQuality,
+                onLookChange = onStickyLookChange,
+                onIntensityChange = onStickyIntensityChange,
+                onRenderingIntentChange = onStickyRenderingIntentChange,
+                onQualityChange = onEditedExportQualityChange,
+                enabled = !anotherTransferActive,
+            )
+            if (anotherTransferActive) {
+                Text(
+                    "Another transfer is already running. Finish or stop it before saving this selection.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = GrTheme.colors.accent,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        onApply(stickyLook, stickyIntensity, stickyRenderingIntent)
+                    },
+                    enabled = !anotherTransferActive,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("Apply only", color = GrTheme.colors.ink)
+                }
+                Button(
+                    onClick = {
+                        onSave(
+                            TransferPreset(
+                                look = stickyLook,
+                                intensity = stickyIntensity,
+                                renderingIntent = stickyRenderingIntent,
+                                quality = editedExportQuality,
+                            ),
+                        )
+                    },
+                    enabled = !anotherTransferActive,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = GrTheme.colors.accent),
+                ) {
+                    Text(
+                        if (stickyLook == null) {
+                            "Save $selectionCount originals"
+                        } else {
+                            "Save $selectionCount photos"
+                        },
+                        color = GrTheme.colors.paper,
+                    )
+                }
             }
         }
     }
 }
-
-@Composable
-private fun BatchIntensityControl(
-    value: Float,
-    onValueChange: (Float) -> Unit,
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "EFFECT",
-                style = MaterialTheme.typography.labelSmall,
-                color = GrTheme.colors.inkSoft,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                "${(value * 100f).roundToInt()}%",
-                style = MaterialTheme.typography.labelSmall,
-                color = GrTheme.colors.accent,
-            )
-        }
-        Slider(
-            value = value.coerceIn(0.5f, 1.5f),
-            onValueChange = { raw ->
-                onValueChange((raw * 20f).roundToInt() / 20f)
-            },
-            valueRange = 0.5f..1.5f,
-            steps = 19,
-            colors = SliderDefaults.colors(
-                thumbColor = GrTheme.colors.accent,
-                activeTrackColor = GrTheme.colors.accent,
-                inactiveTrackColor = GrTheme.colors.hair,
-                activeTickColor = GrTheme.colors.paper,
-                inactiveTickColor = GrTheme.colors.inkSoft,
-            ),
-            modifier = Modifier.fillMaxWidth().height(34.dp),
-        )
-    }
-}
-
-private val RenderingIntent.batchLabel: String
-    get() = if (this == RenderingIntent.STOCK) "STOCK" else "SMART"
 
 @Composable
 private fun LoadingState() {

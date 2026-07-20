@@ -69,7 +69,8 @@ private fun LookChip(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .width(56.dp)
+            // Wide enough for the mono "Standard" label without an orphaned final letter.
+            .width(64.dp)
             .clickable(onClick = onClick),
     ) {
         Spacer(

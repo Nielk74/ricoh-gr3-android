@@ -118,7 +118,9 @@ Concept artifacts approved; full-minimal Concept-A for single-photo viewer.
 - [x] Shared **edit core** in `GalleryViewModel`: per-frame `EditState` + sticky look (DataStore),
       one VM shared gallery↔viewer so a look applied in either shows instantly in the other
 - [ ] Remaining Concept-A screens: connect polish, live view + shutter, settings
-- [ ] Transfer progress UX; on-device thumbnail/photo load against a real GR III
+- [x] Transfer progress UX: auto-import and selected-photo saves share current-file, determinate
+      item progress, saved/failed/remaining counts, pause/continue, and failed-frame retry
+- [ ] On-device thumbnail/photo load against a real GR III
 - [ ] Live-view viewfinder UX (tap-to-focus, exposure controls, minimal chrome)
 - [ ] Onboarding / camera-pairing flow (explain BLE→Wi-Fi handoff simply)
 - [ ] Accessibility pass (contrast, touch targets, TalkBack)
@@ -131,8 +133,9 @@ Decision: **start on-camera, grow in-app**; Auto-Look kept; sticky look + edited
 - [ ] **7.1 On-camera looks** (ships first): push GR III `effect` before capture (`efc_posiFilm`,
       `efc_bleachBypass`, `efc_hardMonochrome`, `efc_HDRTone`, `col_vivid`…) via `/v1/params/camera`
 - [~] **7.2 Look UX in library**: edited mark ✅, sticky default across frames ✅, batch apply ✅,
-      before/after (press-and-hold) ✅, reset ✅, real developed preview ✅. LookSwatch is only the
-      picker chip/fallback; the viewer renders the same adaptive pipeline used for export.
+      batch save + live progress ✅, before/after (press-and-hold) ✅, reset ✅, real developed
+      preview ✅. LookSwatch is only the picker chip/fallback; the viewer renders the same adaptive
+      pipeline used for export.
 - [~] **7.3 In-app develop engine**: scene-adaptive film pipeline ✅ (robust tonal analysis,
       bounded display-referred print curves + dye cross-talk, adaptive stock mix/skin protection,
       luminance-neutral split-tone, scaled halation, ISO-aware grain), 11 curated stocks ✅,
@@ -140,7 +143,8 @@ Decision: **start on-camera, grow in-app**; Auto-Look kept; sticky look + edited
       ✅. Remaining: **GPU/AGSL preview fast-path** (API 33+) so full-res develop is instant on
       new devices (CPU path is the portable baseline).
 - [ ] **7.4 Auto-Look**: heuristic scene→look (EXIF + thumbnail), opt-in; v2 tiny on-device model
-- [ ] **7.5 Presets & sharing**: save/share edit stacks, apply on import (no cloud)
+- [~] **7.5 Presets & sharing**: sticky look/intensity/rendering/quality now apply to whole-roll
+      auto import and batch save ✅; named preset files and share/import remain (no cloud)
 - [ ] **7.6 Advanced editing** (the **⋮ three-dots** menu on a photo): a per-photo manual editor
       that opens from an overflow menu, sitting *on top of* the film-stock look (the stock is the
       starting grade; these are fine adjustments over it). Scope:
