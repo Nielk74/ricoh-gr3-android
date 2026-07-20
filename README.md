@@ -11,7 +11,7 @@ captures.
 The app is independent and unofficial. It uses the camera's community-documented BLE GATT and
 local HTTP interfaces; it does not require Ricoh's Image Sync app or a cloud account.
 
-> **Current release: v0.7.0.** The app, protocol clients, colour-science core, update path, and
+> **Current release: v0.8.0.** The app, protocol clients, colour-science core, update path, and
 > automated tests are implemented. Real-camera radio behaviour still needs validation across GR
 > III/IIIx firmware and Android vendors; see [Current limitations](#current-limitations).
 
@@ -23,8 +23,8 @@ local HTTP interfaces; it does not require Ricoh's Image Sync app or a cloud acc
 | Wi-Fi | Join the camera AP on Android 10+, bind traffic to its internet-less network, show MJPEG live view, fire the Wi-Fi shutter with retry, and read camera properties. |
 | Library | Browse a three-column camera contact sheet, inspect metadata, distinguish RAW files, select batches, download JPEG/DNG originals, and mark edited frames. |
 | Viewer | Render the real developed preview, press and hold for before/after, choose a sticky look, adjust effect from 50–150%, reset, and save original or edited copies to `Pictures/GR3`. |
-| Film Lab | Eleven hand-authored film/cinema looks with adaptive tone, negative-to-print colour, natural skin isolation, Portra sky and foliage handling, stock-coloured halation, and density grain. |
-| Updates | Check GitHub Releases at most once every 24 hours, offer newer stable builds, verify the published APK SHA-256, and hand installation to Android. |
+| Film Lab | Eleven provenance-labelled film/cinema looks with literal Stock and scene-protected Smart rendering, negative-to-print density, natural skin isolation, physical-scale diffusion, two-lobe halation, and film-plane grain. |
+| Updates | Check GitHub Releases automatically at most once every 24 hours or manually on demand, verify the published APK SHA-256, and hand installation to Android. |
 
 ## Connection model
 
@@ -54,9 +54,13 @@ the camera yourself. The investigation is documented in
 
 ## Film Lab
 
-The Film Lab is not a fixed colour overlay. It measures the actual frame and adjusts bounded
-parts of each stock response for high-key, backlit, low-key, mixed-light, and high-ISO scenes.
-Preview and export share the same pure-Kotlin processing core.
+The Film Lab is not a fixed colour overlay. **Stock** applies the authored transform without
+content-dependent decisions; **Smart** adds bounded protection for high-key, backlit, low-key,
+mixed-light, and high-ISO scenes, plus a very small scene-guarded warmth bias for explicitly
+daylight-balanced colour stocks. Preview and export share the selected rendering intent and stable
+per-photo grain seed. For JPEGs, the canonical normalized analyzer is independently evaluated at
+each size and is tested to keep its decisions stable across resolution; DNG has the
+device-rendering limitation documented below.
 
 ### Included looks
 
@@ -71,16 +75,18 @@ Preview and export share the same pure-Kotlin processing core.
 The processing order is deliberate:
 
 ```text
-JPEG or rendered DNG
-  → scene analysis and bounded tone protection
+JPEG or platform-rendered DNG
+  → Stock contract or canonical Smart analysis/protection
+  → optional Smart daylight warmth (scene-guarded, luminance-stable)
   → optional film-negative exposure bracket
-  → per-channel negative density
-  → positive print / scanner response
+  → absolute negative optical density and transmittance
+  → positive print density / reflectance or scanner response
   → luminance-neutral split tone
   → connected, face-gated skin naturalisation
   → selective Portra foliage and top-connected sky colour
-  → stock-coloured halation
-  → film-plane density grain
+  → physical-scale image-structure diffusion
+  → immutable-source, two-lobe stock-coloured halation
+  → analytically integrated film-plane density grain
   → high-quality JPEG export
 ```
 
@@ -88,6 +94,21 @@ Important details:
 
 - **Effect intensity:** 50–150% changes the stock character and emulsion layers. Tonal
   protection is not over-amplified, so 150% does not become an HDR effect.
+- **Rendering intent:** Stock is scene-invariant and suitable for calibration; Smart alone may
+  adjust tone protection, semantic skin/foliage/sky handling, and the restrained daylight warmth
+  described below. The choice travels with each in-session frame edit; the next-frame default is
+  persisted across launches.
+- **Pleasing warmth:** Smart applies a luminance-stable +6-mired Bradford adaptation before
+  the negative/print transform, but only to profiles explicitly classified as daylight colour
+  film. Reliable neutral samples fade the bias when a scene already has a strong warm or cool
+  cast, while a pixel-level chroma/gamut guard leaves vivid boundary colours effectively
+  untouched. Stock, tungsten-balanced CineStill 800T/Vision3 500T, monochrome Tri-X/HP5, and
+  unspecified-balance Eterna are unchanged. This is a product rendering preference, not a claim
+  of matching an Apple camera pipeline.
+- **Density and provenance:** negative and print stages use explicit optical
+  density/transmittance/reflectance. Every built-in names its material/process/source and remains
+  labelled `MANUFACTURER_ANCHORED`; no built-in pretends to be a measurement from this app's
+  camera, film batch, chemistry, or scanner.
 - **Natural portraits:** an on-device face detector gates a chromaticity mask. Complexions are
   protected without globally desaturating red fabric, wood, hair, glasses, beard detail, or warm
   light.
@@ -96,25 +117,30 @@ Important details:
   toward cyan-green plus their own saturation lift; skin, neutrals, deep shadows, pale highlights,
   and existing cyan are excluded. Both transforms preserve luminance and compress chroma into the
   available gamut rather than clipping channels.
-- **Halation:** generated from highlight-edge spill in linear light rather than a uniform bloom.
-  CineStill 800T uses the strong red fringe associated with its rem-jet-free character; cinema
-  stocks remain warmer and more restrained.
-- **Grain:** applied after tone, blur, and halation on the film plane. A non-repeating
-  density-domain field stays sharp over blurred detail, peaks through shadows/midtones, rolls off
-  near black and bright highlights, and uses larger, more irregular crystals for faster stocks.
-  Edited JPEGs export at quality 97 to retain that texture.
+- **Image structure and halation:** a weak radius in film micrometres approximates published
+  stock/process MTF families. Halation then derives broad red and tight orange lobes from the same
+  untouched highlight source, so a first halo cannot recursively create the second.
+- **Grain:** one infinite crystal field lives in physical film coordinates. Each preview/export
+  pixel integrates its footprint analytically, preserving the same field and apparent crystal
+  scale across resolution. Density variation peaks through low-mid/mid tones, rolls off near
+  black/white, and uses larger, more irregular crystals for faster stocks. Edited JPEGs export at
+  quality 97 to retain that texture.
+- **DNG boundary:** Android, not this app, renders the DNG into display RGB. It is not a
+  scene-linear RAW workflow and can vary by device; the viewer labels that limitation.
 - **No mystery LUT pack:** the negative, print, colour-coupling, grain, and spatial models are
   authored in this repository. Stock names describe aesthetic targets, not manufacturer-certified
   colourimetry.
 
-See the methodology in [`research/FILM_EMULATION.md`](research/FILM_EMULATION.md), the Portra
-grain measurements in
+See the methodology in [`research/FILM_EMULATION.md`](research/FILM_EMULATION.md), the
+[measurement and provenance contract](research/FILM_FIDELITY_CALIBRATION.md), the Portra grain
+measurements in
 [`research/PORTRA_GRAIN_CALIBRATION.md`](research/PORTRA_GRAIN_CALIBRATION.md), and the reproducible
 preview workflow in [`docs/FILM_PREVIEWS.md`](docs/FILM_PREVIEWS.md).
 
 ### Generated previews
 
-These are generated from one neutral GR III sample through the exact pipeline used by the app.
+These use Smart intent at the authored 100% strength and are generated from one neutral GR III
+sample through the same pure-Kotlin pipeline used by the app.
 
 | Standard | Portra 400 | Portra 800 | Gold 200 |
 |:--:|:--:|:--:|:--:|
@@ -139,9 +165,12 @@ open it on the Android device, and allow installation from that source when Andr
   uses scoped storage.
 
 After installation, the app checks only this repository's public GitHub Releases feed. A visible
-banner appears when a newer stable APK exists. Download is always user-initiated, its SHA-256 is
-verified when the release publishes one, and Android still requires confirmation before
-installation. Updates must be signed with the same key as the installed app.
+banner appears when a newer stable APK exists, and **App update** on the home screen provides a
+manual check at any time. Automatic checks remain limited to once per 24 hours. Release discovery
+requests up to 100 entries at a time and follows GitHub pagination through the final page, so an
+installable build cannot disappear behind later incomplete releases. Download is always
+user-initiated, its SHA-256 is verified when the release publishes one, and Android still requires
+confirmation before installation. Updates must be signed with the same key as the installed app.
 
 ## Use the app
 
@@ -228,7 +257,7 @@ app/src/main/java/com/ricohgr3/app/
 ├── data/                Camera photo repository, models, persistence and MediaStore export
 ├── gallery/             Contact sheet, viewer, edit state and save/develop flows
 ├── liveview/            MJPEG viewfinder state and Wi-Fi shutter
-├── looks/emulation/     Scene analysis, stock models, skin, tone, halation and grain
+├── looks/emulation/     Colour math, density profiles, scene/skin, optics, halation and grain
 ├── update/              Release discovery, semantic versions, APK download and checksum
 ├── ui/update/           In-app update banner and progress UI
 └── nav/                 Compose navigation and transport flow
@@ -257,9 +286,10 @@ Automated coverage includes:
 - camera HTTP models, fixtures, and MockWebServer integration;
 - MJPEG frame parsing;
 - gallery/edit persistence and viewer save logic;
-- scene adaptation, LUT interpolation, negative/print behaviour, skin masks, selective sky and
-  foliage transforms, halation, and deterministic grain statistics;
-- semantic-version selection, draft/prerelease filtering, and update download checks;
+- canonical scene adaptation, LUT domains/interpolation, negative/print density, B&W capture
+  response, exact colour/luminance behavior, skin masks, selective sky/foliage, physical-scale
+  diffusion, immutable-source halation, and resolution-independent grain;
+- paginated semantic-version selection, draft/prerelease filtering, and update download checks;
 - reproducible README and 3000 px review renders.
 
 CI runs `assembleDebug`, Android lint, the test suites, and film-preview generation on every
@@ -271,7 +301,8 @@ behaviour on every physical camera and phone.
 - Photos are downloaded from the camera's local access point and developed on the phone.
 - The app does not upload photos or edit data to a cloud service.
 - Camera credentials are stored in private app DataStore.
-- The update checker contacts GitHub's public Releases API only, no more than once per 24 hours.
+- The automatic update check contacts GitHub's public Releases API no more than once per 24 hours;
+  an explicit **Check again** action makes an additional user-requested call.
 - Release APKs are checksum-verified when possible and still subject to Android's same-signing-key
   and user-confirmation rules.
 
@@ -287,11 +318,17 @@ behaviour on every physical camera and phone.
 - Live view does not yet provide tap-to-focus or the complete exposure-control surface.
 - CPU film development is the portable baseline and can take time on older phones. A future AGSL
   path can accelerate preview.
-- Full-resolution development is bounded to roughly 6 MP to avoid exhausting a mobile heap. The
-  original 24 MP JPEG/DNG remains available and can be saved untouched.
+- Edited development uses a heap-aware resolution ceiling: roughly 1.6 MP on a 128 MiB heap,
+  3.1 MP on 256 MiB, and at most 6 MP on 512 MiB or larger heaps. The original 24 MP JPEG/DNG
+  remains available and can be saved untouched.
+- The working bitmap and edited export remain 8-bit sRGB/ARGB_8888 and JPEG. A high-bit-depth,
+  scene-linear, wide-gamut path is still required before this is a reference RAW developer.
 - DNG rendering uses Android's platform `ImageDecoder` on API 28+ and therefore varies by device.
-  If a device cannot render a DNG, the app preserves the original instead of producing a broken
-  edit.
+  Edited DNG save is disabled on API 26–27; if a newer device cannot render a particular DNG, the
+  app reports that failure and directs the user to **Save original** instead of silently labelling
+  untouched sensor data as an edited result.
+- Built-in stock values are manufacturer-anchored visual fits. Traceable stock/process/scan
+  measurements and held-out validation are still required for lab-measured fidelity claims.
 - The Settings route, onboarding polish, and instrumented on-device end-to-end suite are not yet
   complete.
 
@@ -299,11 +336,13 @@ behaviour on every physical camera and phone.
 
 | Document | Purpose |
 | --- | --- |
+| [`CHANGELOG.md`](CHANGELOG.md) | User-visible release changes |
 | [`ROADMAP.md`](ROADMAP.md) | Living implementation plan and remaining hardware/product work |
 | [`research/FEASIBILITY.md`](research/FEASIBILITY.md) | GR III wireless protocol feasibility |
 | [`research/BLE_WIFI_WAKE_INVESTIGATION.md`](research/BLE_WIFI_WAKE_INVESTIGATION.md) | Why automatic BLE-to-Wi-Fi wake is not shipped |
 | [`docs/PHASE7-LOOKS.md`](docs/PHASE7-LOOKS.md) | Film Lab product and processing design |
 | [`research/FILM_EMULATION.md`](research/FILM_EMULATION.md) | Colour-science model and implementation |
+| [`research/FILM_FIDELITY_CALIBRATION.md`](research/FILM_FIDELITY_CALIBRATION.md) | Measurement, provenance, fitting, and validation contract |
 | [`research/PORTRA_GRAIN_CALIBRATION.md`](research/PORTRA_GRAIN_CALIBRATION.md) | Portra 400/800 grain evidence and targets |
 | [`docs/FILM_PREVIEWS.md`](docs/FILM_PREVIEWS.md) | Reproducible preview and review-lab workflow |
 | [`RELEASING.md`](RELEASING.md) | Signing, versioning, checksums, tags, and in-app updates |
@@ -311,6 +350,7 @@ behaviour on every physical camera and phone.
 ## Releases
 
 Pushing a `v*` tag runs the release workflow. The tag becomes `versionName`; GitHub Actions builds
-the APK and AAB, signs them when release secrets are configured, writes the APK SHA-256, and
-publishes all three files to GitHub Releases. See [`RELEASING.md`](RELEASING.md) before cutting a
-tag, especially because future Android updates must use the same signing key.
+and verifies the APK/AAB after tests, lint, and preview-drift checks; release signing secrets are
+required. It writes the APK SHA-256 and publishes all three files to GitHub Releases. See
+[`RELEASING.md`](RELEASING.md) before cutting a tag, especially because future Android updates
+must use the same signing key.

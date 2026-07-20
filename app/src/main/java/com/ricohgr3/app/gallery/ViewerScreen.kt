@@ -44,6 +44,9 @@ import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.data.PhotoResult
 import com.ricohgr3.app.looks.emulation.FilmLookCatalog
+import com.ricohgr3.app.looks.emulation.DevelopOptions
+import com.ricohgr3.app.looks.emulation.RenderingIntent
+import com.ricohgr3.app.looks.emulation.stableRenderSeed
 import kotlinx.coroutines.launch
 import com.ricohgr3.app.ui.LookStrip
 import com.ricohgr3.app.ui.LookSwatch
@@ -62,8 +65,8 @@ import kotlin.math.roundToInt
  *  - film-rebate metadata (frame id, ISO/shutter/aperture) in mono,
  *  - Reset / Apply, where Apply also updates the sticky default.
  *
- * This is a real in-app develop preview, not an indicative tint: the same adaptive pipeline,
- * stock intensity, non-tiling density grain, and halation model are used by edited export.
+ * This is a real in-app develop preview, not an indicative tint: the same Stock/Smart contract,
+ * stock intensity, stable film-plane grain, and halation model are used by edited export.
  * On-camera `effect` remains a separate capture-time feature and is not retroactive.
  */
 @Composable
@@ -74,13 +77,22 @@ fun ViewerScreen(
     filmLookLoader: com.ricohgr3.app.looks.emulation.FilmLookLoader? = null,
     appliedLook: String?,
     appliedIntensity: Float,
+    appliedRenderingIntent: RenderingIntent,
     stickyLook: String?,
     stickyIntensity: Float,
-    onApplyLook: (String?, Float) -> Unit,
+    stickyRenderingIntent: RenderingIntent,
+    onApplyLook: (String?, Float, RenderingIntent) -> Unit,
     onResetLook: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isDng = id.file.substringAfterLast('.', "").equals("DNG", ignoreCase = true)
+    val editedSaveUnavailableReason =
+        if (isDng && !supportsPlatformDngDevelop(android.os.Build.VERSION.SDK_INT)) {
+            "Edited DNG export requires Android 9 or newer; Save original remains available."
+        } else {
+            null
+        }
     var bitmap by remember(id) { mutableStateOf<ImageBitmap?>(null) }
     var info by remember(id) { mutableStateOf<PhotoInfo?>(null) }
     var error by remember(id) { mutableStateOf<String?>(null) }
@@ -91,6 +103,11 @@ fun ViewerScreen(
     var effectStrength by remember(id) {
         mutableStateOf(
             (if (appliedLook != null) appliedIntensity else stickyIntensity).coerceIn(0.5f, 1.5f),
+        )
+    }
+    var renderingIntent by remember(id) {
+        mutableStateOf(
+            if (appliedLook != null) appliedRenderingIntent else stickyRenderingIntent,
         )
     }
     var showingBefore by remember { mutableStateOf(false) }
@@ -117,6 +134,7 @@ fun ViewerScreen(
                             filmLookLoader,
                             iso = parseIso(info?.sv),
                             effectStrength = effectStrength,
+                            renderingIntent = renderingIntent,
                         )
                     }
                     else saveOriginal(id, repository, exporter)
@@ -163,10 +181,18 @@ fun ViewerScreen(
     }
 
     // Render the REAL film develop onto the small VIEW bitmap whenever the picked look (or the
-    // loaded frame) changes, so the on-screen preview matches what "Save with …" will produce —
-    // not just an indicative tint. Runs off the main thread; failures fall back to the raw frame
-    // (never crash, never block the UI). The develop is on a ~720×480 bitmap, so it's cheap.
-    LaunchedEffect(picked, effectStrength, rawBitmap, filmLookLoader, info?.sv) {
+    // loaded frame) changes, using the same intent, stock parameters, and stable grain field as
+    // "Save with …" rather than an indicative tint. Resolution and, for DNG, the input rendition
+    // can still differ. Runs off the main thread; failures fall back to the raw frame (never
+    // crash, never block the UI). The develop is on a ~720×480 bitmap, so it's cheap.
+    LaunchedEffect(
+        picked,
+        effectStrength,
+        renderingIntent,
+        rawBitmap,
+        filmLookLoader,
+        info?.sv,
+    ) {
         // Debounce slider drags. Superseded effects cancel during this delay, so the CPU renderer
         // only develops the settled value instead of queueing every intermediate tick.
         kotlinx.coroutines.delay(90)
@@ -186,6 +212,10 @@ fun ViewerScreen(
                                 lut,
                                 iso = parseIso(info?.sv),
                                 effectStrength = effectStrength,
+                                options = DevelopOptions(
+                                    intent = renderingIntent,
+                                    renderSeed = stableRenderSeed(id.toString()),
+                                ),
                             )
                             .asImageBitmap()
                     }
@@ -244,6 +274,14 @@ fun ViewerScreen(
 
         HorizontalDivider(color = GrTheme.colors.hair)
         MetadataRebate(id = id, info = info, look = picked)
+        if (isDng) {
+            Text(
+                text = "DNG preview: camera rendition · export: device RAW renderer",
+                style = MaterialTheme.typography.labelSmall,
+                color = GrTheme.colors.inkSoft,
+                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
+            )
+        }
         HorizontalDivider(color = GrTheme.colors.hair)
 
         // Look picker — press-and-hold the photo above to compare against the original.
@@ -263,6 +301,10 @@ fun ViewerScreen(
         )
 
         if (picked != null) {
+            RenderingIntentControl(
+                value = renderingIntent,
+                onValueChange = { renderingIntent = it },
+            )
             EffectStrengthControl(
                 value = effectStrength,
                 onValueChange = { effectStrength = it },
@@ -274,7 +316,9 @@ fun ViewerScreen(
             appliedLook = appliedLook,
             effectStrength = effectStrength,
             appliedIntensity = appliedIntensity,
-            onApply = { onApplyLook(picked, effectStrength) },
+            renderingIntent = renderingIntent,
+            appliedRenderingIntent = appliedRenderingIntent,
+            onApply = { onApplyLook(picked, effectStrength, renderingIntent) },
             onReset = {
                 picked = null
                 effectStrength = 1f
@@ -285,8 +329,10 @@ fun ViewerScreen(
         SaveBar(
             picked = picked,
             effectStrength = effectStrength,
+            renderingIntent = renderingIntent,
             saving = saving,
             status = saveStatus,
+            editedSaveUnavailableReason = editedSaveUnavailableReason,
             onSaveOriginal = { runSave(edited = false) },
             onSaveEdited = { runSave(edited = true) },
         )
@@ -303,8 +349,10 @@ fun ViewerScreen(
 private fun SaveBar(
     picked: String?,
     effectStrength: Float,
+    renderingIntent: RenderingIntent,
     saving: Boolean,
     status: String?,
+    editedSaveUnavailableReason: String?,
     onSaveOriginal: () -> Unit,
     onSaveEdited: () -> Unit,
 ) {
@@ -327,16 +375,20 @@ private fun SaveBar(
         }
         Spacer(Modifier.weight(1f))
         if (picked != null) {
-            TextButton(onClick = onSaveEdited, enabled = !saving) {
+            TextButton(
+                onClick = onSaveEdited,
+                enabled = !saving && editedSaveUnavailableReason == null,
+            ) {
                 Text(
                     "Save with ${FilmLookCatalog.displayNameFor(picked)} · " +
-                        "${(effectStrength * 100f).roundToInt()}%",
+                        "${(effectStrength * 100f).roundToInt()}% · " +
+                        renderingIntent.displayName,
                     color = GrTheme.colors.accent,
                 )
             }
         }
     }
-    status?.let {
+    (status ?: editedSaveUnavailableReason)?.let {
         Text(
             text = it,
             style = MaterialTheme.typography.labelSmall,
@@ -345,6 +397,10 @@ private fun SaveBar(
         )
     }
 }
+
+/** Android's platform DNG renderer is only available from API 28. */
+internal fun supportsPlatformDngDevelop(sdkInt: Int): Boolean =
+    sdkInt >= android.os.Build.VERSION_CODES.P
 
 @Composable
 private fun ViewerHeader(
@@ -476,7 +532,57 @@ private fun formatExposure(info: PhotoInfo): String {
     return if (parts.isEmpty()) "· · ·" else parts.joinToString("  ·  ")
 }
 
-/** 50–150% stock intensity. 100% is calibrated; 5% ticks plus debounce bound preview churn. */
+/** Explicit choice between a literal authored stock and bounded scene/subject protection. */
+@Composable
+private fun RenderingIntentControl(
+    value: RenderingIntent,
+    onValueChange: (RenderingIntent) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "RENDERING",
+                style = MaterialTheme.typography.labelSmall,
+                color = GrTheme.colors.inkSoft,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            RenderingIntent.entries.forEach { intent ->
+                TextButton(onClick = { onValueChange(intent) }) {
+                    Text(
+                        intent.displayName.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (intent == value) {
+                            GrTheme.colors.accent
+                        } else {
+                            GrTheme.colors.inkSoft
+                        },
+                    )
+                }
+            }
+        }
+        Text(
+            text = if (value == RenderingIntent.STOCK) {
+                "Authored stock core · no scene or subject correction"
+            } else {
+                "Stock response + bounded scene/subject protection · daylight warmth when eligible"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = GrTheme.colors.inkSoft,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+    }
+}
+
+private val RenderingIntent.displayName: String
+    get() = if (this == RenderingIntent.STOCK) "Stock" else "Smart"
+
+/** 50–150% stock intensity. 100% is authored; 5% ticks plus debounce bound preview churn. */
 @Composable
 private fun EffectStrengthControl(
     value: Float,
@@ -526,6 +632,8 @@ private fun ViewerActions(
     appliedLook: String?,
     effectStrength: Float,
     appliedIntensity: Float,
+    renderingIntent: RenderingIntent,
+    appliedRenderingIntent: RenderingIntent,
     onApply: () -> Unit,
     onReset: () -> Unit,
 ) {
@@ -544,7 +652,12 @@ private fun ViewerActions(
         // Applying makes `picked` sticky, so the next frame opens pre-set to it.
         val intensityChanged =
             picked != null && abs(effectStrength - appliedIntensity.coerceIn(0.5f, 1.5f)) > 0.01f
-        TextButton(onClick = onApply, enabled = picked != appliedLook || intensityChanged) {
+        val renderingIntentChanged =
+            picked != null && renderingIntent != appliedRenderingIntent
+        TextButton(
+            onClick = onApply,
+            enabled = picked != appliedLook || intensityChanged || renderingIntentChanged,
+        ) {
             Text(
                 text = if (picked == null) {
                     "Apply"

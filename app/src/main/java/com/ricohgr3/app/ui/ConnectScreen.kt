@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,9 +21,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,6 +70,7 @@ fun ConnectScreen(
     onDisconnect: () -> Unit,
     onOpenGallery: () -> Unit,
     onOpenLiveView: () -> Unit,
+    onOpenAppUpdate: () -> Unit,
     onFireShutter: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -76,12 +81,35 @@ fun ConnectScreen(
             .padding(horizontal = 20.dp),
     ) {
         Spacer(Modifier.height(24.dp))
-        Text("GR", style = MaterialTheme.typography.displaySmall, color = GrTheme.colors.accent)
-        Text(
-            "REMOTE",
-            style = MaterialTheme.typography.labelSmall,
-            color = GrTheme.colors.inkSoft,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "GR",
+                    style = MaterialTheme.typography.displaySmall,
+                    color = GrTheme.colors.accent,
+                )
+                Text(
+                    "REMOTE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = GrTheme.colors.inkSoft,
+                )
+            }
+            OutlinedButton(
+                onClick = onOpenAppUpdate,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.SystemUpdate,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.size(7.dp))
+                Text("App update", style = MaterialTheme.typography.labelMedium)
+            }
+        }
         Spacer(Modifier.height(20.dp))
 
         if (!permissionsGranted) {
@@ -547,4 +575,3 @@ private fun BusyRow(label: String) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = GrTheme.colors.ink)
     }
 }
-

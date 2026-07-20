@@ -82,31 +82,92 @@ class AppUpdateCheckerTest {
 
     @Test
     fun `checker targets public repository and skips incomplete newest release`() = runBlocking {
+        val requestedPages = mutableListOf<Int>()
         val client = githubClient(
-            """
-            [
-              {
-                "tag_name": "v0.8.0",
-                "draft": false,
-                "prerelease": false,
-                "assets": []
-              },
-              {
-                "tag_name": "v0.7.0",
-                "draft": false,
-                "prerelease": false,
-                "assets": [
-                  {
-                    "name": "app-release.apk",
-                    "size": 12345,
-                    "browser_download_url": "https://example.com/app-release.apk"
-                  }
-                ]
-              }
-            ]
-            """.trimIndent(),
+            pages = mapOf(
+                1 to
+                    """
+                    [
+                      {
+                        "tag_name": "v0.8.0",
+                        "draft": false,
+                        "prerelease": false,
+                        "assets": []
+                      },
+                      {
+                        "tag_name": "v0.7.0",
+                        "draft": false,
+                        "prerelease": false,
+                        "assets": [
+                          {
+                            "name": "app-release.apk",
+                            "size": 12345,
+                            "browser_download_url": "https://example.com/app-release.apk"
+                          }
+                        ]
+                      }
+                    ]
+                    """.trimIndent(),
+            ),
+            requestedPages = requestedPages,
         )
-        val checker = AppUpdateChecker(
+        val checker = checker(client)
+
+        val status = checker.check()
+
+        assertTrue(status is UpdateStatus.Available)
+        assertEquals("0.7.0", (status as UpdateStatus.Available).release.versionName)
+        assertEquals(listOf(1), requestedPages)
+    }
+
+    @Test
+    fun `checker follows GitHub pagination to an installable release on a later page`() =
+        runBlocking {
+            val requestedPages = mutableListOf<Int>()
+            val client = githubClient(
+                pages = mapOf(
+                    1 to
+                        """
+                        [
+                          {
+                            "tag_name": "v0.9.0",
+                            "draft": false,
+                            "prerelease": false,
+                            "assets": []
+                          }
+                        ]
+                        """.trimIndent(),
+                    2 to
+                        """
+                        [
+                          {
+                            "tag_name": "v0.8.0",
+                            "draft": false,
+                            "prerelease": false,
+                            "assets": [
+                              {
+                                "name": "app-release.apk",
+                                "size": 54321,
+                                "browser_download_url": "https://example.com/v0.8.0.apk"
+                              }
+                            ]
+                          }
+                        ]
+                        """.trimIndent(),
+                ),
+                requestedPages = requestedPages,
+            )
+            val checker = checker(client)
+
+            val status = checker.check()
+
+            assertTrue(status is UpdateStatus.Available)
+            assertEquals("0.8.0", (status as UpdateStatus.Available).release.versionName)
+            assertEquals(listOf(1, 2), requestedPages)
+        }
+
+    private fun checker(client: OkHttpClient): AppUpdateChecker =
+        AppUpdateChecker(
             client = client,
             json = Json { ignoreUnknownKeys = true },
             repo = "Nielk74/ricoh-gr3-android",
@@ -114,13 +175,10 @@ class AppUpdateCheckerTest {
             ioDispatcher = Dispatchers.Unconfined,
         )
 
-        val status = checker.check()
-
-        assertTrue(status is UpdateStatus.Available)
-        assertEquals("0.7.0", (status as UpdateStatus.Available).release.versionName)
-    }
-
-    private fun githubClient(responseJson: String): OkHttpClient =
+    private fun githubClient(
+        pages: Map<Int, String>,
+        requestedPages: MutableList<Int>,
+    ): OkHttpClient =
         OkHttpClient.Builder()
             .addInterceptor { chain ->
                 val request = chain.request()
@@ -128,14 +186,29 @@ class AppUpdateCheckerTest {
                     "/repos/Nielk74/ricoh-gr3-android/releases",
                     request.url.encodedPath,
                 )
-                assertEquals("10", request.url.queryParameter("per_page"))
-                Response.Builder()
+                assertEquals("100", request.url.queryParameter("per_page"))
+                val pageNumber = request.url.queryParameter("page")?.toInt()
+                checkNotNull(pageNumber)
+                requestedPages += pageNumber
+                val responseJson = checkNotNull(pages[pageNumber]) {
+                    "Unexpected GitHub release page $pageNumber"
+                }
+                val response = Response.Builder()
                     .request(request)
                     .protocol(Protocol.HTTP_1_1)
                     .code(200)
                     .message("OK")
                     .body(responseJson.toResponseBody("application/json".toMediaType()))
-                    .build()
+                if (pages.containsKey(pageNumber + 1)) {
+                    response.header(
+                        "Link",
+                        "<https://api.github.com/repos/Nielk74/ricoh-gr3-android/releases" +
+                            "?per_page=100&page=${pageNumber + 1}>; rel=\"next\", " +
+                            "<https://api.github.com/repos/Nielk74/ricoh-gr3-android/releases" +
+                            "?per_page=100&page=${pages.keys.max()}>; rel=\"last\"",
+                    )
+                }
+                response.build()
             }
             .build()
 }

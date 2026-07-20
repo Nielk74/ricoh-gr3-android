@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,9 +43,11 @@ import androidx.compose.ui.unit.dp
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoItem
 import com.ricohgr3.app.data.PhotoRepository
+import com.ricohgr3.app.looks.emulation.RenderingIntent
 import com.ricohgr3.app.ui.LookStrip
 import com.ricohgr3.app.ui.PhotoThumbnail
 import com.ricohgr3.app.ui.theme.GrTheme
+import kotlin.math.roundToInt
 
 /**
  * The **hero** screen: a 3-column contact sheet of every frame on the camera.
@@ -62,8 +66,10 @@ fun GalleryScreen(
     onOpenPhoto: (PhotoId) -> Unit,
     onToggleSelect: (PhotoId) -> Unit,
     onClearSelection: () -> Unit,
-    onApplyLookToSelection: (String?) -> Unit,
+    onApplyLookToSelection: (String?, Float, RenderingIntent) -> Unit,
     onStickyLookChange: (String?) -> Unit,
+    onStickyIntensityChange: (Float) -> Unit,
+    onStickyRenderingIntentChange: (RenderingIntent) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -103,7 +109,11 @@ fun GalleryScreen(
             BatchApplyBar(
                 selectionCount = state.selectionCount,
                 stickyLook = state.stickyLook,
+                stickyIntensity = state.stickyIntensity,
+                stickyRenderingIntent = state.stickyRenderingIntent,
                 onStickyLookChange = onStickyLookChange,
+                onStickyIntensityChange = onStickyIntensityChange,
+                onStickyRenderingIntentChange = onStickyRenderingIntentChange,
                 onApply = onApplyLookToSelection,
             )
         }
@@ -262,8 +272,12 @@ private fun ContactFrame(
 private fun BatchApplyBar(
     selectionCount: Int,
     stickyLook: String?,
+    stickyIntensity: Float,
+    stickyRenderingIntent: RenderingIntent,
     onStickyLookChange: (String?) -> Unit,
-    onApply: (String?) -> Unit,
+    onStickyIntensityChange: (Float) -> Unit,
+    onStickyRenderingIntentChange: (RenderingIntent) -> Unit,
+    onApply: (String?, Float, RenderingIntent) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -278,13 +292,29 @@ private fun BatchApplyBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "APPLY LOOK",
+                text = if (stickyLook == null) {
+                    "RESET LOOK"
+                } else {
+                    "APPLY LOOK  ·  ${(stickyIntensity * 100f).roundToInt()}%  ·  " +
+                        stickyRenderingIntent.batchLabel
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = GrTheme.colors.inkSoft,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = { onApply(stickyLook) }) {
-                Text("Apply to $selectionCount  →", color = GrTheme.colors.accent)
+            TextButton(
+                onClick = {
+                    onApply(stickyLook, stickyIntensity, stickyRenderingIntent)
+                },
+            ) {
+                Text(
+                    if (stickyLook == null) {
+                        "Reset $selectionCount  →"
+                    } else {
+                        "Apply to $selectionCount  →"
+                    },
+                    color = GrTheme.colors.accent,
+                )
             }
         }
         LookStrip(
@@ -292,8 +322,95 @@ private fun BatchApplyBar(
             onSelect = onStickyLookChange,
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
         )
+        if (stickyLook != null) {
+            BatchRenderingIntentControl(
+                value = stickyRenderingIntent,
+                onValueChange = onStickyRenderingIntentChange,
+            )
+            BatchIntensityControl(
+                value = stickyIntensity,
+                onValueChange = onStickyIntensityChange,
+            )
+        }
     }
 }
+
+@Composable
+private fun BatchRenderingIntentControl(
+    value: RenderingIntent,
+    onValueChange: (RenderingIntent) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "RENDERING",
+            style = MaterialTheme.typography.labelSmall,
+            color = GrTheme.colors.inkSoft,
+        )
+        Spacer(Modifier.weight(1f))
+        RenderingIntent.entries.forEach { intent ->
+            TextButton(onClick = { onValueChange(intent) }) {
+                Text(
+                    intent.batchLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (intent == value) {
+                        GrTheme.colors.accent
+                    } else {
+                        GrTheme.colors.inkSoft
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BatchIntensityControl(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "EFFECT",
+                style = MaterialTheme.typography.labelSmall,
+                color = GrTheme.colors.inkSoft,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "${(value * 100f).roundToInt()}%",
+                style = MaterialTheme.typography.labelSmall,
+                color = GrTheme.colors.accent,
+            )
+        }
+        Slider(
+            value = value.coerceIn(0.5f, 1.5f),
+            onValueChange = { raw ->
+                onValueChange((raw * 20f).roundToInt() / 20f)
+            },
+            valueRange = 0.5f..1.5f,
+            steps = 19,
+            colors = SliderDefaults.colors(
+                thumbColor = GrTheme.colors.accent,
+                activeTrackColor = GrTheme.colors.accent,
+                inactiveTrackColor = GrTheme.colors.hair,
+                activeTickColor = GrTheme.colors.paper,
+                inactiveTickColor = GrTheme.colors.inkSoft,
+            ),
+            modifier = Modifier.fillMaxWidth().height(34.dp),
+        )
+    }
+}
+
+private val RenderingIntent.batchLabel: String
+    get() = if (this == RenderingIntent.STOCK) "STOCK" else "SMART"
 
 @Composable
 private fun LoadingState() {

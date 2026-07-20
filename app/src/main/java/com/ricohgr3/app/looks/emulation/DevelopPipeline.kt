@@ -4,7 +4,6 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 /**
  * The pure-Kotlin film-develop pipeline. Operates on a planar RGB float buffer (values in
@@ -12,16 +11,16 @@ import kotlin.math.sqrt
  * dependencies**, so the entire look-rendering math is JVM-unit-testable — the device/GPU
  * `Bitmap` path (see the Android glue in `DevelopEngine`) merely marshals pixels in and out.
  *
- * Pipeline order: optional RAW base → scene analysis/adaptation → optional film-negative exposure
+ * Pipeline order: optional platform-DNG base → rendering intent/scene protection →
+ * optional film-negative exposure and restrained product-side warmth
  * → adaptively blended negative/print LUT → luminance-neutral split-tone → connected-region skin
- * naturalisation → optional selective foliage and connected-sky colour → scaled halation →
- * ISO/scene-aware density grain. Grain runs last in display space; halation is computed from a
- * linear-light highlight mask.
+ * naturalisation → optional selective foliage and connected-sky colour → physical-scale
+ * diffusion → two-lobe halation → ISO/scene-aware film-plane density grain.
  */
 object DevelopPipeline {
 
     /**
-     * A mild base grade applied **before** the film LUT, used to bring a flat RAW/DNG preview up
+     * A mild base grade applied **before** the film LUT, used to bring a platform-rendered DNG up
      * to the camera-JPEG-like tonal base the film models expect (see `PhotoSave`). Applied in
      * display space: an S-curve contrast around mid-grey plus a saturation scale.
      *
@@ -30,16 +29,18 @@ object DevelopPipeline {
      */
     data class PreGrade(val contrast: Float, val saturation: Float)
 
-    private const val GAMMA = 2.2f
-
     /** `x^e` guarded for the `[0,1]` develop domain (negatives → 0). */
     private fun pow(x: Float, e: Float): Float = if (x <= 0f) 0f else x.toDouble().pow(e.toDouble()).toFloat()
 
-    private fun srgbToLinear(c: Float): Float = if (c <= 0f) 0f else exp(GAMMA * kotlin.math.ln(c))
-    private fun linearToSrgb(c: Float): Float =
-        if (c <= 0f) 0f else exp((1f / GAMMA) * kotlin.math.ln(c.coerceAtMost(1f)))
+    private fun srgbToLinear(c: Float): Float = ColorMath.srgbToLinear(c)
+    private fun linearToSrgb(c: Float): Float = ColorMath.linearToSrgb(c)
 
+    /** Perceptual/code-value weighting used only for masks and backwards-compatible look controls. */
     private fun luma(r: Float, g: Float, b: Float): Float = 0.2126f * r + 0.7152f * g + 0.0722f * b
+
+    /** Physical relative luminance used whenever light energy or exposure is changed. */
+    private fun linearLuma(r: Float, g: Float, b: Float): Float =
+        ColorMath.linearLuminance(r, g, b)
 
     /**
      * Render [look] over the RGB planes [r],[g],[b] in place. Each array is row-major,
@@ -58,32 +59,54 @@ object DevelopPipeline {
         effectStrength: Float = 1f,
         filmExposureEv: Float = 0f,
         faceRegions: List<FaceRegion> = emptyList(),
+        options: DevelopOptions = DevelopOptions(),
     ) {
         val lutSample = FloatArray(3)
         val skinOutput = FloatArray(3)
         val skinScratch = FloatArray(3)
+        val colourScratch = FloatArray(3)
+        val colourLab = FloatArray(3)
         val effect = effectStrength.coerceIn(0f, 1.5f)
         val negativeExposureGain =
             exp(0.69314718056f * filmExposureEv.coerceIn(-2f, 2f))
 
-        // 0. Optional RAW base grade (before analysis) — only for a genuinely flatter DNG render.
+        // 0. Optional platform-DNG base grade (before analysis), kept close to neutral because
+        // Android has already rendered sensor data into display RGB.
         if (preGrade != null) applyPreGrade(r, g, b, preGrade)
 
         // 1. Measure the actual frame and make small, bounded tonal/strength decisions. This is
         // what makes a look respond differently to backlight, high-key cloud, blue hour, and a
         // warm low-key interior while preserving the intent of each scene.
-        val baseAdjustment = if (look.adaptive.enabled) {
-            val profile = SceneAnalyzer.analyze(r, g, b, width, height)
-            SceneAnalyzer.adjustment(profile, look.adaptive, iso)
+        val smart = options.intent == RenderingIntent.SMART
+        val pleasingWarmthEligible =
+            smart && look.colorBalance == FilmColorBalance.DAYLIGHT && effect > 0f
+        val sceneProfile =
+            if (smart && (look.adaptive.enabled || pleasingWarmthEligible)) {
+                options.sceneProfile ?: SceneAnalyzer.analyze(r, g, b, width, height)
+            } else {
+                null
+            }
+        val baseAdjustment = if (smart && look.adaptive.enabled) {
+            SceneAnalyzer.adjustment(
+                requireNotNull(sceneProfile),
+                look.adaptive,
+                iso,
+                look.stock,
+            )
         } else {
-            SceneAdjustment.NONE
+            // The calibration path keeps the stock's authored mix and texture scale, but makes no
+            // decision based on scene contents or camera ISO.
+            SceneAdjustment.NONE.copy(
+                lookStrength = look.stock.lookStrength,
+                grainScale = look.stock.grainScale,
+            )
         }
         // Tonal protection fades toward zero with the user's intensity, but is deliberately not
-        // amplified beyond its calibrated value above 100%: "stronger film" should deepen the
+        // amplified beyond its authored value above 100%: "stronger film" should deepen the
         // stock character, not turn bounded auto-exposure into an HDR control.
         val protectionMix = effect.coerceAtMost(1f)
         val colourMix = (baseAdjustment.lookStrength * effect).coerceIn(0f, 1f)
-        // Spatial/emulsion layers may grow a little beyond their calibrated baseline. The cap
+        // Spatial/emulsion layers may grow a little beyond their authored baseline. The cap
         // prevents a 150% slider setting from producing novelty-app grain or a red fog.
         val layerMix = (baseAdjustment.lookStrength * effect).coerceIn(0f, 1.25f)
         val adjustment = baseAdjustment.copy(
@@ -94,14 +117,24 @@ object DevelopPipeline {
             saturation = 1f + (baseAdjustment.saturation - 1f) * protectionMix,
             lookStrength = colourMix,
         )
-        if (look.adaptive.enabled && protectionMix > 0f) {
+        // Product-side warmth is intentionally outside the reproducible Stock contract. It uses a
+        // tiny +6-mired Bradford adaptation for daylight-balanced colour stocks only, and fades
+        // when reliable neutral samples say the scene already has a strong cast.
+        if (pleasingWarmthEligible && sceneProfile != null) {
+            val warmthMix =
+                effect.coerceAtMost(1f) * pleasingWarmthScale(sceneProfile)
+            if (warmthMix > 0f) {
+                applyPleasingWarmth(r, g, b, warmthMix)
+            }
+        }
+        if (smart && look.adaptive.enabled && protectionMix > 0f) {
             applySceneAdaptation(r, g, b, adjustment)
         }
 
         // 2. Detect coherent complexion regions from the scene-normalised source. The proxy mask
         // is intentionally computed before the stock colour transform, then reused during the
         // full-resolution LUT pass. This avoids globally keying every red/orange object.
-        val skinMask = if (look.skinTone.enabled && effect > 0f) {
+        val skinMask = if (smart && look.skinTone.enabled && effect > 0f) {
             SkinTone.detect(
                 r,
                 g,
@@ -165,7 +198,9 @@ object DevelopPipeline {
                 // this in the same pass lets the skin correction evaluate the complete stock
                 // colour rather than only the LUT.
                 if (splitAmount > 0f) {
-                    val l = luma(renderedR, renderedG, renderedB)
+                    val originalY = linearLuma(renderedR, renderedG, renderedB)
+                    ColorMath.srgbToOklab(renderedR, renderedG, renderedB, colourLab)
+                    val l = colourLab[0].coerceIn(0f, 1f)
                     // Smoothly concentrate the tints near the ends; leave mid-grey mostly to the
                     // LUT.
                     val hw = l * l * splitAmount
@@ -180,6 +215,18 @@ object DevelopPipeline {
                     renderedB = (renderedB +
                         (st.shadowB - shadowTintLuma) * sw +
                         (st.highB - highTintLuma) * hw).coerceIn(0f, 1f)
+                    // "Neutral" now means constant physical relative luminance, not merely a
+                    // weighted sum of gamma-encoded code values.
+                    ColorMath.putAtLinearLuminance(
+                        renderedR,
+                        renderedG,
+                        renderedB,
+                        originalY,
+                        colourScratch,
+                    )
+                    renderedR = colourScratch[0]
+                    renderedG = colourScratch[1]
+                    renderedB = colourScratch[2]
                 }
 
                 val maskWeight = if (skinMask != null && skinXMap != null) {
@@ -215,7 +262,7 @@ object DevelopPipeline {
         // 4. Stock-specific vegetation colour. A soft hue/chroma/luminance gate rotates only
         // plausible yellow-green foliage toward cyan-green, with exact luminance restoration.
         val foliage = look.foliageTone
-        if (foliage.enabled) {
+        if (smart && foliage.enabled) {
             applyFoliageCyanShift(
                 r, g, b,
                 cyanShift = foliage.cyanShift * layerMix,
@@ -226,7 +273,7 @@ object DevelopPipeline {
         // 5. Stock-specific sky colour. Connectivity to the top frame edge is the semantic gate:
         // this is not a global blue rotation and therefore leaves blue subjects/objects alone.
         val sky = look.skyTone
-        if (sky.enabled) {
+        if (smart && sky.enabled) {
             applySkyCyanShift(
                 r, g, b, width, height,
                 cyanShift = sky.cyanShift * layerMix,
@@ -234,7 +281,24 @@ object DevelopPipeline {
             )
         }
 
-        // 6. Halation: scale radius with output dimensions so the small on-screen preview matches
+        // 6. Image structure: a weak physical-scale diffusion/MTF response belongs underneath
+        // halation and grain. It is stock-authored in both rendering intents.
+        val imageStructure = look.imageStructure
+        if (imageStructure.enabled) {
+            FilmOptics.applyDiffusion(
+                r,
+                g,
+                b,
+                width,
+                height,
+                imageStructure.copy(
+                    strength = (imageStructure.strength * layerMix).coerceIn(0f, 1f),
+                ),
+                options.filmFormat,
+            )
+        }
+
+        // 7. Halation: scale radius with output dimensions so the small on-screen preview matches
         // the exported image, and scale strength with scene brightness/highlight availability.
         val h = look.halation
         if (h.enabled) {
@@ -246,12 +310,96 @@ object DevelopPipeline {
             applyHalation(r, g, b, width, height, scaled)
         }
 
-        // 7. Grain (display space, last). High ISO, low-key frames, and already busy/noisy files
-        // automatically receive less added texture.
+        // 8. Film-plane grain (last). The field lives in physical film coordinates and each
+        // output pixel analytically integrates its footprint, so preview/export resolution no
+        // longer changes the apparent crystal size. Smart rendering may reduce the authored
+        // amount for noisy/high-ISO scenes; Stock preserves the authored stock amount.
         val gr = look.grain
         if (gr.enabled) {
             val scaled = gr.copy(amount = gr.amount * adjustment.grainScale * layerMix)
-            applyGrain(r, g, b, width, height, scaled)
+            PhysicalFilmGrain.apply(
+                r = r,
+                g = g,
+                b = b,
+                width = width,
+                height = height,
+                params = scaled,
+                renderSeed = options.renderSeed,
+                filmPlane = PhysicalFilmGrain.FilmPlane(
+                    longEdgeMillimeters = maxOf(
+                        options.filmFormat.widthMillimetres,
+                        options.filmFormat.heightMillimetres,
+                    ),
+                ),
+            )
+        }
+    }
+
+    /** Fade the optional warm style when credible neutral samples already show a strong cast. */
+    internal fun pleasingWarmthScale(profile: SceneProfile): Float {
+        val castStress =
+            ((abs(profile.neutralWarmth) - 0.035f) / 0.16f).coerceIn(0f, 1f) *
+                profile.neutralConfidence.coerceIn(0f, 1f)
+        return (1f - castStress).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Apply a fixed +6-mired Bradford D65 adaptation in exact linear sRGB, blended by [amount].
+     *
+     * The app's source is already rendered RGB, so this is deliberately labelled a pleasing style
+     * bias rather than illuminant recovery. The complete CAT/mix stays in linear light. When the
+     * tiny move would cross the sRGB boundary, its amount is shortened along the original-to-CAT
+     * vector; this leaves saturated boundary colours intact instead of clipping a channel or
+     * collapsing chroma to force exact luminance.
+     */
+    internal fun applyPleasingWarmth(
+        r: FloatArray,
+        g: FloatArray,
+        b: FloatArray,
+        amount: Float,
+    ) {
+        val mix = amount.coerceIn(0f, 1f)
+        if (mix == 0f) return
+        for (i in r.indices) {
+            // A pleasing neutral/skin bias should not repaint vivid object colours. Fade before
+            // decoding so saturated cyan/yellow/primary boundaries remain effectively untouched.
+            val codeChroma =
+                maxOf(r[i], g[i], b[i]) - minOf(r[i], g[i], b[i])
+            val localMix = mix * (1f - smoothstep(0.50f, 0.80f, codeChroma))
+            if (localMix <= 0f) continue
+
+            val lr = srgbToLinear(r[i])
+            val lg = srgbToLinear(g[i])
+            val lb = srgbToLinear(b[i])
+
+            // Bradford D65 -> CIE daylight 6259 K (+6 reciprocal-megakelvin).
+            val adaptedR =
+                1.0078224f * lr + 0.01121765f * lg + 0.001989895f * lb
+            val adaptedG =
+                -0.00053236f * lr + 0.9976770f * lg + 0.00072567f * lb
+            val adaptedB =
+                -0.00091958f * lr - 0.00330192f * lg + 0.9633657f * lb
+
+            val deltaR = adaptedR - lr
+            val deltaG = adaptedG - lg
+            val deltaB = adaptedB - lb
+            var boundedMix = localMix
+
+            // Intersect the requested CAT vector with the linear-sRGB cube. Reducing the shared
+            // coefficient preserves the adaptation direction and can only make the effect
+            // smaller. In particular, a saturated yellow/cyan stays saturated rather than being
+            // pulled toward grey by an exact-luminance gamut compressor.
+            if (deltaR > 0f) boundedMix = minOf(boundedMix, (1f - lr) / deltaR)
+            else if (deltaR < 0f) boundedMix = minOf(boundedMix, -lr / deltaR)
+            if (deltaG > 0f) boundedMix = minOf(boundedMix, (1f - lg) / deltaG)
+            else if (deltaG < 0f) boundedMix = minOf(boundedMix, -lg / deltaG)
+            if (deltaB > 0f) boundedMix = minOf(boundedMix, (1f - lb) / deltaB)
+            else if (deltaB < 0f) boundedMix = minOf(boundedMix, -lb / deltaB)
+            boundedMix = boundedMix.coerceIn(0f, localMix)
+
+            r[i] = linearToSrgb(lr + deltaR * boundedMix).coerceIn(0f, 1f)
+            g[i] = linearToSrgb(lg + deltaG * boundedMix).coerceIn(0f, 1f)
+            b[i] = linearToSrgb(lb + deltaB * boundedMix).coerceIn(0f, 1f)
         }
     }
 
@@ -270,10 +418,10 @@ object DevelopPipeline {
     }
 
     /**
-     * Apply the scene-level tonal decisions while preserving pixel hue. Exposure uses a bounded
-     * logit shift (black/white endpoints stay fixed); shadows and highlights use smooth,
-     * monotonic curves; any out-of-gamut result is compressed toward its target luminance instead
-     * of clipping channels independently.
+     * Apply the scene-level tonal decisions in linear light while preserving pixel chromaticity.
+     * Exposure uses a bounded logit shift (black/white endpoints stay fixed); shadows and
+     * highlights use smooth, monotonic curves; any out-of-gamut result is compressed toward its
+     * target luminance instead of clipping channels independently.
      */
     fun applySceneAdaptation(
         r: FloatArray,
@@ -283,7 +431,10 @@ object DevelopPipeline {
     ) {
         val exposureGain = exp(0.69314718056f * adjustment.exposureEv)
         for (i in r.indices) {
-            val oldLuma = luma(r[i], g[i], b[i]).coerceIn(0f, 1f)
+            val lr = srgbToLinear(r[i])
+            val lg = srgbToLinear(g[i])
+            val lb = srgbToLinear(b[i])
+            val oldLuma = ColorMath.luminanceOfLinear(lr, lg, lb).coerceIn(0f, 1f)
             var y = if (oldLuma <= 0f || oldLuma >= 1f) oldLuma
             else (oldLuma * exposureGain) / (1f - oldLuma + oldLuma * exposureGain)
 
@@ -309,9 +460,9 @@ object DevelopPipeline {
             y = y.coerceIn(0f, 1f)
 
             val scale = if (oldLuma > 1e-5f) y / oldLuma else 0f
-            var rr = r[i] * scale
-            var gg = g[i] * scale
-            var bb = b[i] * scale
+            var rr = lr * scale
+            var gg = lg * scale
+            var bb = lb * scale
             if (adjustment.saturation != 1f) {
                 rr = y + (rr - y) * adjustment.saturation
                 gg = y + (gg - y) * adjustment.saturation
@@ -333,9 +484,9 @@ object DevelopPipeline {
                 gg = y + (gg - y) * c
                 bb = y + (bb - y) * c
             }
-            r[i] = rr.coerceIn(0f, 1f)
-            g[i] = gg.coerceIn(0f, 1f)
-            b[i] = bb.coerceIn(0f, 1f)
+            r[i] = linearToSrgb(rr.coerceIn(0f, 1f)).coerceIn(0f, 1f)
+            g[i] = linearToSrgb(gg.coerceIn(0f, 1f)).coerceIn(0f, 1f)
+            b[i] = linearToSrgb(bb.coerceIn(0f, 1f)).coerceIn(0f, 1f)
         }
     }
 
@@ -373,7 +524,7 @@ object DevelopPipeline {
      * the hue window, and near-neutrals fail the saturation gate. Blue is raised in proportion to
      * its hue is rotated toward a bounded cyan-green target while retaining the original chroma;
      * a separate saturation control then expands that chroma. The result is gamut-compressed
-     * around the original Rec.709 luminance, so foliage can read clearly cooler and richer without
+     * around the original linear-light luminance, so foliage can read clearly cooler and richer without
      * changing scene exposure.
      */
     fun applyFoliageCyanShift(
@@ -395,7 +546,7 @@ object DevelopPipeline {
             val rr = r[i]
             val gg = g[i]
             val bb = b[i]
-            val oldLuma = luma(rr, gg, bb)
+            val oldLuma = linearLuma(rr, gg, bb)
             if (oldLuma <= 0f) continue
 
             val max = maxOf(rr, gg, bb)
@@ -454,7 +605,7 @@ object DevelopPipeline {
      * clothing, glasses, signs, and interior objects, while avoiding a full-frame flood-fill
      * buffer on a 6 MP Android export. The hue move raises green only in eligible pixels; a
      * separate chroma expansion increases sky saturation. Both are gamut-compressed around the
-     * original luminance so the operation changes sky colour rather than exposure.
+     * original linear-light luminance so the operation changes sky colour rather than exposure.
      */
     fun applySkyCyanShift(
         r: FloatArray,
@@ -513,7 +664,7 @@ object DevelopPipeline {
                     val rr = r[index]
                     val gg = g[index]
                     val bb = b[index]
-                    val oldLuma = luma(rr, gg, bb)
+                    val oldLuma = linearLuma(rr, gg, bb)
                     val blueGreenGap = (bb - gg).coerceAtLeast(0f)
                     if (oldLuma <= 0f) continue
 
@@ -544,7 +695,7 @@ object DevelopPipeline {
     /**
      * Put [targetR]/[targetG]/[targetB]'s hue/chroma around [outputLuma], then expand chroma by
      * [chromaScale]. One shared gamut scale keeps every channel in range without clipping them
-     * independently, so hue and exact Rec.709 luminance survive the saturation boost.
+     * independently, so hue and exact linear-light luminance survive the saturation boost.
      */
     private fun writeLumaMatchedChroma(
         r: FloatArray,
@@ -557,10 +708,13 @@ object DevelopPipeline {
         outputLuma: Float,
         chromaScale: Float,
     ) {
-        val targetLuma = luma(targetR, targetG, targetB)
-        val dr = targetR - targetLuma
-        val dg = targetG - targetLuma
-        val db = targetB - targetLuma
+        val linearR = srgbToLinear(targetR)
+        val linearG = srgbToLinear(targetG)
+        val linearB = srgbToLinear(targetB)
+        val targetLuma = ColorMath.luminanceOfLinear(linearR, linearG, linearB)
+        val dr = linearR - targetLuma
+        val dg = linearG - targetLuma
+        val db = linearB - targetLuma
         var scale = chromaScale.coerceIn(0f, 1.60f)
         scale = minOf(
             scale,
@@ -568,9 +722,9 @@ object DevelopPipeline {
             chromaLimit(outputLuma, dg),
             chromaLimit(outputLuma, db),
         )
-        r[index] = (outputLuma + dr * scale).coerceIn(0f, 1f)
-        g[index] = (outputLuma + dg * scale).coerceIn(0f, 1f)
-        b[index] = (outputLuma + db * scale).coerceIn(0f, 1f)
+        r[index] = linearToSrgb((outputLuma + dr * scale).coerceIn(0f, 1f))
+        g[index] = linearToSrgb((outputLuma + dg * scale).coerceIn(0f, 1f))
+        b[index] = linearToSrgb((outputLuma + db * scale).coerceIn(0f, 1f))
     }
 
     private fun chromaLimit(luma: Float, delta: Float): Float = when {
@@ -625,236 +779,118 @@ object DevelopPipeline {
     }
 
     /**
-     * Edge-driven red-orange halation in linear light. A smooth highlight core is blurred, then
-     * the unblurred core is subtracted: uniform bright areas remain clean while only light that
-     * spills *outside* a highlight survives. The spill is strongest on darker receiving pixels,
-     * matching the visible red fringe around practical lights and hard sun reflections rather
-     * than laying a red fog over the entire frame.
+     * Edge-driven red-orange halation in linear light.
+     *
+     * A broad, predominantly red base-reflection lobe is followed by a tighter emulsion-scatter
+     * lobe. Both source masks are derived from the same pre-halation pixels; the broad red halo
+     * therefore cannot become a new highlight source for the tight lobe. The tight source is kept
+     * as a 16-bit immutable mask while one float blur plane is reused for both lobes, avoiding two
+     * full-resolution float masks.
      */
     fun applyHalation(
         r: FloatArray, g: FloatArray, b: FloatArray,
         width: Int, height: Int, h: HalationParams,
     ) {
         val n = width * height
+        if (n == 0) return
         val mask = FloatArray(n)
-        for (i in 0 until n) {
-            val lin = srgbToLinear(luma(r[i], g[i], b[i]))
-            val t = ((lin - h.threshold) / (1f - h.threshold + 1e-4f)).coerceIn(0f, 1f)
-            mask[i] = t * t * (3f - 2f * t)
+        val tightCore = ShortArray(n)
+        fillHalationMask(r, g, b, h, redSourceBias = 0.24f, out = mask)
+        for (i in mask.indices) {
+            tightCore[i] = (mask[i] * 65535f + 0.5f).toInt()
+                .coerceIn(0, 65535)
+                .toShort()
+        }
+
+        val broadRadius = (h.radius * 2.15f).roundToInt().coerceIn(h.radius + 1, 64)
+        fillHalationMask(r, g, b, h, redSourceBias = 0.58f, out = mask)
+        gaussianBlur(mask, width, height, broadRadius)
+        compositeHalationPass(
+            r, g, b, width, height, h,
+            blurredMask = mask,
+            fixedCore = null,
+            strengthScale = 0.24f,
+            redSourceBias = 0.58f,
+            tintGScale = 0.30f,
+            tintBScale = 0.08f,
+        )
+
+        for (i in mask.indices) {
+            mask[i] = (tightCore[i].toInt() and 0xffff) / 65535f
         }
         gaussianBlur(mask, width, height, h.radius)
-        for (i in 0 until n) {
-            val sourceLuma = luma(r[i], g[i], b[i])
-            val sourceLinearLuma = srgbToLinear(sourceLuma)
-            val sourceT =
-                ((sourceLinearLuma - h.threshold) / (1f - h.threshold + 1e-4f)).coerceIn(0f, 1f)
-            val core = sourceT * sourceT * (3f - 2f * sourceT)
-            val spill = (mask[i] - core).coerceAtLeast(0f)
-            val receiver = pow((1f - sourceLinearLuma).coerceIn(0f, 1f), 0.65f)
-            val energy = (spill * h.strength * receiver).coerceIn(0f, 0.72f)
-            if (energy <= 0f) continue
-
-            // Screen-composite light energy in linear space; red penetrates furthest, with only
-            // restrained green/blue in the fringe.
-            val rr = srgbToLinear(r[i])
-            val gg = srgbToLinear(g[i])
-            val bb = srgbToLinear(b[i])
-            r[i] = linearToSrgb(1f - (1f - rr) * (1f - energy * h.tintR))
-            g[i] = linearToSrgb(1f - (1f - gg) * (1f - energy * h.tintG * 0.82f))
-            b[i] = linearToSrgb(1f - (1f - bb) * (1f - energy * h.tintB * 0.55f))
-        }
+        compositeHalationPass(
+            r, g, b, width, height, h,
+            blurredMask = mask,
+            fixedCore = tightCore,
+            strengthScale = 0.78f,
+            redSourceBias = 0.24f,
+            tintGScale = 0.82f,
+            tintBScale = 0.55f,
+        )
     }
 
-    /**
-     * Non-tiling, high-frequency emulsion grain.
-     *
-     * A coordinate hash creates one deterministic density sample per output pixel. A compact 3×3
-     * convolution correlates only immediate neighbours, producing small crystal-like structure
-     * without the low-frequency clouds and repeating stamps of a texture plate. [GrainParams.size]
-     * changes those local weights rather than scaling up a bitmap. A zero-mean cubic density term
-     * gives fast stocks occasional irregular clumps; shadows receive a little more of that
-     * non-Gaussian structure, never a separate blurry octave.
-     *
-     * The field is independent of image edges, focus, and motion blur. It is applied last and
-     * perturbs log-odds/optical-density-like luminance through [compositeDensityGrain], preserving
-     * black/white endpoints and hue. Smooth regions reveal the same sharp field more clearly simply
-     * because they contain less competing scene detail.
-     */
-    fun applyGrain(
-        r: FloatArray, g: FloatArray, b: FloatArray,
-        width: Int, height: Int, gp: GrainParams,
-    ) {
-        val n = width * height
-        if (n == 0) return
-        val seed = gp.seed.toInt()
-        val resolutionScale = sqrt((maxOf(width, height) / 1600f).coerceIn(0.25f, 4f))
-        val baseStructure =
-            ((gp.size * resolutionScale - 1.05f) / 1.90f).coerceIn(0f, 1f)
-
-        // Quantised shadow variants avoid a square root for every pixel. Every kernel sums to
-        // one and is variance-normalised to the same 0.42 standard deviation, so "larger grain"
-        // changes crystal structure rather than quietly changing exposure or overall strength.
-        val centerWeights = FloatArray(GRAIN_SHADOW_LEVELS)
-        val axialWeights = FloatArray(GRAIN_SHADOW_LEVELS)
-        val diagonalWeights = FloatArray(GRAIN_SHADOW_LEVELS)
-        for (level in 0 until GRAIN_SHADOW_LEVELS) {
-            val shadow = level.toFloat() / (GRAIN_SHADOW_LEVELS - 1)
-            val structure = (baseStructure + 0.10f * shadow).coerceIn(0f, 1f)
-            val axial = 0.025f + (0.095f - 0.025f) * structure
-            val diagonal = 0.030f * structure
-            val center = 1f - 4f * axial - 4f * diagonal
-            val variance = (center * center + 4f * axial * axial +
-                4f * diagonal * diagonal) / 3f
-            val normaliser = 0.42f / sqrt(variance.coerceAtLeast(1e-6f))
-            centerWeights[level] = center * normaliser
-            axialWeights[level] = axial * normaliser
-            diagonalWeights[level] = diagonal * normaliser
-        }
-
-        var above = grainHashRow(width, -1, seed)
-        var current = grainHashRow(width, 0, seed)
-        var below = grainHashRow(width, 1, seed)
-        var index = 0
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                val oldLuma = luma(r[index], g[index], b[index]).coerceIn(0f, 1f)
-                val shadowT = ((0.42f - oldLuma) / 0.38f).coerceIn(0f, 1f)
-                val shadow = shadowT * shadowT * (3f - 2f * shadowT)
-                val level = (shadow * (GRAIN_SHADOW_LEVELS - 1)).roundToInt()
-                val centerWeight = centerWeights[level]
-                val axialWeight = axialWeights[level]
-                val diagonalWeight = diagonalWeights[level]
-
-                val center = current[x + 1]
-                val axial = above[x + 1] + below[x + 1] + current[x] + current[x + 2]
-                val diagonal = above[x] + above[x + 2] + below[x] + below[x + 2]
-                val gaussianGrain = center * centerWeight + axial * axialWeight +
-                    diagonal * diagonalWeight
-                val clumpStrength =
-                    gp.clumping.coerceIn(0f, 0.5f) * (0.55f + 0.75f * shadow)
-                // H3-like term: for the variance-normalised field (σ≈0.42),
-                // g³ - 3σ²g remains approximately zero mean while replacing a too-perfect
-                // Gaussian texture with occasional denser crystals. Independent amplitude
-                // jitter breaks up uniform kernels without adding a lower-frequency layer.
-                val cubic =
-                    gaussianGrain * gaussianGrain * gaussianGrain -
-                        0.5292f * gaussianGrain
-                val jitter = grainHash(x, y, seed xor 0x6D2B79F5)
-                val grain = (
-                    gaussianGrain +
-                        1.70f * clumpStrength * cubic +
-                        0.16f * clumpStrength * jitter * abs(gaussianGrain)
-                    ).coerceIn(-1.75f, 1.75f)
-
-                // Chroma remains tightly coupled to the luma crystal. Neighbour taps provide a
-                // very small channel difference without independent RGB "sensor noise".
-                val chromaR = grain * 0.84f + current[x] * 0.16f
-                val chromaB = grain * 0.84f + below[x + 2] * 0.16f
-                compositeDensityGrain(r, g, b, index, grain, chromaR, chromaB, gp)
-                index++
-            }
-            val oldAbove = above
-            above = current
-            current = below
-            below = oldAbove
-            fillGrainHashRow(below, y + 2, seed)
-        }
-    }
-
-    private const val GRAIN_SHADOW_LEVELS = 9
-
-    private fun grainHashRow(width: Int, y: Int, seed: Int): FloatArray =
-        FloatArray(width + 2).also { fillGrainHashRow(it, y, seed) }
-
-    private fun fillGrainHashRow(row: FloatArray, y: Int, seed: Int) {
-        for (index in row.indices) row[index] = grainHash(index - 1, y, seed)
-    }
-
-    /** Stable, non-periodic coordinate hash mapped to `[-1,1]`. */
-    private fun grainHash(x: Int, y: Int, seed: Int): Float {
-        var hash = seed xor (x * 521_288_629) xor (y * 1_597_334_677)
-        hash = (hash xor (hash ushr 16)) * -2_048_144_789
-        hash = (hash xor (hash ushr 13)) * -1_028_477_387
-        hash = hash xor (hash ushr 16)
-        return (((hash ushr 8) and 0x00FF_FFFF) / 8_388_607.5f) - 1f
-    }
-
-    /**
-     * Perturb luminance in log-odds/optical-density-like space, then put that luminance back under
-     * the original hue. The chroma component is constructed to have zero Rec.709 luminance.
-     */
-    private fun compositeDensityGrain(
+    private fun fillHalationMask(
         r: FloatArray,
         g: FloatArray,
         b: FloatArray,
-        index: Int,
-        grain: Float,
-        chromaR: Float,
-        chromaB: Float,
-        gp: GrainParams,
+        h: HalationParams,
+        redSourceBias: Float,
+        out: FloatArray,
     ) {
-        val oldLuma = luma(r[index], g[index], b[index]).coerceIn(0f, 1f)
-        if (oldLuma <= 0f || oldLuma >= 1f) return
-        val density = grainDensity(oldLuma, gp.shadowBias)
-        val y = oldLuma.coerceIn(0.0005f, 0.9995f)
-        val logOdds = kotlin.math.ln(y / (1f - y))
-        val shifted = logOdds + grain * gp.amount * density * 2.65f
-        val newLuma = (1f / (1f + exp(-shifted))).coerceIn(0f, 1f)
-        val scale = newLuma / oldLuma.coerceAtLeast(1e-5f)
-        var rr = r[index] * scale
-        var gg = g[index] * scale
-        var bb = b[index] * scale
-
-        val chromaAmount = gp.amount * density * gp.chroma.coerceIn(0f, 1f) * 0.32f
-        if (chromaAmount > 0f) {
-            // Solve G so the chroma vector has exactly zero Rec.709 luminance.
-            val chromaG = -(0.2126f * chromaR + 0.0722f * chromaB) / 0.7152f
-            val envelope = 4f * newLuma * (1f - newLuma)
-            rr += chromaR * chromaAmount * envelope
-            gg += chromaG * chromaAmount * envelope
-            bb += chromaB * chromaAmount * envelope
+        for (i in out.indices) {
+            val lr = srgbToLinear(r[i])
+            val lg = srgbToLinear(g[i])
+            val lb = srgbToLinear(b[i])
+            val y = ColorMath.luminanceOfLinear(lr, lg, lb)
+            // Longer wavelengths penetrate further into the emulsion/base. Biasing the broad
+            // pass toward red lets a saturated practical light drive its own halo correctly.
+            val source = y + (lr - y) * redSourceBias
+            val t = ((source - h.threshold) / (1f - h.threshold + 1e-4f)).coerceIn(0f, 1f)
+            out[i] = t * t * (3f - 2f * t)
         }
-
-        // Hue-preserving gamut compression around the new luminance.
-        val max = maxOf(rr, gg, bb)
-        if (max > 1f && max > newLuma) {
-            val mix = ((1f - newLuma) / (max - newLuma)).coerceIn(0f, 1f)
-            rr = newLuma + (rr - newLuma) * mix
-            gg = newLuma + (gg - newLuma) * mix
-            bb = newLuma + (bb - newLuma) * mix
-        }
-        val min = minOf(rr, gg, bb)
-        if (min < 0f && min < newLuma) {
-            val mix = (newLuma / (newLuma - min)).coerceIn(0f, 1f)
-            rr = newLuma + (rr - newLuma) * mix
-            gg = newLuma + (gg - newLuma) * mix
-            bb = newLuma + (bb - newLuma) * mix
-        }
-        r[index] = rr.coerceIn(0f, 1f)
-        g[index] = gg.coerceIn(0f, 1f)
-        b[index] = bb.coerceIn(0f, 1f)
     }
 
-    /**
-     * Midtone-peaked grain density `A(I)` on luminance `l∈[0,1]`. A hump centred near mid-grey
-     * that falls off in both the deepest shadows and the brightest highlights (real film grain is
-     * strongest in the midtones). [shadowBias] (0..1) slides the peak toward the shadows and lifts
-     * the shadow side, so a stock can lean grainier in the low-mids without losing the highlight
-     * roll-off. Returns ~[0,1].
-     */
-    fun grainDensity(l: Float, shadowBias: Float): Float {
-        // Peak position: mid-grey at bias 0, moving down toward ~0.3 as bias→1.
-        val peak = 0.5f - 0.2f * shadowBias.coerceIn(0f, 1f)
-        // Asymmetric Gaussian-ish hump: wider on the shadow side when biased.
-        val width = if (l < peak) (0.32f + 0.25f * shadowBias) else 0.30f
-        val d = (l - peak) / width
-        val hump = exp(-0.5f * d * d)
-        // Roll grain off in the brightest highlights (thin negative → little silver) and, more
-        // gently, in the very deepest blacks (dense negative → grain clumps but the printed
-        // black hides it). Both are partial, not hard cuts.
-        val highlightRolloff = (1f - (l - 0.75f).coerceAtLeast(0f) / 0.25f).coerceIn(0.15f, 1f)
-        val shadowRolloff = (0.45f + l / 0.06f).coerceIn(0.45f, 1f) // ~0.45 at black → 1 by luma 0.03
-        return (hump * highlightRolloff * shadowRolloff).coerceIn(0f, 1f)
+    private fun compositeHalationPass(
+        r: FloatArray,
+        g: FloatArray,
+        b: FloatArray,
+        width: Int,
+        height: Int,
+        h: HalationParams,
+        blurredMask: FloatArray,
+        fixedCore: ShortArray?,
+        strengthScale: Float,
+        redSourceBias: Float,
+        tintGScale: Float,
+        tintBScale: Float,
+    ) {
+        val n = width * height
+        for (i in 0 until n) {
+            val rr = srgbToLinear(r[i])
+            val gg = srgbToLinear(g[i])
+            val bb = srgbToLinear(b[i])
+            val sourceLinearLuma = ColorMath.luminanceOfLinear(rr, gg, bb)
+            val core = if (fixedCore != null) {
+                (fixedCore[i].toInt() and 0xffff) / 65535f
+            } else {
+                val sourceEnergy =
+                    sourceLinearLuma + (rr - sourceLinearLuma) * redSourceBias
+                val sourceT =
+                    ((sourceEnergy - h.threshold) / (1f - h.threshold + 1e-4f))
+                        .coerceIn(0f, 1f)
+                sourceT * sourceT * (3f - 2f * sourceT)
+            }
+            val spill = (blurredMask[i] - core).coerceAtLeast(0f)
+            val receiver = pow((1f - sourceLinearLuma).coerceIn(0f, 1f), 0.65f)
+            val energy =
+                (spill * h.strength * strengthScale * receiver).coerceIn(0f, 0.72f)
+            if (energy <= 0f) continue
+
+            r[i] = linearToSrgb(1f - (1f - rr) * (1f - energy * h.tintR))
+            g[i] = linearToSrgb(1f - (1f - gg) * (1f - energy * h.tintG * tintGScale))
+            b[i] = linearToSrgb(1f - (1f - bb) * (1f - energy * h.tintB * tintBScale))
+        }
     }
 
     /**

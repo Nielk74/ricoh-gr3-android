@@ -1,5 +1,6 @@
 package com.ricohgr3.app.looks
 
+import com.ricohgr3.app.looks.emulation.RenderingIntent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -88,5 +89,19 @@ class CameraLookTest {
         // An unknown/removed stock id degrades to Standard (null), never crashes.
         assertEquals(null, LookPreferenceCodec.decode("GONE_STOCK"))
         assertFalse(LookPreferenceCodec.encode("velvia").isBlank())
+    }
+
+    @Test
+    fun renderingIntentPreferenceCodecIsMigrationSafe() {
+        for (intent in RenderingIntent.entries) {
+            assertEquals(
+                intent,
+                LookPreferenceCodec.decodeRenderingIntent(
+                    LookPreferenceCodec.encodeRenderingIntent(intent),
+                ),
+            )
+        }
+        assertEquals(RenderingIntent.SMART, LookPreferenceCodec.decodeRenderingIntent(null))
+        assertEquals(RenderingIntent.SMART, LookPreferenceCodec.decodeRenderingIntent("future"))
     }
 }

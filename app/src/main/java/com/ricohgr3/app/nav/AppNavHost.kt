@@ -27,6 +27,7 @@ import com.ricohgr3.app.gallery.ViewerScreen
 import com.ricohgr3.app.liveview.LiveViewScreen
 import com.ricohgr3.app.liveview.LiveViewViewModel
 import com.ricohgr3.app.ui.ConnectScreen
+import com.ricohgr3.app.ui.update.AppUpdateScreen
 import com.ricohgr3.app.wifi.CameraWifiController
 import com.ricohgr3.app.wifi.CameraWifiSession
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -100,6 +101,7 @@ fun AppNavHost(
                 onDisconnect = viewModel::disconnect,
                 onOpenGallery = { navController.navigate(Screen.Gallery.route) },
                 onOpenLiveView = { navController.navigate(Screen.LiveView.route) },
+                onOpenAppUpdate = { navController.navigate(Screen.AppUpdate.route) },
                 onFireShutter = viewModel::fireShutter,
             )
         }
@@ -116,11 +118,13 @@ fun AppNavHost(
                 onOpenPhoto = { id -> navController.navigate(Screen.Viewer.buildRoute(id.toRouteArg())) },
                 onToggleSelect = galleryViewModel::toggleSelect,
                 onClearSelection = galleryViewModel::clearSelection,
-                onApplyLookToSelection = { look ->
-                    galleryViewModel.applyLookToSelection(look)
+                onApplyLookToSelection = { look, intensity, renderingIntent ->
+                    galleryViewModel.applyLookToSelection(look, intensity, renderingIntent)
                     galleryViewModel.clearSelection()
                 },
                 onStickyLookChange = galleryViewModel::setStickyLook,
+                onStickyIntensityChange = galleryViewModel::setStickyIntensity,
+                onStickyRenderingIntentChange = galleryViewModel::setStickyRenderingIntent,
                 onBack = { navController.popBackStack() },
             )
         }
@@ -143,10 +147,12 @@ fun AppNavHost(
                     filmLookLoader = filmLookLoader,
                     appliedLook = state.lookFor(photoId),
                     appliedIntensity = state.intensityFor(photoId),
+                    appliedRenderingIntent = state.renderingIntentFor(photoId),
                     stickyLook = state.stickyLook,
                     stickyIntensity = state.stickyIntensity,
-                    onApplyLook = { look, intensity ->
-                        galleryViewModel.applyLook(photoId, look, intensity)
+                    stickyRenderingIntent = state.stickyRenderingIntent,
+                    onApplyLook = { look, intensity, renderingIntent ->
+                        galleryViewModel.applyLook(photoId, look, intensity, renderingIntent)
                     },
                     onResetLook = { galleryViewModel.resetLook(photoId) },
                     onBack = { navController.popBackStack() },
@@ -162,6 +168,24 @@ fun AppNavHost(
             )
             LiveViewScreen(
                 viewModel = liveViewModel,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Screen.AppUpdate.route) {
+            val updateStatus by viewModel.updateStatus.collectAsStateWithLifecycle()
+            val updateDownload by viewModel.updateDownload.collectAsStateWithLifecycle()
+
+            LaunchedEffect(Unit) {
+                if (updateStatus is com.ricohgr3.app.update.UpdateStatus.Idle) {
+                    viewModel.checkForUpdates()
+                }
+            }
+            AppUpdateScreen(
+                currentVersion = com.ricohgr3.app.BuildConfig.VERSION_NAME,
+                status = updateStatus,
+                download = updateDownload,
+                onCheck = viewModel::checkForUpdates,
+                onInstall = viewModel::downloadAndInstallUpdate,
                 onBack = { navController.popBackStack() },
             )
         }

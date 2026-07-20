@@ -73,12 +73,13 @@ Goal: pick a look in the app → camera shoots that way. Authentic, tiny build.
 
 Goal: the "intuitive editing" requirements, made concrete.
 
-- [ ] **Edited mark**: contact-sheet thumbnails + viewer show a small red dot when a look is
-      applied (in-app look for transferred frames; distinct glyph for "shot with effect X").
-- [ ] **Sticky default across frames**: styling frame N pre-selects the same look on N+1.
-- [ ] **Batch apply**: "Apply to all new" / multi-select apply.
-- [ ] **Before/after** toggle in the viewer (press-and-hold to see the original).
-- [ ] **Reset**: one tap back to Standard; edited mark clears.
+- [x] **Edited mark**: contact-sheet thumbnails + viewer show a small red dot when an in-app look
+      is applied. A distinct glyph for an on-camera capture effect remains future work.
+- [x] **Sticky default across frames**: styling frame N pre-selects the same look, intensity, and
+      Stock/Smart intent on N+1 and after relaunch.
+- [x] **Batch apply**: multi-select applies the visible look, intensity, and rendering intent.
+- [x] **Before/after** toggle in the viewer (press-and-hold to see the original).
+- [x] **Reset**: one tap back to Standard; edited mark clears.
 
 ## Phase 7.3 — In-app develop engine (the big one)  (L)
 
@@ -87,17 +88,29 @@ limited to the camera's built-in set. This is where "film emulations" become tru
 Research + design: **`research/FILM_EMULATION.md`**.
 
 - [x] **CPU adaptive film engine** — pure-Kotlin, JVM-tested, in `looks/emulation/`:
-      `SceneAnalyzer` (robust percentiles/cast/texture → bounded per-frame decisions),
-      `FilmLutFactory` (per-channel negative density → dye-layer coupling → independent positive
-      print/scan characteristic), `DevelopPipeline` (adaptive tone/mix → luminance-neutral
-      split-tone → face-gated, luminance-preserving complexion naturalisation → selective Portra
-      foliage hue/saturation → connected-sky hue/saturation → stock-coloured edge-only halation → non-tiling,
-      clumped ISO-aware density grain), and `DevelopEngine` (Bitmap glue + bundled on-device ML
-      Kit face bounds). The 11-stock catalog includes
+      `SceneAnalyzer` (canonical, resolution-invariant linear-light statistics → bounded Smart
+      decisions), `FilmLutFactory` (absolute negative optical density/transmittance → dye-layer
+      coupling → independent positive print density/reflectance or scan characteristic),
+      `DevelopPipeline` (Stock or Smart scene handling → optional Smart daylight warmth →
+      negative/print transform → luminance-neutral split-tone → face-gated,
+      luminance-preserving complexion naturalisation → selective Portra
+      foliage hue/saturation → connected-sky hue/saturation → physical-scale image diffusion →
+      immutable-source two-lobe halation → analytically integrated, non-tiling, ISO-aware
+      film-plane density grain), and `DevelopEngine` (Bitmap glue + bundled on-device ML Kit face
+      bounds). The 11-stock catalog includes
       Portra 400/800, Gold, Ektar, Superia, CineStill/Vision3, Eterna, Tri-X, and HP5.
-      Preview and edited export use the same render.
+      Preview and edited export use the same rendering implementation and persisted intent/seed;
+      Android-rendered DNG export remains a separately labelled input rendition.
+- [x] **Rendering contract and provenance** — Stock is scene-invariant; Smart alone applies
+      semantic/tone safeguards plus a scene-guarded, luminance-stable +6-mired bias for
+      explicitly daylight-balanced colour profiles. Tungsten, monochrome, and unspecified
+      profiles are excluded. Intent and the stable per-photo grain seed travel together through
+      preview/export; sticky defaults persist across launches, while the per-frame edit map is
+      currently session-scoped. Every profile records stock/process/source and explicit colour
+      balance and is manufacturer-anchored or lab-measured; validated monotonic D-logE CSV can
+      replace the fallback fit without inventing measurement claims.
 - [x] **Stock intensity** — a persisted 50–150% control scales LUT, split tone, grain, and
-      halation while bounded scene protection stops at its calibrated 100% value. Per-frame,
+      halation while bounded scene protection stops at its authored 100% value. Per-frame,
       sticky-next-frame, batch-apply, preview, and edited export all carry the same strength.
 - [x] **High-resolution review lab** — `:tools:renderReviewSite` generates 3000 px original,
       100%, and 150% masters for every local JPEG/DNG example; the browser UI provides split
@@ -111,7 +124,10 @@ Research + design: **`research/FILM_EMULATION.md`**.
       colour-science suite even on a host without the Android SDK.
 - [ ] **AGSL/`RuntimeShader` preview fast-path** (API 33+) for live grid/viewer preview;
       keep the CPU engine as the universal + export path (min SDK 26). No RenderScript.
-- [ ] DNG decode (transferred via `downloadPhoto(... raw)`), demosaic to a working buffer.
+- [x] DNG platform rendition (API 28+) with an explicit UI warning that Android controls the
+      device-dependent display-RGB base and edited output is not a scene-linear RAW develop.
+- [ ] Controlled scene-linear DNG decode, camera colour calibration, and high-bit-depth working
+      buffer/output.
 - [ ] Non-destructive edit stack per photo; render on export.
 
 ## Phase 7.4 — Auto-Look  (M) — kept from Concept B

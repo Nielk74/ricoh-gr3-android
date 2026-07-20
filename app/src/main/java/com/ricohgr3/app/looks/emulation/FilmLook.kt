@@ -2,17 +2,23 @@ package com.ricohgr3.app.looks.emulation
 
 /**
  * A film-emulation look: a 3D LUT plus the parametric spatial/tonal layers that a pointwise
- * colour map can't express (selective skin/foliage/sky colour, split toning, halation, grain).
- * Rendered on-device by [DevelopEngine]. See `research/FILM_EMULATION.md` §4.
+ * colour map can't express (selective skin/foliage/sky colour, split toning, image structure,
+ * halation, grain).
+ * Rendered on-device by [DevelopEngine]. Physical negative/print calibration and its provenance
+ * belong to the corresponding [FilmLookCatalog.Entry.model], keeping presentation controls
+ * separate from the stock's sensitometric definition. See `research/FILM_EMULATION.md` §4.
  *
  * @property id stable identifier (asset key / persisted value).
  * @property displayName UI label.
  * @property lutAsset path under `assets/` to the `.cube` file, or `null` for no colour LUT
  *   (identity — useful for looks defined purely by the parametric layers).
  * @property splitTone shadow/highlight tint, applied after the LUT.
+ * @property colorBalance explicit stock capture balance. Smart rendering may use this metadata for
+ *   a restrained product-side warmth bias; it never changes the reproducible Stock contract.
  * @property skinTone connected-region skin isolation and natural colour protection.
  * @property foliageTone selective vegetation-green colour adjustment; disabled by default.
  * @property skyTone top-connected blue-sky colour adjustment; disabled by default.
+ * @property imageStructure physical-scale emulsion/scanner diffusion; disabled by default.
  * @property halation stock-coloured highlight bloom; [HalationParams.NONE] to disable.
  * @property grain film grain; [GrainParams.NONE] to disable.
  * @property swatchTop/[swatchBottom] a representative 2-stop gradient (ARGB `0xFFrrggbb`) for
@@ -22,24 +28,52 @@ package com.ricohgr3.app.looks.emulation
  *   the LUT output is taken as-is (display-referred). `1.0` = feed sRGB directly, which is what
  *   the hand-authored shipped stocks use. The field remains for any future, licensed asset whose
  *   documented input transfer differs.
- * @property adaptive scene-aware input/output protection. [AdaptiveParams.NONE] makes the LUT
+ * @property stock authored, scene-invariant stock/layer calibration.
+ * @property adaptive optional scene-aware input/output protection. [AdaptiveParams.NONE] makes the LUT
  *   literal, which is useful for identity transforms and tests; shipped stocks enable it.
  */
 data class FilmLook(
     val id: String,
     val displayName: String,
     val lutAsset: String?,
+    val colorBalance: FilmColorBalance = FilmColorBalance.UNSPECIFIED,
     val splitTone: SplitTone = SplitTone.NONE,
     val skinTone: SkinToneParams = SkinToneParams.NONE,
     val foliageTone: FoliageToneParams = FoliageToneParams.NONE,
     val skyTone: SkyToneParams = SkyToneParams.NONE,
+    val imageStructure: ImageStructureParams = ImageStructureParams.NONE,
     val halation: HalationParams = HalationParams.NONE,
     val grain: GrainParams = GrainParams.NONE,
     val swatchTop: Long = 0xFFECEAE6,
     val swatchBottom: Long = 0xFFCFCCC6,
     val lutInputGamma: Float = 1f,
+    val stock: StockRenderParams = StockRenderParams(),
     val adaptive: AdaptiveParams = AdaptiveParams.NONE,
 )
+
+/**
+ * Restrained image-structure response ahead of halation and film-plane grain.
+ *
+ * [diffusionMicrometres] is a physical radius on the emulsion/scan plane, not an output-pixel
+ * blur. [strength] blends that response with the incoming scene. Built-in values are qualitative
+ * manufacturer-anchored MTF fits until a measured camera/stock/process/scan chain is available;
+ * they must not be described as measured MTF curves.
+ */
+data class ImageStructureParams(
+    val diffusionMicrometres: Float,
+    val strength: Float,
+) {
+    init {
+        require(diffusionMicrometres.isFinite() && diffusionMicrometres >= 0f)
+        require(strength.isFinite() && strength in 0f..1f)
+    }
+
+    val enabled: Boolean get() = diffusionMicrometres > 0f && strength > 0f
+
+    companion object {
+        val NONE = ImageStructureParams(diffusionMicrometres = 0f, strength = 0f)
+    }
+}
 
 /**
  * A restrained colour move for vegetation-like yellow-green and green pixels. The soft
@@ -147,11 +181,10 @@ data class HalationParams(
 
 /**
  * Film grain — a physically-motivated model, not uniform digital noise. See
- * `research/FILM_EMULATION.md` and [DevelopPipeline.applyGrain]. A deterministic, non-tiling
- * coordinate field is correlated only across immediate neighbours, then perturbs
- * log-odds/optical-density-like luminance. A bounded non-Gaussian crystal term makes faster
- * stocks irregular rather than digitally uniform. The response peaks in the midtones, preserves
- * black/white endpoints, and can be biased toward shadows.
+ * `research/FILM_EMULATION.md` and [PhysicalFilmGrain]. A deterministic, non-tiling continuous
+ * film-plane crystal field perturbs density-like luminance. A bounded non-Gaussian crystal term
+ * makes faster stocks irregular rather than digitally uniform. The response peaks in the
+ * midtones, preserves black/white endpoints, and can be biased toward shadows.
  *
  * @property amount overall density-variation strength.
  * @property size local crystal correlation (larger = slightly broader neighbouring structure;

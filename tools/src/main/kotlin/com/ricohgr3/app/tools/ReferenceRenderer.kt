@@ -1,9 +1,11 @@
 package com.ricohgr3.app.tools
 
 import com.ricohgr3.app.looks.emulation.DevelopPipeline
+import com.ricohgr3.app.looks.emulation.DevelopOptions
 import com.ricohgr3.app.looks.emulation.FilmLookCatalog
 import com.ricohgr3.app.looks.emulation.SceneAnalyzer
 import com.ricohgr3.app.looks.emulation.SceneProfile
+import com.ricohgr3.app.looks.emulation.stableRenderSeed
 import java.awt.Color
 import java.awt.Font
 import java.awt.RenderingHints
@@ -58,6 +60,10 @@ fun main(args: Array<String>) {
     val report = StringBuilder()
     report.appendLine("GR III adaptive-film calibration")
     report.appendLine("sources=${sources.size} looks=${selectedIds.joinToString()}")
+    report.appendLine(
+        "analysis=224x224 normalized grid; luminance=linear sRGB/Rec.709; " +
+            "microContrast=canonical 720px scale",
+    )
     report.appendLine()
 
     for (source in sources) {
@@ -66,6 +72,10 @@ fun main(args: Array<String>) {
         // skin colour, and grain character in the generated contact sheet.
         val work = if (decoded.width > 960) scaleTo(decoded, 960) else toRgb(decoded)
         val profile = profileOf(work)
+        val developOptions = DevelopOptions(
+            sceneProfile = profile,
+            renderSeed = stableRenderSeed(source.name),
+        )
         report.appendLine(source.name)
         report.appendLine(profile.summary())
 
@@ -73,7 +83,11 @@ fun main(args: Array<String>) {
         panels += "Original" to work
         for (id in selectedIds) {
             val entry = FilmLookCatalog.entryFor(id) ?: continue
-            val adjustment = SceneAnalyzer.adjustment(profile, entry.look.adaptive)
+            val adjustment = SceneAnalyzer.adjustment(
+                profile,
+                entry.look.adaptive,
+                stock = entry.look.stock,
+            )
             report.appendLine(
                 "  ${entry.look.displayName.padEnd(15)} " +
                     "ev=${adjustment.exposureEv.fmt()} sh=${adjustment.shadowLift.fmt()} " +
@@ -81,7 +95,12 @@ fun main(args: Array<String>) {
                     "sat=${adjustment.saturation.fmt()} grain=${adjustment.grainScale.fmt()}",
             )
             val lut = loadLut(entry.look, lutDir)
-            panels += entry.look.displayName to develop(work, entry.look, lut)
+            panels += entry.look.displayName to develop(
+                work,
+                entry.look,
+                lut,
+                options = developOptions,
+            )
         }
         report.appendLine()
 

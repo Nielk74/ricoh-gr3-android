@@ -35,6 +35,23 @@ jobs:
           echo "version_name=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "version_code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify source, tests, lint and previews
+        run: |
+          ./gradlew assembleDebug lint test :tools:renderPreviews --stacktrace
+          git diff --exit-code -- docs/previews
+
+      - name: Require release signing secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_B64" || { echo "KEYSTORE_B64 is missing"; exit 1; }
+          test -n "$STORE_PASSWORD" || { echo "STORE_PASSWORD is missing"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "KEY_ALIAS is missing"; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "KEY_PASSWORD is missing"; exit 1; }
+
       - name: Decode keystore
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
@@ -51,6 +68,14 @@ jobs:
           VERSION_CODE: ${{ steps.version.outputs.version_code }}
           GITHUB_REPO: ${{ github.repository }}
         run: ./gradlew assembleRelease bundleRelease --stacktrace
+
+      - name: Verify APK signature
+        run: |
+          APK="$(find app/build/outputs/apk/release -name '*.apk' -type f -print -quit)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          test -n "$APK" || { echo "Release APK was not produced"; exit 1; }
+          test -n "$APKSIGNER" || { echo "apksigner was not found"; exit 1; }
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Generate APK checksum
         run: |

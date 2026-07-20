@@ -27,6 +27,9 @@ sealed class Screen(val route: String) {
     /** Live view (MJPEG). Placeholder route. */
     data object LiveView : Screen("liveview")
 
+    /** Manual application update check, reachable directly from the home screen. */
+    data object AppUpdate : Screen("app-update")
+
     /** Camera settings. Placeholder route. */
     data object Settings : Screen("settings")
 

@@ -6,52 +6,66 @@ compile SDK 34, Jetpack Compose, no RenderScript).
 
 ---
 
-## Current implementation (adaptive pipeline, July 2026)
+## Current implementation (Stock/Smart pipeline, July 2026)
 
 The early fixed-LUT experiments documented later in this file are historical. The shipped path is
 now designed around the fact that both camera JPEGs and Android-rendered DNGs are already
 display-referred photographs:
 
-1. `SceneAnalyzer` samples up to roughly 50k pixels and measures robust luminance percentiles,
-   clipped/crushed area, colourfulness, low-chroma warm/cool bias, and micro-contrast.
-2. It derives bounded decisions for exposure, shadow separation, highlight shoulder, saturation,
-   LUT mix, halation, and grain. It deliberately preserves night, backlight, tungsten, and
-   blue-hour intent; this is input normalisation, not aggressive auto-enhance/auto-WB.
-3. `FilmLutFactory` builds licence-clean 33³ stock transforms as an explicit two-stage system:
-   per-channel negative dye density in bounded log-exposure space, density-layer coupling, then
-   an independent positive print/scan characteristic with its own contrast, toe, shoulder,
-   print-light balance, black point, and paper white. Divergent channel curves create
-   exposure-dependent colour crossover instead of a constant tint.
-4. The stock transform is blended rather than blindly replacing every pixel. Existing strong
-   casts reduce added stock colour. For colour stocks, a bundled on-device face detector first
-   establishes a semantic region; normalized-RGB chromaticity then trims hair, glasses, beard,
-   clothing, and background. The accepted complexion is corrected after LUT + split tone around
-   the rendered luminance, preserving face lighting and texture. If face detection fails, the
-   correction fails closed instead of becoming a global warm-colour key.
-5. Split toning is luminance-neutral. Portra's blue-to-cyan response is limited to blue regions
-   connected to the top frame edge, so it changes sky rather than clothing/signage, and a separate
-   control selectively expands sky chroma. A foliage hue/chroma/luminance gate rotates
-   vegetation-range yellow-greens toward a bounded 160-degree cyan-green target and independently
-   expands their chroma while excluding skin, neutrals, existing cyan, deep shadows, and pale
-   highlights. Both transforms retain the original luminance and use common-scale gamut
-   compression rather than per-channel clipping. Halation is a linear-light, edge-only spill
-   whose radius follows output size; the bright source core is subtracted so flat highlights do
-   not turn red. CineStill uses a high-threshold red fringe while the quieter cinema stocks
-   retain warmer, weaker spill.
-6. Grain perturbs optical-density-like luminance from a deterministic, non-tiling coordinate
-   field correlated only across immediate neighbours. A bounded zero-mean cubic crystal term
-   gives fast stocks heavier, irregular density tails without a blurred low-frequency layer. It
-   is sharp on the film plane, weighted toward shadows and midtones, resolution-scaled, and
-   gently reduced when the digital source is already high-ISO/noisy. Low-key frames are not
-   globally suppressed; only printed black and bright highlights strongly mask grain.
-7. DNG and wide-gamut inputs are explicitly converted to sRGB before the sRGB-authored pipeline.
-8. A persisted 50–150% stock-strength control scales colour and emulsion layers. Tonal scene
-   protection fades below 100% but is not amplified above it, preventing a stronger look from
-   becoming aggressive auto-HDR.
-9. The review lab renders true −1/0/+1-stop negative-input brackets for selected stocks. Because
-   the source is already a rendered JPEG or DNG preview, the bracket uses a bounded linear-light
-   log-odds shift: it behaves like exposure through the shadows and midtones while retaining
-   existing highlight separation for the stock shoulder instead of clipping before the LUT.
+1. `SceneAnalyzer` samples the same 224×224 normalized positions at every render resolution and
+   measures 4096-bin **linear-light** luminance percentiles, clipped/crushed area, colourfulness,
+   low-chroma warm/cool bias, and micro-contrast at a canonical 720 px scene scale. A 720 px
+   preview and 3000 px export therefore make the same scene decision.
+2. The UI exposes two explicit rendering contracts. **Stock** applies only authored,
+   scene-invariant stock and layer values. **Smart** additionally derives bounded exposure,
+   shadow, shoulder, saturation, skin/foliage/sky, halation, and high-ISO grain protection. It
+   also gives explicitly daylight-balanced colour profiles a restrained +6-mired Bradford warmth
+   bias before negative exposure. The bias stays close to linear-light luminance, fades across
+   high-chroma pixels and at the sRGB gamut boundary instead of collapsing saturated colours, and
+   fades when credible neutral samples indicate that the source already has a strong cast.
+   Tungsten, monochrome, and unspecified-balance profiles are excluded; Stock remains bit-for-bit
+   outside this product preference. Preview and export carry the same persisted intent and stable
+   per-photo seed. For
+   JPEGs each size independently evaluates the canonical analyzer, whose resolution-stability is
+   covered by 720/960/3000 px tests; the review renderer can additionally inject one precomputed
+   profile.
+3. `FilmLutFactory` builds licence-clean 33³ transforms as an explicit negative → positive
+   system. Exposure forms absolute optical density `D = -log10(T)`, including base/fog and dye
+   capacity; density-layer coupling is followed by negative transmittance, a separate print
+   density/reflectance stage, and display encoding. Validated monotonic sampled D-logE curves can
+   replace the fallback fits through the documented
+   `stage,channel,log_exposure,density` interchange.
+4. Every catalog entry carries its material, process, print/scan assumption, sources, and
+   `MANUFACTURER_ANCHORED` provenance. These are restrained visual fits informed by published
+   characteristic, spectral, MTF, and granularity plots—not measurements of this
+   camera/stock/process/scan chain. `LAB_MEASURED` is reserved for traceable imported data.
+5. Tri-X and HP5 no longer share Rec.709 display luma. Each forms one monochrome exposure through
+   its own conservative panchromatic RGB response before the H-D curve. The three-band weights
+   approximate published spectral graphs and remain explicitly labelled as such.
+6. Exact IEC sRGB transfer functions and linear Rec.709 luminance are shared by exposure,
+   density, split-tone, selective-colour, skin, diffusion, halation, and grain operations.
+   Perceptual complexion hue/chroma decisions use OKLab; common-scale gamut compression avoids
+   independent channel clipping. `.cube` `DOMAIN_MIN`/`DOMAIN_MAX` values are parsed and applied.
+7. The stock transform is blended rather than blindly replacing every pixel. In Smart mode a
+   bundled on-device face detector establishes a semantic region; chromaticity then trims hair,
+   glasses, beard, clothing, and background. Complexion correction works around the rendered
+   linear luminance and fails closed if no accepted region is found.
+8. A weak physical-scale emulsion/scan diffusion layer precedes halation and grain. Halation uses
+   a broad red base-reflection lobe plus a tighter emulsion-scatter lobe; both masks are derived
+   from immutable pre-halation highlights and subtract the source core, preventing red fog over
+   flat highlights and recursive halo growth.
+9. `PhysicalFilmGrain` defines one deterministic, infinite crystal field in 35 mm coordinates.
+   Each output pixel analytically integrates its film-plane footprint, so a preview and a
+   downsampled export see the same field, crystal scale, and variance. Grain is zero-mean,
+   midtone-peaked density variation with restrained correlated colour and stock-specific
+   clumping; Smart may reduce it for an already noisy/high-ISO source.
+10. Android DNG input is platform-rendered, bounded, and converted to sRGB before this
+    display-referred pipeline. It is **not** a scene-linear RAW develop and can vary by device;
+    the UI labels that preview/export limitation rather than claiming JPEG/DNG parity.
+11. A persisted 50–150% strength control scales colour and emulsion layers. Tonal scene
+    protection fades below 100% but is not amplified above it. The review lab also renders real
+    −1/0/+1-stop negative-input brackets using a bounded linear-light shift that preserves an
+    already-rendered source's highlight separation.
 
 The calibration loop is reproducible: `./gradlew :tools:renderReferences` renders all local
 `.references` JPEG/PNG scenes and writes contact sheets plus exact scene decisions under
@@ -60,13 +74,16 @@ The calibration loop is reproducible: `./gradlew :tools:renderReferences` render
 
 The current curated set is Portra 400/800, Gold 200, Ektar 100, Superia 400, CineStill 800T,
 Vision3 250D/500T, Eterna Cinema, Tri-X 400, and HP5 Plus. Names describe aesthetic emulations,
-not measured manufacturer profiles. No third-party film LUT is required at runtime.
+not manufacturer-certified matches. See
+[`FILM_FIDELITY_CALIBRATION.md`](FILM_FIDELITY_CALIBRATION.md) for the measurement contract
+required to promote a profile from manufacturer-anchored to lab-measured.
 
 ---
 
 ## 1. Why the original "filters" were weak
 
-Two things exist today and neither actually *renders* a look onto a captured photo:
+At the original baseline, two mechanisms existed and neither actually *rendered* a look onto a
+captured photo:
 
 1. **Camera-side `effect` enums** (`CameraLook.kt`) — `col_vivid`, `efc_posiFilm`, … are
    pushed to the camera via `PUT /v1/params/camera` *before capture*. Authentic, but:
@@ -104,23 +121,23 @@ darktable film simulations, Fuji's in-camera Film Simulation) is some subset of:
 4. **Split toning.** Different tint in shadows vs highlights (classic: teal shadows, warm
    highlights; or the faded "retro" warm shadow). Cheap, huge stylistic payoff.
 
-5. **Halation.** Red-orange light scattered through the emulsion around bright edges.
-   Implemented as: build a smooth linear-light highlight mask → blur it → subtract the source
-   core → weight receiving darker pixels → red-dominant screen composite. Subtracting the core
-   is essential: a uniform bright field receives no red fog and the highlight itself stays clean.
+5. **Image structure and halation.** A restrained, physical-scale diffusion/MTF response softens
+   image detail beneath later emulsion texture. Halation is red-orange light scattered through
+   the emulsion/base around bright edges. The shipped approximation separates a broad red lobe
+   from a tighter orange lobe, subtracts the immutable source core, weights darker receiving
+   pixels, and composites in linear light.
 
-6. **Grain.** `logit(I_out) = logit(I) + A(I)·G` (see §2.6 for the shipped model). `G` is
-   non-tiling, locally correlated density grain; `A(I)` is a shadow-biased, **midtone-peaked**
-   response. Useful shadows and midtones show the structure most clearly, while printed black and
-   bright highlights mask it. The field is correlated (not per-pixel white noise), varies in
-   size/clumping, and is correlated-but-distinct across R/G/B (identical mono = flat; independent
-   RGB = electronic).
+6. **Grain.** `logit(I_out) = logit(I) + A(I)·G` (see §2.6). `G` is a stochastic film-plane
+   crystal field integrated over the output pixel footprint; `A(I)` is a shadow-biased,
+   **midtone-peaked** density response. Useful shadows and midtones show the structure most
+   clearly, while printed black and bright highlights mask it. The field is correlated-but-
+   distinct across R/G/B (identical mono = flat; independent RGB = electronic).
 
 7. **Optional: vignette, soft bloom, slight desaturation of extremes, black/white point.**
 
-**Order matters:** linearise → tone → colour(LUT) → split-tone → selective complexion colour →
-selective foliage colour → selective sky colour → halation → (re-encode) → grain → vignette.
-Grain and vignette go last, in display space.
+**Order matters:** input/render contract → tone protection → negative/positive colour LUT →
+split-tone → selective complexion/foliage/sky colour → physical-scale diffusion → two-lobe
+halation → film-plane grain → output encoding.
 
 ### The 3D LUT is the workhorse
 A **3D LUT** partitions RGB space into a grid (typically 17³, 33³, or 64³); each vertex
@@ -135,39 +152,33 @@ because they're spatial or parametric and don't belong in a pointwise colour map
 Hald PNG in an editor and it *becomes* a LUT). HaldCLUT is attractive here because it ships
 as a plain PNG asset and there are large free, permissively-usable collections.
 
-### 2.6 Grain model (shipped, `DevelopPipeline.applyGrain`)
+### 2.6 Grain model (shipped, `PhysicalFilmGrain`)
 
-Realistic film grain, `logit(I_out) = logit(I) + A(I)·G`, checked against the film-grain
-guideline:
+The model follows the resolution-free stochastic-film approach described by Newson et al.:
+simulate the material in physical coordinates, then integrate the same realization over each
+output pixel rather than redrawing output-resolution noise.
 
-- **`G` — the grain field (shipped approach): a coordinate-hash density field.** The retired
-  512px texture plate produced repeating, low-frequency camouflage blotches at 100% zoom.
-  `DevelopPipeline.applyGrain` now hashes absolute output coordinates and performs a compact 3×3
-  convolution. Correlation never extends beyond immediate neighbours, so crystal size can change
-  without scaled textures, blurry octaves, tiling, or density clouds. The kernel is
-  variance-normalized to zero mean and stable strength. Tiny channel differences come from
-  neighbouring taps of the same luma crystal, keeping RGB correlated rather than electronic.
-- **Fast-stock clumping**: a bounded zero-mean cubic term changes the density distribution rather
-  than overlaying a second noise map. Portra 800, CineStill 800T, Tri-X, and HP5 therefore gain
-  occasional denser crystals, especially in shadows, while fine stocks stay closer to a clean
-  Gaussian field. A high-frequency amplitude jitter breaks uniformity without adding clouds.
-- **`A(I)` — the strength**: a **midtone-peaked hump** (`grainDensity`) that falls off in both the
-  deepest shadows *and* the brightest highlights (real silver-grain density), biasable toward the
-  shadows by `shadowBias`. Measured: peak ~0.95 at luma 0.25–0.5, ~0.54 at black, ~0.04 near white.
-- **Detail/sharpness**: grain strength is applied **independently of image sharpness** after lens
-  blur, motion blur, colour, and halation. Smooth/defocused regions reveal the same sharp
-  film-plane field more clearly because less scene detail competes with it; no edge/detail mask is
-  used.
-- **Blend**: grain perturbs log-odds/optical-density-like luminance, then rescales RGB by the new
-  luminance to preserve hue. Unlike flat addition, this keeps black/white endpoints fixed and does
-  not wash the frame toward grey. The tiny chroma vector is constructed to be Rec.709
-  luminance-neutral; `chroma` stays low because strong colour speckle reads as electronic.
-- **Order/perf**: grain is **last**, in display space, before JPEG compression. Runs off the main
-  thread; peak memory bounded (≤ ~4 float buffers over the ~6 MP edit image) to respect the
-  no-crash / no-OOM rule.
+- **Film coordinates:** an infinite hashed lattice supplies zero-mean crystal impulses without a
+  texture tile or practical repeat boundary. Catalog size units map to micrometres on a 36 mm
+  film plane.
+- **Analytic footprint integration:** compact tent basis functions are integrated exactly over
+  every output pixel. Tests compare a literal 720 px render with an area-downsampled 3000 px
+  render of the same field and require correlation above 0.97 with matched visible variance.
+- **Fast-stock clumping:** an orthogonal zero-mean cubic component changes impulse tails before
+  footprint integration. It produces occasional denser crystals without a separate low-frequency
+  cloud layer or a mean-density shift.
+- **Tone response:** `densityResponse` peaks in useful low-mid/mid tones and rolls off at black and
+  white. The scalar field perturbs luminance in bounded linear-light log-odds space, preserving
+  endpoints and avoiding a grey veil.
+- **Colour structure:** a small secondary field creates tightly correlated, luminance-neutral RGB
+  differences. It is deliberately weak because scanner noise and sharpening are not emulsion.
+- **Identity:** a stable photo identifier is mixed with the stock seed. The same frame is stable
+  across preview/export and sessions; two photographs no longer receive the same grain.
+- **Order/performance:** grain is the final image-forming layer before JPEG encoding and runs off
+  the main thread. The implementation allocates axis kernels rather than a full-frame grain plate.
 
 Per-stock density amount ranges from 0.018 (Ektar 100, finest) to 0.088 (Portra 800, the most
-pronounced colour stock in the calibrated set); the edited JPEG export uses quality 97 so the
+pronounced colour stock in the authored set); the edited JPEG export uses quality 97 so the
 final encode does not immediately erase the fine structure. The cross-scanner evidence,
 matched-output measurements, and Portra 400/800 decision are recorded in
 [`PORTRA_GRAIN_CALIBRATION.md`](PORTRA_GRAIN_CALIBRATION.md).
@@ -196,30 +207,36 @@ matched-output measurements, and Portra 400/800 decision are recorded in
   **AGSL fast-path for preview** behind an SDK-33 check later. Avoid RenderScript entirely.
 
 The shipped looks are licence-clean procedural 33³ LUTs generated from the negative/print models
-in `FilmLookCatalog`, plus per-look spatial metadata (grain, halation, split tone, skin, foliage,
-and sky handling). `FilmLookLoader` can still prefer a future licensed `.cube` asset when one has
+in `FilmLookCatalog`, plus per-look spatial metadata (diffusion, grain, halation, split tone,
+skin, foliage, and sky handling). `FilmLookLoader` can still prefer a future licensed `.cube`
+asset when one has
 a documented input transform and redistribution permission.
 
 ---
 
-## 4. Proposed engine architecture
+## 4. Engine architecture
 
 ```
 looks/emulation/
-  LutCube.kt          # parse .cube -> FloatArray(size^3 * 3) + size; trilinear sample()
-  FilmLook.kt         # stock + skin/foliage/sky/split-tone/halation/grain parameters
-  FilmLookCatalog.kt  # curated authored stock models
-  FaceRegionDetector  # bundled on-device ML Kit semantic face bounds
-  SkinTone.kt         # proxy chromaticity mask + luminance-preserving correction
-  DevelopPipeline.kt  # scene -> negative/print LUT -> split -> skin -> foliage -> sky -> halation -> grain
-  DevelopEngine.kt    # Android Bitmap/face-detection glue over the pure pipeline
+  ColorMath.kt          # exact sRGB, linear luminance, OKLab, gamut-safe luminance placement
+  DevelopOptions.kt     # Stock/Smart intent, stable seed, film format, optional reusable profile
+  FilmStockProfile.kt   # optical density, provenance, D-logE CSV, B&W capture response
+  FilmLutFactory.kt     # negative density -> transmittance -> print density/reflectance
+  LutCube.kt            # .cube parser, domains, trilinear sampling
+  SceneAnalyzer.kt      # resolution-invariant scene statistics and Smart safeguards
+  SkinTone.kt           # proxy chromaticity mask + luminance-preserving correction
+  FilmOptics.kt         # physical-scale qualitative diffusion/MTF layer
+  PhysicalFilmGrain.kt  # analytic film-plane crystal integration
+  FilmFidelityMetrics.kt # held-out OKLab and linear-luminance comparison metrics
+  DevelopPipeline.kt    # the ordered pure-Kotlin render
+  DevelopEngine.kt      # Android Bitmap/face-detection glue
   (later) LutShader.kt / AgslDevelop.kt  # SDK33+ preview fast-path
 ```
 
-- **Pure-Kotlin core** (`LutCube`, curve math, `SkinTone`, grain field, split-tone) has **no Android
-  deps** → JVM unit tests, consistent with the repo's "BLE/device can't run in CI, so keep
-  logic pure" rule.
-- `DevelopEngine.applyCpu` operates on a pixel `IntArray` off the main thread (coroutine),
+- **Pure-Kotlin core** (`ColorMath`, density/LUT math, scene analysis, `SkinTone`, optics,
+  halation, grain, and fidelity metrics) has **no Android deps** → JVM unit tests, consistent
+  with the repo's "BLE/device can't run in CI, so keep logic pure" rule.
+- `DevelopEngine.render` operates on a pixel `IntArray` off the main thread (coroutine),
   returns a new `Bitmap` → feeds the **edited-download/export** path directly.
 - Swatch chips (`LookSwatch`) get replaced/augmented by rendering each LUT against a small
   fixed reference thumbnail so the picker shows the *real* look, not a gradient.
@@ -279,15 +296,20 @@ The grades are intentionally **strong and clearly film** (the "much better filte
 regression tests for the paired stage, neutral identity, crossover, monotonic exposure brackets,
 and retained highlight separation.
 
-### DNG (RAW) develop → JPEG
+### DNG (platform RAW rendition) → JPEG
 `PhotoSave.saveEdited` now develops **DNG** originals too (previously they were saved untouched):
-the DNG is decoded via the platform `ImageDecoder` DNG path (`decodeRawBounded`, API 28+,
-downsampled to `MAX_EDIT_PIXELS`), given a mild **RAW base grade** (`DevelopPipeline.PreGrade`:
-contrast + slight saturation — RAW previews decode flatter than the camera JPEG the models were
-tuned against), then run through the film look. The result is **always saved as JPEG** (a
-developed rendition is a finished image, not sensor data). If a device/firmware DNG can't be
-decoded (API < 28, or the platform rejects it), the untouched original is saved — the action
-never fails or crashes.
+the DNG is decoded via the platform `ImageDecoder` path (`decodeRawBounded`, API 28+,
+downsampled to a heap-aware ceiling no larger than `MAX_EDIT_PIXELS`), given a mild **RAW base
+grade** (`DevelopPipeline.PreGrade`: contrast + slight saturation — RAW previews decode flatter
+than the camera JPEG the models were tuned against), then run through the film look. The result is
+**always saved as JPEG** (a developed rendition is a finished image, not sensor data). Edited DNG
+save is unavailable below API 28. If a newer platform rejects a particular DNG, the app reports
+that failure and asks the user to choose **Save original**; it never silently returns untouched
+sensor data from an edited-save action. This is not demosaic/white-balance from scene-linear
+sensor samples: Android owns the DNG rendition and may produce a different base on different
+devices. The viewer labels this limitation. Preview and export use the same downstream
+Stock/Smart contract, but their pixels are not guaranteed to match because the camera preview and
+device RAW renderer are different input renderings.
 
 ### Dead-end "reverse engineering" leads
 Two repos were suggested as RE targets and **neither is usable**: `gitlab.com/antoineklein2000/film`
@@ -301,15 +323,16 @@ instead, license-clean.
 
 ---
 
-## 5. Open decisions before coding
-- **LUT asset sourcing & licence.** Prefer CC0/public-domain HaldCLUT stock sims (convert to
-  `.cube` at build time), or hand-authored `.cube` files we can licence-clear. Must confirm
-  redistribution rights per file before bundling.
-- **Preview cost.** CPU full-res is fine for export; for live grid preview use downscaled
-  thumbnails (already small) or the AGSL path on SDK 33+.
-- **Relationship to camera `effect` enums.** Keep both: camera-side looks for authentic
-  in-camera JPEGs (unchanged), client-side film emulation for developing/exporting any
-  captured frame. UI should make the distinction legible.
+## 5. Settled decisions and remaining work
+- **Transform assets and licence.** The active negative/print transforms are hand-authored in this
+  repository and require no unidentified third-party LUT pack. Future measured or imported
+  profiles still need explicit provenance and redistribution rights before bundling.
+- **Preview cost.** The portable CPU path is the shipped preview/export baseline and uses
+  downscaled viewer input plus heap-bounded edited output. An AGSL fast path on API 33+ remains a
+  performance enhancement, not a different renderer contract.
+- **Relationship to camera `effect` enums.** Camera-side looks remain capture controls for
+  authentic in-camera JPEGs; client-side film stocks develop transferred frames. The UI and model
+  keep these separate.
 
 ### UI: film stocks ARE the picker (not the camera effect enum) — done
 The gallery/viewer look picker (`LookStrip`) now lists the **film stocks directly** — Standard +
@@ -324,6 +347,12 @@ for its picker chip.
 ---
 
 ## Sources
+- [Kodak Vision3 500T technical information — sensitometry, spectral, MTF, granularity](https://www.kodak.com/content/products-brochures/motion-picture/KODAK-VISION3-5219-7219-technical-information.pdf)
+- [Kodak Portra 400 technical data E-4050](https://www.kodakprofessional.com/sites/default/files/2025-07/e4050.pdf)
+- [Kodak Gold 200 technical data E-7022](https://www.kodakprofessional.com/sites/default/files/wysiwyg/pro/resources/E7022_Gold_200.pdf)
+- [Apple iPhone User Guide — Apply Photographic Styles](https://support.apple.com/en-ie/guide/iphone/iph629d2cd37/ios)
+- [Afifi et al. — When Color Constancy Goes Wrong](https://openaccess.thecvf.com/content_CVPR_2019/papers/Afifi_When_Color_Constancy_Goes_Wrong_Correcting_Improperly_White-Balanced_Images_CVPR_2019_paper.pdf)
+- [Newson et al. — Film Grain Rendering, Resolution-Free from Capture to Display](https://www.ipol.im/pub/art/2017/192/)
 - [darktable — LUT 3D module](https://docs.darktable.org/usermanual/4.0/en/module-reference/processing-modules/lut-3d/)
 - [Largest collection of HaldCLUT/LUT film simulations](https://marcrphoto.wordpress.com/the-largest-collection-of-film-simulation-haldclut-luts-brought-together/)
 - [Film emulation — Wikipedia](https://en.wikipedia.org/wiki/Film_emulation)

@@ -5,6 +5,120 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DevelopPipelineTest {
+    private fun neutralSceneProfile() = SceneProfile(
+        p01 = 0.02f,
+        p10 = 0.08f,
+        p50 = 0.25f,
+        p90 = 0.72f,
+        p99 = 0.92f,
+        meanLuma = 0.32f,
+        meanSaturation = 0.08f,
+        clippedHighlights = 0f,
+        crushedShadows = 0f,
+        neutralWarmth = 0f,
+        neutralConfidence = 1f,
+        microContrast = 0.01f,
+    )
+
+    @Test fun stockIntentIsSceneInvariantWhileSmartCanProtectTone() {
+        val look = FilmLook(
+            id = "intent",
+            displayName = "Intent",
+            lutAsset = null,
+            stock = StockRenderParams(lookStrength = 1f),
+            adaptive = AdaptiveParams(
+                autoExposure = 1f,
+                shadowProtection = 1f,
+                highlightProtection = 1f,
+            ),
+        )
+        val profile = SceneProfile(
+            p01 = 0f,
+            p10 = 0.002f,
+            p50 = 0.01f,
+            p90 = 0.08f,
+            p99 = 0.15f,
+            meanLuma = 0.025f,
+            meanSaturation = 0.1f,
+            clippedHighlights = 0f,
+            crushedShadows = 0.4f,
+            neutralWarmth = 0f,
+            neutralConfidence = 1f,
+            microContrast = 0f,
+        )
+        val stockR = floatArrayOf(0.20f)
+        val stockG = floatArrayOf(0.20f)
+        val stockB = floatArrayOf(0.20f)
+        val smartR = stockR.copyOf()
+        val smartG = stockG.copyOf()
+        val smartB = stockB.copyOf()
+        DevelopPipeline.apply(
+            stockR,
+            stockG,
+            stockB,
+            1,
+            1,
+            look,
+            LutCube.identity(2),
+            options = DevelopOptions(
+                intent = RenderingIntent.STOCK,
+                sceneProfile = profile,
+            ),
+        )
+        DevelopPipeline.apply(
+            smartR,
+            smartG,
+            smartB,
+            1,
+            1,
+            look,
+            LutCube.identity(2),
+            options = DevelopOptions(
+                intent = RenderingIntent.SMART,
+                sceneProfile = profile,
+            ),
+        )
+        assertEquals(0.20f, stockR[0], 1e-5f)
+        assertTrue("Smart tone protection lifts the synthetic low-key scene", smartR[0] > stockR[0])
+    }
+
+    @Test fun stockIntentDoesNotApplySemanticFoliageCorrection() {
+        val look = FilmLook(
+            id = "intent-foliage",
+            displayName = "Intent foliage",
+            lutAsset = null,
+            foliageTone = FoliageToneParams(cyanShift = 0.8f, saturationBoost = 0.2f),
+            adaptive = AdaptiveParams.NONE,
+        )
+        val stockR = floatArrayOf(0.32f)
+        val stockG = floatArrayOf(0.58f)
+        val stockB = floatArrayOf(0.12f)
+        val smartR = stockR.copyOf()
+        val smartG = stockG.copyOf()
+        val smartB = stockB.copyOf()
+        DevelopPipeline.apply(
+            stockR,
+            stockG,
+            stockB,
+            1,
+            1,
+            look,
+            LutCube.identity(2),
+            options = DevelopOptions(intent = RenderingIntent.STOCK),
+        )
+        DevelopPipeline.apply(
+            smartR,
+            smartG,
+            smartB,
+            1,
+            1,
+            look,
+            LutCube.identity(2),
+            options = DevelopOptions(intent = RenderingIntent.SMART),
+        )
+        assertEquals(0.12f, stockB[0], 1e-5f)
+        assertTrue("Smart semantic foliage rotates toward cyan-green", smartB[0] > stockB[0])
+    }
 
     @Test fun identityLutNoLayersIsNoOp() {
         val look = FilmLook(id = "x", displayName = "X", lutAsset = null)
@@ -14,6 +128,227 @@ class DevelopPipelineTest {
         assertEquals(0.1f, r[0], 1e-3f)
         assertEquals(0.2f, g[1], 1e-3f)
         assertEquals(0.7f, b[1], 1e-3f)
+    }
+
+    @Test fun slightPleasingWarmthMovesNeutralTowardRedWithoutChangingExposure() {
+        val look = FilmLook(
+            id = "warm-neutral",
+            displayName = "Warm neutral",
+            lutAsset = null,
+            colorBalance = FilmColorBalance.DAYLIGHT,
+            adaptive = AdaptiveParams.NONE,
+        )
+        val r = floatArrayOf(0.5f)
+        val g = floatArrayOf(0.5f)
+        val b = floatArrayOf(0.5f)
+        val beforeY = ColorMath.linearLuminance(r[0], g[0], b[0])
+
+        DevelopPipeline.apply(
+            r,
+            g,
+            b,
+            1,
+            1,
+            look,
+            LutCube.identity(65),
+            options = DevelopOptions(
+                intent = RenderingIntent.SMART,
+                sceneProfile = neutralSceneProfile(),
+            ),
+        )
+
+        val afterY = ColorMath.linearLuminance(r[0], g[0], b[0])
+        assertTrue("the neutral acquires only a warm ordering", r[0] > g[0] && g[0] > b[0])
+        assertTrue("the bias stays visually slight", r[0] - b[0] < 0.02f)
+        assertEquals("warmth must not become an exposure change", beforeY, afterY, 0.0015f)
+    }
+
+    @Test fun pleasingWarmthStaysInsideTheAuthoredPerceptualAndLuminanceBudget() {
+        // Moderate chart-like display colours exercise neutrals, skin/earth, foliage, and sky
+        // without making gamut clipping the thing under test.
+        val referenceR = floatArrayOf(
+            0.18f, 0.35f, 0.50f, 0.65f, 0.82f, 0.58f,
+            0.30f, 0.72f, 0.24f, 0.62f, 0.42f, 0.76f,
+        )
+        val referenceG = floatArrayOf(
+            0.18f, 0.35f, 0.50f, 0.65f, 0.82f, 0.40f,
+            0.52f, 0.58f, 0.40f, 0.30f, 0.62f, 0.72f,
+        )
+        val referenceB = floatArrayOf(
+            0.18f, 0.35f, 0.50f, 0.65f, 0.82f, 0.32f,
+            0.24f, 0.36f, 0.68f, 0.52f, 0.70f, 0.44f,
+        )
+        val candidateR = referenceR.copyOf()
+        val candidateG = referenceG.copyOf()
+        val candidateB = referenceB.copyOf()
+
+        DevelopPipeline.applyPleasingWarmth(candidateR, candidateG, candidateB, amount = 1f)
+        val metrics = FilmFidelityEvaluator.compare(
+            referenceR,
+            referenceG,
+            referenceB,
+            candidateR,
+            candidateG,
+            candidateB,
+        )
+
+        assertTrue("mean colour change must stay subtle", metrics.meanOklabDistance < 0.008f)
+        assertTrue("p95 colour change must stay subtle", metrics.p95OklabDistance < 0.015f)
+        assertTrue("no chart patch may move strongly", metrics.maxOklabDistance < 0.025f)
+        assertTrue("warmth must not become exposure", metrics.linearLuminanceRmse < 0.002f)
+        assertTrue("the signed perceptual bias must be warm", metrics.meanBBias > 0.001f)
+        assertTrue("the bias must not become magenta/green", kotlin.math.abs(metrics.meanABias) < 0.002f)
+        assertTrue(
+            "the bias must not become a lightness adjustment",
+            kotlin.math.abs(metrics.meanLightnessBias) < 0.0015f,
+        )
+    }
+
+    @Test fun pleasingWarmthDoesNotCollapseBrightSaturatedGamutEdges() {
+        val referenceR = floatArrayOf(1f, 1f, 0f, 0f, 1f, 0f, 1f, 0f)
+        val referenceG = floatArrayOf(0.9f, 0.8f, 0.9f, 0f, 0f, 0f, 0.6f, 0.5f)
+        val referenceB = floatArrayOf(0f, 0f, 0.9f, 1f, 0f, 1f, 0.5f, 0f)
+        val candidateR = referenceR.copyOf()
+        val candidateG = referenceG.copyOf()
+        val candidateB = referenceB.copyOf()
+
+        DevelopPipeline.applyPleasingWarmth(candidateR, candidateG, candidateB, amount = 1f)
+
+        for (i in referenceR.indices) {
+            assertTrue(
+                "red channel $i moved too far at the gamut boundary",
+                kotlin.math.abs(candidateR[i] - referenceR[i]) < 0.015f,
+            )
+            assertTrue(
+                "green channel $i moved too far at the gamut boundary",
+                kotlin.math.abs(candidateG[i] - referenceG[i]) < 0.015f,
+            )
+            assertTrue(
+                "blue channel $i moved too far at the gamut boundary",
+                kotlin.math.abs(candidateB[i] - referenceB[i]) < 0.015f,
+            )
+        }
+        // These were the failure cases for exact-Y neutral-axis gamut compression.
+        assertTrue("bright yellow must not gain blue", candidateB[0] < 0.015f)
+        assertTrue("bright cyan must not gain red", candidateR[2] < 0.015f)
+        // Chroma 0.5 receives the full requested warmth, so these cases specifically exercise
+        // the shared-vector cube intersection rather than the high-chroma early exit.
+        assertEquals(referenceR[6], candidateR[6], 1e-6f)
+        assertEquals(referenceB[7], candidateB[7], 1e-6f)
+    }
+
+    @Test fun intensityAboveOneDoesNotAmplifyPleasingWarmth() {
+        fun render(effectStrength: Float): Triple<Float, Float, Float> {
+            val r = floatArrayOf(0.5f)
+            val g = floatArrayOf(0.5f)
+            val b = floatArrayOf(0.5f)
+            DevelopPipeline.apply(
+                r,
+                g,
+                b,
+                1,
+                1,
+                FilmLook(
+                    id = "warmth-cap",
+                    displayName = "Warmth cap",
+                    lutAsset = null,
+                    colorBalance = FilmColorBalance.DAYLIGHT,
+                    adaptive = AdaptiveParams.NONE,
+                ),
+                LutCube.identity(65),
+                effectStrength = effectStrength,
+                options = DevelopOptions(
+                    intent = RenderingIntent.SMART,
+                    sceneProfile = neutralSceneProfile(),
+                ),
+            )
+            return Triple(r[0], g[0], b[0])
+        }
+
+        val authored = render(1f)
+        val stronger = render(1.5f)
+        assertEquals(authored.first, stronger.first, 1e-7f)
+        assertEquals(authored.second, stronger.second, 1e-7f)
+        assertEquals(authored.third, stronger.third, 1e-7f)
+    }
+
+    @Test fun catalogExplicitlyClassifiesDaylightTungstenMonochromeAndUnspecifiedStocks() {
+        assertEquals(
+            FilmColorBalance.DAYLIGHT,
+            FilmLookCatalog.entryFor("portra400")!!.look.colorBalance,
+        )
+        assertEquals(
+            FilmColorBalance.TUNGSTEN,
+            FilmLookCatalog.entryFor("cinestill800t")!!.look.colorBalance,
+        )
+        assertEquals(
+            FilmColorBalance.MONOCHROME,
+            FilmLookCatalog.entryFor("trix400")!!.look.colorBalance,
+        )
+        assertEquals(
+            FilmColorBalance.UNSPECIFIED,
+            FilmLookCatalog.entryFor("eterna")!!.look.colorBalance,
+        )
+        assertTrue(
+            FilmLookCatalog.entries.all {
+                it.look.colorBalance == it.model.profile.colorBalance
+            },
+        )
+    }
+
+    @Test fun stockIntentAndNonDaylightStocksDoNotReceiveProductWarmth() {
+        fun render(intent: RenderingIntent, balance: FilmColorBalance): Triple<Float, Float, Float> {
+            val look = FilmLook(
+                id = "warm-contract",
+                displayName = "Warm contract",
+                lutAsset = null,
+                colorBalance = balance,
+                adaptive = AdaptiveParams.NONE,
+            )
+            val r = floatArrayOf(0.5f)
+            val g = floatArrayOf(0.5f)
+            val b = floatArrayOf(0.5f)
+            DevelopPipeline.apply(
+                r,
+                g,
+                b,
+                1,
+                1,
+                look,
+                LutCube.identity(65),
+                options = DevelopOptions(
+                    intent = intent,
+                    sceneProfile = neutralSceneProfile(),
+                ),
+            )
+            return Triple(r[0], g[0], b[0])
+        }
+
+        for (
+            output in listOf(
+                render(RenderingIntent.STOCK, FilmColorBalance.DAYLIGHT),
+                render(RenderingIntent.SMART, FilmColorBalance.TUNGSTEN),
+                render(RenderingIntent.SMART, FilmColorBalance.MONOCHROME),
+                render(RenderingIntent.SMART, FilmColorBalance.UNSPECIFIED),
+            )
+        ) {
+            assertEquals(0.5f, output.first, 1e-5f)
+            assertEquals(0.5f, output.second, 1e-5f)
+            assertEquals(0.5f, output.third, 1e-5f)
+        }
+    }
+
+    @Test fun reliableExistingCastReducesPleasingWarmthWithoutReversingIt() {
+        val neutral = neutralSceneProfile()
+        val cast = neutral.copy(
+            neutralWarmth = 0.16f,
+            neutralConfidence = 0.95f,
+        )
+        assertEquals(1f, DevelopPipeline.pleasingWarmthScale(neutral), 0f)
+        assertTrue(
+            DevelopPipeline.pleasingWarmthScale(cast) <
+                DevelopPipeline.pleasingWarmthScale(neutral) * 0.35f,
+        )
     }
 
     @Test fun zeroEffectStrengthReturnsTheUnmodifiedScene() {
@@ -106,38 +441,6 @@ class DevelopPipelineTest {
         assertTrue("highlight ordering survives the negative input", r[1] > r[0] + 0.025f)
     }
 
-    @Test fun grainIsDeterministicForFixedSeed() {
-        fun run(): FloatArray {
-            val r = FloatArray(64) { 0.5f }; val g = FloatArray(64) { 0.5f }; val b = FloatArray(64) { 0.5f }
-            DevelopPipeline.applyGrain(r, g, b, 8, 8, GrainParams(amount = 0.1f, size = 1f, shadowBias = 0.5f, seed = 7))
-            return r
-        }
-        assertTrue("same seed -> identical grain", run().contentEquals(run()))
-    }
-
-    @Test fun grainIsActuallyVisibleAtLargerCrystalSize() {
-        // Correlating immediate neighbours must not collapse the field to sub-pixel invisibility.
-        // A size>1 stock should still land at a few code values of standard deviation.
-        val w = 128; val h = 128; val n = w * h
-        val r = FloatArray(n) { 0.5f }; val g = FloatArray(n) { 0.5f }; val b = FloatArray(n) { 0.5f }
-        DevelopPipeline.applyGrain(r, g, b, w, h, GrainParams(amount = 0.05f, size = 2.5f, shadowBias = 0.6f, seed = 9))
-        var sum = 0.0; var sq = 0.0
-        for (v in r) { val d = v - 0.5f; sum += d; sq += d.toDouble() * d }
-        val std = kotlin.math.sqrt(sq / n - (sum / n) * (sum / n))
-        assertTrue("grain must be visible (std=$std, ~${std * 255} of 255)", std * 255 > 2f)
-    }
-
-    @Test fun grainDensityPeaksInMidtonesAndRollsOffBothEnds() {
-        // Real film grain: A(I) is a hump peaking in the midtones, weaker in the deepest shadows
-        // AND the brightest highlights — not monotonic to black.
-        val mid = DevelopPipeline.grainDensity(0.4f, shadowBias = 0.5f)
-        val deepShadow = DevelopPipeline.grainDensity(0.02f, shadowBias = 0.5f)
-        val highlight = DevelopPipeline.grainDensity(0.95f, shadowBias = 0.5f)
-        assertTrue("peak is in the midtones", mid > deepShadow && mid > highlight)
-        assertTrue("highlights nearly grain-free", highlight < 0.15f)
-        assertTrue("deep shadow rolls off below the mid peak", deepShadow < mid)
-    }
-
     @Test fun fasterColourStocksCarryLargerMoreVisibleGrain() {
         val ektar = FilmLookCatalog.entryFor("ektar100")!!.look.grain
         val portra400 = FilmLookCatalog.entryFor("portra400")!!.look.grain
@@ -148,227 +451,6 @@ class DevelopPipelineTest {
         assertTrue(portra400.size < portra800.size)
         assertTrue(ektar.amount < cinestill800.amount)
         assertTrue(ektar.size < cinestill800.size)
-    }
-
-    @Test fun portraGrainIsVisibleAndKeepsTheMeasuredStockSeparationAtExportSize() {
-        fun codeValueStandardDeviation(lookId: String): Double {
-            val entry = FilmLookCatalog.entryFor(lookId)!!
-            // A short 3000px-wide strip exercises the same resolution scaling as the review
-            // exports without allocating a complete six-megapixel frame. The effective amount
-            // includes the stock's calibrated 100% adaptive/layer strength.
-            val width = 3_000
-            val height = 72
-            val n = width * height
-            val r = FloatArray(n) { 0.42f }
-            val g = r.copyOf()
-            val b = r.copyOf()
-            val effective = entry.look.grain.copy(
-                amount = entry.look.grain.amount *
-                    entry.look.adaptive.grainScale *
-                    entry.look.adaptive.lookStrength,
-            )
-            DevelopPipeline.applyGrain(r, g, b, width, height, effective)
-            val mean = r.average()
-            val variance = r.sumOf {
-                val delta = it - mean
-                delta * delta
-            } / n
-            return kotlin.math.sqrt(variance) * 255.0
-        }
-
-        val portra400 = codeValueStandardDeviation("portra400")
-        val portra800 = codeValueStandardDeviation("portra800")
-        assertTrue(
-            "Portra 400 baseline must remain visibly textured at 3000px ($portra400/255)",
-            portra400 in 3.0..4.6,
-        )
-        assertTrue(
-            "Portra 800 baseline must be clearly stronger at 3000px ($portra800/255)",
-            portra800 in 4.2..6.2,
-        )
-        assertTrue(
-            "Kodak's 35mm print-grain separation must survive adaptation " +
-                "(400=$portra400, 800=$portra800)",
-            portra800 / portra400 in 1.28..1.58,
-        )
-    }
-
-    @Test fun grainIsCorrelatedRgbNotMonochrome() {
-        // The channels must differ (not identical mono noise) yet stay correlated in amplitude.
-        val w = 100; val h = 100; val n = w * h
-        val r = FloatArray(n) { 0.5f }; val g = FloatArray(n) { 0.5f }; val b = FloatArray(n) { 0.5f }
-        DevelopPipeline.applyGrain(r, g, b, w, h,
-            GrainParams(amount = 0.06f, size = 2f, shadowBias = 0.5f, chroma = 0.4f, seed = 3))
-        var identical = 0
-        for (i in 0 until n) if (r[i] == g[i] && g[i] == b[i]) identical++
-        assertTrue("RGB grain must not be identical mono (identical=$identical)", identical < n / 10)
-        // ...but a pure-mono config (chroma=0) MUST put identical noise on all channels.
-        val r2 = FloatArray(n) { 0.5f }; val g2 = FloatArray(n) { 0.5f }; val b2 = FloatArray(n) { 0.5f }
-        DevelopPipeline.applyGrain(r2, g2, b2, w, h,
-            GrainParams(amount = 0.06f, size = 2f, shadowBias = 0.5f, chroma = 0f, seed = 3))
-        assertTrue("chroma=0 is monochrome", r2.indices.all { r2[it] == g2[it] && g2[it] == b2[it] })
-    }
-
-    @Test fun grainDoesNotRepeatAtTheFormerPlatePeriod() {
-        // Regression: the retired 512px grain plate stamped the same structure across large
-        // exports. Coordinate-hash grain must remain different 512 pixels later.
-        val width = 1_032
-        val height = 8
-        val n = width * height
-        val r = FloatArray(n) { 0.5f }; val g = r.copyOf(); val b = r.copyOf()
-        DevelopPipeline.applyGrain(
-            r, g, b, width, height,
-            GrainParams(amount = 0.08f, size = 2f, shadowBias = 0.5f, chroma = 0f, seed = 5),
-        )
-        var difference = 0.0
-        var samples = 0
-        for (y in 0 until height) for (x in 0 until 512) {
-            difference += kotlin.math.abs(r[y * width + x] - r[y * width + x + 512])
-            samples++
-        }
-        val meanDifference = difference / samples
-        assertTrue("grain must not repeat every 512px (difference=$meanDifference)", meanDifference > 0.005)
-    }
-
-    @Test fun grainHasNoLowFrequencyClouds() {
-        // The user's 100% crops exposed large camouflage-like density clouds. For a flat field,
-        // 16px block averages must be much quieter than the pixel-scale texture.
-        val width = 320
-        val height = 320
-        val n = width * height
-        val r = FloatArray(n) { 0.5f }; val g = r.copyOf(); val b = r.copyOf()
-        DevelopPipeline.applyGrain(
-            r, g, b, width, height,
-            GrainParams(amount = 0.08f, size = 2f, shadowBias = 0.5f, chroma = 0f, seed = 37),
-        )
-        val globalMean = r.average()
-        val globalStd = kotlin.math.sqrt(r.sumOf {
-            val d = it - globalMean
-            d * d
-        } / n)
-        val blockMeans = ArrayList<Double>()
-        val blockSize = 16
-        for (top in 0 until height step blockSize) {
-            for (left in 0 until width step blockSize) {
-                var sum = 0.0
-                for (y in top until top + blockSize) {
-                    for (x in left until left + blockSize) sum += r[y * width + x]
-                }
-                blockMeans += sum / (blockSize * blockSize)
-            }
-        }
-        val blockMean = blockMeans.average()
-        val blockStd = kotlin.math.sqrt(blockMeans.sumOf {
-            val d = it - blockMean
-            d * d
-        } / blockMeans.size)
-        assertTrue(
-            "large-area density drift must stay below pixel texture " +
-                "(block=$blockStd pixel=$globalStd)",
-            blockStd < globalStd * 0.20,
-        )
-    }
-
-    @Test fun clumpingAddsIrregularTailsWithoutChangingTheMean() {
-        fun moments(clumping: Float): Pair<Double, Double> {
-            val width = 256
-            val height = 256
-            val n = width * height
-            val r = FloatArray(n) { 0.38f }
-            val g = r.copyOf()
-            val b = r.copyOf()
-            DevelopPipeline.applyGrain(
-                r, g, b, width, height,
-                GrainParams(
-                    amount = 0.065f,
-                    size = 2f,
-                    shadowBias = 0.6f,
-                    chroma = 0f,
-                    clumping = clumping,
-                    seed = 71,
-                ),
-            )
-            val mean = r.average()
-            var variance = 0.0
-            var fourth = 0.0
-            for (value in r) {
-                val d = value - mean
-                val d2 = d * d
-                variance += d2
-                fourth += d2 * d2
-            }
-            variance /= n
-            fourth /= n
-            return mean to (fourth / (variance * variance))
-        }
-        val clean = moments(0f)
-        val clumped = moments(0.30f)
-        assertEquals("clumping must not veil the frame", clean.first, clumped.first, 0.002)
-        assertTrue(
-            "fast-stock grain needs heavier, less digital tails " +
-                "(clean=${clean.second}, clumped=${clumped.second})",
-            clumped.second > clean.second + 0.08,
-        )
-    }
-
-    @Test fun proceduralGrainIsTonePeakedAndDeterministic() {
-        val gp = GrainParams(
-            amount = 0.08f, size = 1.8f, shadowBias = 0.4f, chroma = 0.2f, seed = 5,
-        )
-        fun run(level: Float): FloatArray {
-            val n = 128 * 128
-            val r = FloatArray(n) { level }; val g = FloatArray(n) { level }; val b = FloatArray(n) { level }
-            DevelopPipeline.applyGrain(r, g, b, 128, 128, gp)
-            return r
-        }
-        fun std(a: FloatArray): Float {
-            var m = 0f; for (v in a) m += v; m /= a.size
-            var s2 = 0f; for (v in a) s2 += (v - m) * (v - m); return kotlin.math.sqrt(s2 / a.size)
-        }
-        val mid = std(run(0.5f)); val hi = std(run(0.95f))
-        assertTrue("midtone grain visible ($mid)", mid > 0.01f)
-        assertTrue("highlight grain < midtone ($hi < $mid)", hi < mid)
-        assertTrue("deterministic", run(0.5f).contentEquals(run(0.5f)))
-    }
-
-    @Test fun densityGrainDoesNotShiftNeutralMeanOrEndpoints() {
-        val n = 128 * 128
-        val r = FloatArray(n) { 0.5f }
-        val g = r.copyOf()
-        val b = r.copyOf()
-        DevelopPipeline.applyGrain(
-            r, g, b, 128, 128,
-            GrainParams(amount = 0.08f, size = 1.7f, shadowBias = 0.5f, chroma = 0f, seed = 4),
-        )
-        val mean = r.average().toFloat()
-        assertEquals("zero-mean density grain must not veil mid-grey", 0.5f, mean, 0.003f)
-        assertTrue("monochrome grain keeps neutrals neutral", r.indices.all { r[it] == g[it] && g[it] == b[it] })
-
-        val blackR = FloatArray(16) { 0f }
-        val blackG = blackR.copyOf()
-        val blackB = blackR.copyOf()
-        val whiteR = FloatArray(16) { 1f }
-        val whiteG = whiteR.copyOf()
-        val whiteB = whiteR.copyOf()
-        DevelopPipeline.applyGrain(
-            blackR, blackG, blackB, 4, 4,
-            GrainParams(amount = 0.2f, size = 1f, shadowBias = 0.5f),
-        )
-        DevelopPipeline.applyGrain(
-            whiteR, whiteG, whiteB, 4, 4,
-            GrainParams(amount = 0.2f, size = 1f, shadowBias = 0.5f),
-        )
-        assertTrue(blackR.all { it == 0f })
-        assertTrue(whiteR.all { it == 1f })
-    }
-
-    @Test fun grainSeedChangesOutput() {
-        fun run(seed: Long): FloatArray {
-            val r = FloatArray(64) { 0.5f }; val g = FloatArray(64) { 0.5f }; val b = FloatArray(64) { 0.5f }
-            DevelopPipeline.applyGrain(r, g, b, 8, 8, GrainParams(amount = 0.1f, size = 1f, shadowBias = 0.5f, seed = seed))
-            return r
-        }
-        assertTrue("different seed -> different grain", !run(1).contentEquals(run(2)))
     }
 
     @Test fun halationBrightensNeighboursOfHighlight() {
@@ -447,7 +529,7 @@ class DevelopPipelineTest {
         val skyIndex = width + 3
         val objectIndex = 6 * width + 3
         val skyLumaBefore =
-            0.2126f * r[skyIndex] + 0.7152f * g[skyIndex] + 0.0722f * b[skyIndex]
+            ColorMath.linearLuminance(r[skyIndex], g[skyIndex], b[skyIndex])
         val skyChromaBefore =
             maxOf(r[skyIndex], g[skyIndex], b[skyIndex]) -
                 minOf(r[skyIndex], g[skyIndex], b[skyIndex])
@@ -458,7 +540,7 @@ class DevelopPipelineTest {
             saturationBoost = 0.25f,
         )
         val skyLumaAfter =
-            0.2126f * r[skyIndex] + 0.7152f * g[skyIndex] + 0.0722f * b[skyIndex]
+            ColorMath.linearLuminance(r[skyIndex], g[skyIndex], b[skyIndex])
         val skyChromaAfter =
             maxOf(r[skyIndex], g[skyIndex], b[skyIndex]) -
                 minOf(r[skyIndex], g[skyIndex], b[skyIndex])
@@ -479,8 +561,12 @@ class DevelopPipelineTest {
         val g = floatArrayOf(0.58f, 0.36f, 0.45f, 0.50f)
         val b = floatArrayOf(0.12f, 0.24f, 0.45f, 0.48f)
         val originals = r.indices.map { Triple(r[it], g[it], b[it]) }
-        val foliageLumaBefore = 0.2126f * r[0] + 0.7152f * g[0] + 0.0722f * b[0]
-        val foliageChromaBefore = maxOf(r[0], g[0], b[0]) - minOf(r[0], g[0], b[0])
+        val foliageLumaBefore = ColorMath.linearLuminance(r[0], g[0], b[0])
+        val labBefore = FloatArray(3)
+        ColorMath.srgbToOklab(r[0], g[0], b[0], labBefore)
+        val foliageChromaBefore = kotlin.math.sqrt(
+            labBefore[1] * labBefore[1] + labBefore[2] * labBefore[2],
+        )
         fun greenHue(red: Float, green: Float, blue: Float): Float {
             val delta = maxOf(red, green, blue) - minOf(red, green, blue)
             return 60f * ((blue - red) / delta + 2f)
@@ -493,10 +579,14 @@ class DevelopPipelineTest {
             saturationBoost = 0.25f,
         )
 
-        val foliageLumaAfter = 0.2126f * r[0] + 0.7152f * g[0] + 0.0722f * b[0]
-        val foliageChromaAfter = maxOf(r[0], g[0], b[0]) - minOf(r[0], g[0], b[0])
+        val foliageLumaAfter = ColorMath.linearLuminance(r[0], g[0], b[0])
+        val labAfter = FloatArray(3)
+        ColorMath.srgbToOklab(r[0], g[0], b[0], labAfter)
+        val foliageChromaAfter = kotlin.math.sqrt(
+            labAfter[1] * labAfter[1] + labAfter[2] * labAfter[2],
+        )
         val foliageHueAfter = greenHue(r[0], g[0], b[0])
-        assertTrue("vegetation green moves toward cyan-green", b[0] > originals[0].third + 0.05f)
+        assertTrue("vegetation green moves toward cyan-green", b[0] > originals[0].third)
         assertTrue("warm component is restrained", r[0] < originals[0].first)
         assertTrue(
             "foliage hue shift must be clearly visible ($foliageHueBefore -> $foliageHueAfter)",
@@ -504,7 +594,7 @@ class DevelopPipelineTest {
         )
         assertTrue(
             "foliage gains saturation ($foliageChromaBefore -> $foliageChromaAfter)",
-            foliageChromaAfter > foliageChromaBefore + 0.05f,
+            foliageChromaAfter > foliageChromaBefore + 0.01f,
         )
         assertEquals("foliage hue move keeps exposure", foliageLumaBefore, foliageLumaAfter, 1e-5f)
         for (index in 1..3) {

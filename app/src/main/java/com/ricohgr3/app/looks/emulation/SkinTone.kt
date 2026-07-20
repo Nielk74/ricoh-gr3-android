@@ -297,37 +297,42 @@ object SkinTone {
             return
         }
 
-        val renderedLuma = luma(renderedR, renderedG, renderedB).coerceIn(0f, 1f)
-        val sourceLuma = luma(sourceR, sourceG, sourceB)
-        val sourceScale = if (sourceLuma > 1e-5f) renderedLuma / sourceLuma else 0f
-        var referenceR = sourceR * sourceScale
-        var referenceG = sourceG * sourceScale
-        var referenceB = sourceB * sourceScale
-        compressAroundLuma(
-            referenceR,
-            referenceG,
-            referenceB,
+        val renderedLuma =
+            ColorMath.linearLuminance(renderedR, renderedG, renderedB).coerceIn(0f, 1f)
+        // Move the captured complexion to the stock-rendered exposure in exact linear light.
+        // Scaling gamma-encoded RGB here used to change hue and could not truly preserve light.
+        ColorMath.putAtLinearLuminance(
+            sourceR,
+            sourceG,
+            sourceB,
             renderedLuma,
             scratch,
         )
-        referenceR = scratch[0]
-        referenceG = scratch[1]
-        referenceB = scratch[2]
+        val referenceR = scratch[0]
+        val referenceG = scratch[1]
+        val referenceB = scratch[2]
 
-        val sourceSaturation = saturation(referenceR, referenceG, referenceB)
-        val renderedSaturation = saturation(renderedR, renderedG, renderedB)
+        ColorMath.srgbToOklab(referenceR, referenceG, referenceB, scratch)
+        val referenceA = scratch[1]
+        val referenceBPerceptual = scratch[2]
+        val sourceChroma = sqrt(
+            referenceA * referenceA + referenceBPerceptual * referenceBPerceptual,
+        )
+        ColorMath.srgbToOklab(renderedR, renderedG, renderedB, scratch)
+        val renderedA = scratch[1]
+        val renderedBPerceptual = scratch[2]
+        val renderedChroma = sqrt(
+            renderedA * renderedA + renderedBPerceptual * renderedBPerceptual,
+        )
         // Beneficial desaturation should survive. Stronger protection is reserved for a stock
         // that adds chroma or visibly pushes hue away from the captured complexion.
         val addedChroma =
-            ((renderedSaturation - sourceSaturation - 0.015f) / 0.10f).coerceIn(0f, 1f)
+            ((renderedChroma - sourceChroma - 0.005f) / 0.045f).coerceIn(0f, 1f)
         val hueRotation = chromaDirectionDistance(
-            referenceR,
-            referenceG,
-            referenceB,
-            renderedR,
-            renderedG,
-            renderedB,
-            renderedLuma,
+            referenceA,
+            referenceBPerceptual,
+            renderedA,
+            renderedBPerceptual,
         )
         val restoreBias = maxOf(0.08f, addedChroma, hueRotation)
         val protection = (params.protection * weight * restoreBias).coerceIn(0f, 0.90f)
@@ -335,20 +340,37 @@ object SkinTone {
         var rr = renderedR + (referenceR - renderedR) * protection
         var gg = renderedG + (referenceG - renderedG) * protection
         var bb = renderedB + (referenceB - renderedB) * protection
+        ColorMath.putAtLinearLuminance(rr, gg, bb, renderedLuma, scratch)
+        rr = scratch[0]
+        gg = scratch[1]
+        bb = scratch[2]
 
         val currentSaturation = saturation(rr, gg, bb)
-        val shadow = 1f - smoothstep(0.08f, 0.25f, renderedLuma)
+        val shadow = 1f - smoothstep(
+            ColorMath.srgbToLinear(0.08f),
+            ColorMath.srgbToLinear(0.25f),
+            renderedLuma,
+        )
         val ceiling = (params.saturationCeiling + 0.07f * shadow).coerceAtMost(0.82f)
         if (currentSaturation > ceiling) {
             val targetScale = (ceiling / currentSaturation).coerceIn(0f, 1f)
             val chromaScale =
                 1f - params.naturalness.coerceIn(0f, 1f) * weight * (1f - targetScale)
-            rr = renderedLuma + (rr - renderedLuma) * chromaScale
-            gg = renderedLuma + (gg - renderedLuma) * chromaScale
-            bb = renderedLuma + (bb - renderedLuma) * chromaScale
+            val linearR = ColorMath.srgbToLinear(rr)
+            val linearG = ColorMath.srgbToLinear(gg)
+            val linearB = ColorMath.srgbToLinear(bb)
+            rr = ColorMath.linearToSrgb(
+                renderedLuma + (linearR - renderedLuma) * chromaScale,
+            )
+            gg = ColorMath.linearToSrgb(
+                renderedLuma + (linearG - renderedLuma) * chromaScale,
+            )
+            bb = ColorMath.linearToSrgb(
+                renderedLuma + (linearB - renderedLuma) * chromaScale,
+            )
         }
 
-        compressAroundLuma(rr, gg, bb, renderedLuma, out)
+        ColorMath.putAtLinearLuminance(rr, gg, bb, renderedLuma, out)
     }
 
     private fun saturation(r: Float, g: Float, b: Float): Float {
@@ -362,73 +384,22 @@ object SkinTone {
      * correct the latter without undoing the former.
      */
     private fun chromaDirectionDistance(
-        referenceR: Float,
-        referenceG: Float,
+        referenceA: Float,
         referenceB: Float,
-        renderedR: Float,
-        renderedG: Float,
+        renderedA: Float,
         renderedB: Float,
-        luma: Float,
     ): Float {
-        val referenceCr = referenceR - luma
-        val referenceCg = referenceG - luma
-        val referenceCb = referenceB - luma
-        val renderedCr = renderedR - luma
-        val renderedCg = renderedG - luma
-        val renderedCb = renderedB - luma
-        val referenceLength = sqrt(
-            referenceCr * referenceCr +
-                referenceCg * referenceCg +
-                referenceCb * referenceCb,
-        )
-        val renderedLength = sqrt(
-            renderedCr * renderedCr +
-                renderedCg * renderedCg +
-                renderedCb * renderedCb,
-        )
-        if (referenceLength < 0.008f || renderedLength < 0.008f) return 0f
+        val referenceLength = sqrt(referenceA * referenceA + referenceB * referenceB)
+        val renderedLength = sqrt(renderedA * renderedA + renderedB * renderedB)
+        if (referenceLength < 0.004f || renderedLength < 0.004f) return 0f
 
-        val dr = referenceCr / referenceLength - renderedCr / renderedLength
-        val dg = referenceCg / referenceLength - renderedCg / renderedLength
-        val db = referenceCb / referenceLength - renderedCb / renderedLength
-        val distance = sqrt(dr * dr + dg * dg + db * db)
+        val da = referenceA / referenceLength - renderedA / renderedLength
+        val db = referenceB / referenceLength - renderedB / renderedLength
+        val distance = sqrt(da * da + db * db)
         val reliability =
-            smoothstep(0.008f, 0.045f, referenceLength) *
-                smoothstep(0.008f, 0.035f, renderedLength)
-        return smoothstep(0.055f, 0.42f, distance) * reliability
-    }
-
-    /**
-     * Hue-preserving gamut compression around [targetLuma], written into a caller-reused buffer
-     * so the full-resolution pixel loop does not allocate.
-     */
-    private fun compressAroundLuma(
-        r: Float,
-        g: Float,
-        b: Float,
-        targetLuma: Float,
-        out: FloatArray,
-    ) {
-        var rr = r
-        var gg = g
-        var bb = b
-        val max = maxOf(rr, gg, bb)
-        if (max > 1f && max > targetLuma) {
-            val mix = ((1f - targetLuma) / (max - targetLuma)).coerceIn(0f, 1f)
-            rr = targetLuma + (rr - targetLuma) * mix
-            gg = targetLuma + (gg - targetLuma) * mix
-            bb = targetLuma + (bb - targetLuma) * mix
-        }
-        val min = minOf(rr, gg, bb)
-        if (min < 0f && min < targetLuma) {
-            val mix = (targetLuma / (targetLuma - min)).coerceIn(0f, 1f)
-            rr = targetLuma + (rr - targetLuma) * mix
-            gg = targetLuma + (gg - targetLuma) * mix
-            bb = targetLuma + (bb - targetLuma) * mix
-        }
-        out[0] = rr.coerceIn(0f, 1f)
-        out[1] = gg.coerceIn(0f, 1f)
-        out[2] = bb.coerceIn(0f, 1f)
+            smoothstep(0.004f, 0.035f, referenceLength) *
+                smoothstep(0.004f, 0.030f, renderedLength)
+        return smoothstep(0.04f, 0.36f, distance) * reliability
     }
 
     private fun boxBlur(source: FloatArray, width: Int, height: Int, radius: Int): FloatArray {

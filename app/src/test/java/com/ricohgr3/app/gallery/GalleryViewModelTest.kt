@@ -2,6 +2,7 @@ package com.ricohgr3.app.gallery
 
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoRepository
+import com.ricohgr3.app.looks.emulation.RenderingIntent
 import com.ricohgr3.app.wifi.FakeCameraWifiController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -148,6 +149,22 @@ class GalleryViewModelTest {
     }
 
     @Test
+    fun `applyLook keeps per-frame and sticky rendering intent`() = runTest {
+        val vm = viewModel(FakeCameraWifiController())
+        val id = PhotoId("100RICOH", "R0000001.JPG")
+
+        vm.applyLook(
+            id,
+            "portra400",
+            renderingIntent = RenderingIntent.STOCK,
+        )
+
+        val state = vm.state.value
+        assertEquals(RenderingIntent.STOCK, state.renderingIntentFor(id))
+        assertEquals(RenderingIntent.STOCK, state.stickyRenderingIntent)
+    }
+
+    @Test
     fun `applyLook STANDARD clears the edited mark`() = runTest {
         val vm = viewModel(FakeCameraWifiController())
         val id = PhotoId("100RICOH", "R0000001.JPG")
@@ -185,14 +202,50 @@ class GalleryViewModelTest {
         vm.toggleSelect(a)
         vm.toggleSelect(b)
 
-        vm.applyLookToSelection("bleach_bypass")
+        vm.applyLookToSelection(
+            "bleach_bypass",
+            intensity = 1.35f,
+            renderingIntent = RenderingIntent.STOCK,
+        )
 
         val s = vm.state.value
         assertTrue(s.isEdited(a))
         assertTrue(s.isEdited(b))
         assertEquals(2, s.editedCount)
         assertEquals("bleach_bypass", s.lookFor(a))
+        assertEquals(1.35f, s.intensityFor(a))
+        assertEquals(1.35f, s.intensityFor(b))
+        assertEquals(RenderingIntent.STOCK, s.renderingIntentFor(a))
+        assertEquals(RenderingIntent.STOCK, s.renderingIntentFor(b))
         assertEquals("bleach_bypass", s.stickyLook)
+        assertEquals(1.35f, s.stickyIntensity)
+        assertEquals(RenderingIntent.STOCK, s.stickyRenderingIntent)
+    }
+
+    @Test
+    fun `batch controls update visible sticky settings without editing frames`() = runTest {
+        val vm = viewModel(FakeCameraWifiController())
+
+        vm.setStickyLook("portra400")
+        vm.setStickyIntensity(1.4f)
+        vm.setStickyRenderingIntent(RenderingIntent.STOCK)
+
+        val state = vm.state.value
+        assertEquals("portra400", state.stickyLook)
+        assertEquals(1.4f, state.stickyIntensity)
+        assertEquals(RenderingIntent.STOCK, state.stickyRenderingIntent)
+        assertEquals(0, state.editedCount)
+    }
+
+    @Test
+    fun `batch intensity control clamps before becoming effective`() = runTest {
+        val vm = viewModel(FakeCameraWifiController())
+
+        vm.setStickyIntensity(2f)
+        assertEquals(1.5f, vm.state.value.stickyIntensity)
+
+        vm.setStickyIntensity(0.1f)
+        assertEquals(0.5f, vm.state.value.stickyIntensity)
     }
 
     @Test

@@ -55,6 +55,37 @@ class LutCubeTest {
         assertEquals(1f, b, 1e-4f)
     }
 
+    @Test fun parseHonorsPerChannelInputDomains() {
+        val text = buildString {
+            appendLine("LUT_3D_SIZE 2")
+            appendLine("DOMAIN_MIN -1 0 0.25")
+            appendLine("DOMAIN_MAX 1 2 0.75")
+            for (b in 0..1) for (g in 0..1) for (r in 0..1) {
+                appendLine("${r.toFloat()} ${g.toFloat()} ${b.toFloat()}")
+            }
+        }
+        val lut = LutCube.parse(text)
+        val (r, g, b) = sample(lut, 0f, 1f, 0.5f)
+        assertEquals(0.5f, r, 1e-4f)
+        assertEquals(0.5f, g, 1e-4f)
+        assertEquals(0.5f, b, 1e-4f)
+
+        val clamped = sample(lut, -2f, 3f, 0f)
+        assertEquals(0f, clamped.first, 1e-4f)
+        assertEquals(1f, clamped.second, 1e-4f)
+        assertEquals(0f, clamped.third, 1e-4f)
+    }
+
+    @Test fun parseRejectsDegenerateDomains() {
+        val cube = buildString {
+            appendLine("LUT_3D_SIZE 2")
+            appendLine("DOMAIN_MIN 0 0 0")
+            appendLine("DOMAIN_MAX 1 0 1")
+            repeat(8) { appendLine("0 0 0") }
+        }
+        assertThrows(IllegalArgumentException::class.java) { LutCube.parse(cube) }
+    }
+
     @Test fun parseRejects1dLut() {
         assertThrows(IllegalArgumentException::class.java) {
             LutCube.parse("LUT_1D_SIZE 4\n0 0 0\n1 1 1\n0.5 0.5 0.5\n0.2 0.2 0.2")

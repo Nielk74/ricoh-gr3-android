@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.ricohgr3.app.looks.emulation.FilmLookCatalog
+import com.ricohgr3.app.looks.emulation.RenderingIntent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -24,6 +25,13 @@ object LookPreferenceCodec {
 
     fun decode(value: String?): String? =
         value?.takeIf { it.isNotEmpty() && FilmLookCatalog.entryFor(it) != null }
+
+    fun encodeRenderingIntent(intent: RenderingIntent): String = intent.name
+
+    fun decodeRenderingIntent(value: String?): RenderingIntent =
+        value?.let { encoded ->
+            RenderingIntent.entries.firstOrNull { it.name == encoded }
+        } ?: RenderingIntent.SMART
 }
 
 /** The app-wide DataStore for look preferences. */
@@ -46,16 +54,28 @@ class StickyLookStore(private val context: Context) {
         (prefs[LAST_INTENSITY_KEY] ?: 1f).coerceIn(0.5f, 1.5f)
     }
 
+    /** Last-used renderer contract; old installs migrate to the protected Smart path. */
+    val renderingIntentFlow: Flow<RenderingIntent> = context.looksDataStore.data.map { prefs ->
+        LookPreferenceCodec.decodeRenderingIntent(prefs[LAST_RENDERING_INTENT_KEY])
+    }
+
     /** Persist [look] as the sticky last-used film-stock id (`null` = Standard). */
-    suspend fun setLook(look: String?, intensity: Float = 1f) {
+    suspend fun setLook(
+        look: String?,
+        intensity: Float = 1f,
+        renderingIntent: RenderingIntent = RenderingIntent.SMART,
+    ) {
         context.looksDataStore.edit { prefs ->
             prefs[LAST_LOOK_KEY] = LookPreferenceCodec.encode(look)
             prefs[LAST_INTENSITY_KEY] = intensity.coerceIn(0.5f, 1.5f)
+            prefs[LAST_RENDERING_INTENT_KEY] =
+                LookPreferenceCodec.encodeRenderingIntent(renderingIntent)
         }
     }
 
     private companion object {
         val LAST_LOOK_KEY = stringPreferencesKey("last_look")
         val LAST_INTENSITY_KEY = floatPreferencesKey("last_look_intensity")
+        val LAST_RENDERING_INTENT_KEY = stringPreferencesKey("last_look_rendering_intent")
     }
 }

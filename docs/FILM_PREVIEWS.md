@@ -6,6 +6,10 @@ run through the **same pure-Kotlin develop pipeline the app ships** (`DevelopPip
 has no Android dependencies, so a plain JVM tool decodes the JPEG, analyses the scene, applies
 each adaptive look, and writes the thumbnails.
 
+The committed previews use Smart intent. For explicitly daylight-balanced colour profiles this
+includes the same subtle +6-mired, scene-guarded warmth used by the app; Stock intent and
+tungsten, monochrome, or unspecified-balance profiles do not receive it.
+
 ## Regenerate locally
 
 ```bash
@@ -15,7 +19,8 @@ each adaptive look, and writes the thumbnails.
 This reads:
 - the sample photo `docs/preview-src/griii-sample.jpg`,
 - the hand-authored negative/print stock models in `FilmLookCatalog`,
-- the analytic, non-tiling density-grain model in `DevelopPipeline`,
+- the qualitative physical-scale diffusion and immutable-source two-lobe halation models,
+- the analytic, resolution-independent film-plane grain model in `PhysicalFilmGrain`,
 
 and writes one thumbnail per look to `docs/previews/*.jpg` (Standard + every stock in
 `FilmLookCatalog`). The renderer lives in `tools/` (`:tools`, a JVM-only Gradle module).
@@ -44,9 +49,10 @@ JPEGs/PNGs in the ignored `.references/` folder and run:
 ```
 
 This writes contact sheets and `scene-report.txt` under the ignored
-`build/reference-renders/`. The report records tonal percentiles and the exact exposure,
-highlight, look-mix, saturation, and grain decisions for every scene. DNGs can be rendered to
-temporary PNG previews by the host OS and passed with `-PreferenceInput=/path/to/previews`.
+`build/reference-renders/`. The report records canonical linear-light statistics and the exact
+exposure, highlight, look-mix, saturation, and grain decisions for every scene. DNGs can be
+platform-rendered to temporary PNG previews and passed with
+`-PreferenceInput=/path/to/previews`; those are device/decoder renditions, not scene-linear RAW.
 
 ## High-resolution interactive review
 
@@ -59,11 +65,15 @@ python3 -m http.server 8765 --directory build/film-review
 
 Open `http://localhost:8765`. The site keeps every scene at a 3000 px long edge, offers
 original/developed split comparison plus 100% and 200% zoom, and records local Keep/Tweak/Reject
-notes for export. The Skin mask view shows the face-detector-gated chromaticity mask in cyan, so
+notes for export. Each source is analyzed at the exact render resolution and reuses that immutable
+scene profile and stable source seed for every look. The Skin mask view shows the
+face-detector-gated chromaticity mask in cyan, so
 spill onto clothing, décor, hair, glasses, and beard can be audited at full resolution. Its
-50–150% intensity slider blends between original, a real calibrated 100% master, and a real 150%
-master. The Android preview/export path evaluates the same strength directly; 100% and 150%
-therefore match the site exactly. For Portra 400, CineStill 800T, and Vision3 250D, the
+50–150% intensity slider blends between original, a real authored 100% master, and a real 150%
+master. The Android preview/export path evaluates the same strength through the same colour core.
+Equivalent prepared pixels, face regions, dimensions, intent, and seed match, but platform decode,
+face detection, and preview/export resolution can legitimately change a device rendition. For
+Portra 400, CineStill 800T, and Vision3 250D, the
 **Film exposure** buttons load real −1/0/+1-stop renders made before negative dye formation; they
 are not post-render brightness changes. **Inspect grain** jumps directly to the developed image at
 150% effect and 200% zoom; the same control remains visible in the mobile layout.
@@ -74,5 +84,7 @@ are not post-render brightness changes. **Inspect grain** jumps directly to the 
   author's; it is included here purely to illustrate the looks. If redistribution is ever a
   concern (e.g. a public release), swap `docs/preview-src/griii-sample.jpg` for an image you own
   or a CC0 photo and re-run the renderer — nothing else changes.
-- **Stock transforms and grain** — hand-authored/analytic code in this repository. Stock names are
-  descriptive aesthetic targets, not claims of measured manufacturer colourimetry.
+- **Stock transforms and spatial layers** — hand-authored/analytic code in this repository.
+  Stock names are descriptive aesthetic targets. Built-ins are explicitly
+  `MANUFACTURER_ANCHORED`, not claims of a measured camera/film/process/scan match; see the
+  [calibration contract](../research/FILM_FIDELITY_CALIBRATION.md).

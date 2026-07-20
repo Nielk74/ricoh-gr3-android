@@ -1,5 +1,6 @@
 package com.ricohgr3.app.looks
 
+import com.ricohgr3.app.looks.emulation.RenderingIntent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -26,11 +27,19 @@ class EditStateTest {
 
     @Test
     fun intensityIsStoredClampedAndClearedWithTheLook() {
-        val strong = EditState().apply("a", "portra400", intensity = 2f)
+        val strong = EditState().apply(
+            "a",
+            "portra400",
+            intensity = 2f,
+            renderingIntent = RenderingIntent.STOCK,
+        )
         assertEquals(1.5f, strong.intensityFor("a"))
+        assertEquals(RenderingIntent.STOCK, strong.renderingIntentFor("a"))
         val reset = strong.reset("a")
         assertEquals(1f, reset.intensityFor("a"))
+        assertEquals(RenderingIntent.SMART, reset.renderingIntentFor("a"))
         assertTrue(reset.intensities.isEmpty())
+        assertTrue(reset.renderingIntents.isEmpty())
     }
 
     @Test
@@ -58,15 +67,21 @@ class EditStateTest {
         assertNull(state.lookFor("a"))
         assertTrue("Standard entries are not stored", state.applied.isEmpty())
         assertTrue("Standard intensities are not stored", state.intensities.isEmpty())
+        assertTrue("Standard rendering intents are not stored", state.renderingIntents.isEmpty())
     }
 
     @Test
     fun applyAllMarksEveryFrame() {
         val ids = listOf("a", "b", "c")
-        val state = EditState().applyAll(ids, "nostalgic_neg")
+        val state = EditState().applyAll(
+            ids,
+            "nostalgic_neg",
+            renderingIntent = RenderingIntent.STOCK,
+        )
         for (id in ids) {
             assertTrue(state.isEdited(id))
             assertEquals("nostalgic_neg", state.lookFor(id))
+            assertEquals(RenderingIntent.STOCK, state.renderingIntentFor(id))
         }
     }
 

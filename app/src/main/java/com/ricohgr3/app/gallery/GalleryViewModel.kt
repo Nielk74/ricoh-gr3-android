@@ -9,6 +9,7 @@ import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.data.PhotoResult
 import com.ricohgr3.app.looks.EditState
 import com.ricohgr3.app.looks.StickyLookStore
+import com.ricohgr3.app.looks.emulation.RenderingIntent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,8 +30,10 @@ data class GalleryUiState(
     val edits: EditState = EditState(),
     /** Last-used look, pre-selected for the next frames ("sticky default"). */
     val stickyLook: String? = null,
-    /** Last-used look intensity (`1f` = calibrated stock), sticky alongside [stickyLook]. */
+    /** Last-used look intensity (`1f` = authored stock baseline), sticky alongside [stickyLook]. */
     val stickyIntensity: Float = 1f,
+    /** Last-used renderer contract, sticky alongside the stock and intensity. */
+    val stickyRenderingIntent: RenderingIntent = RenderingIntent.SMART,
 ) {
     val hasSelection: Boolean get() = selected.isNotEmpty()
     val selectionCount: Int get() = selected.size
@@ -42,8 +45,12 @@ data class GalleryUiState(
     /** The film-stock id applied to [id], or null (Standard) if none. */
     fun lookFor(id: PhotoId): String? = edits.lookFor(id.toString())
 
-    /** Applied effect multiplier for [id], defaulting to calibrated 100%. */
+    /** Applied effect multiplier for [id], defaulting to the authored 100%. */
     fun intensityFor(id: PhotoId): Float = edits.intensityFor(id.toString())
+
+    /** Applied renderer contract, defaulting to Smart for edits from older app versions. */
+    fun renderingIntentFor(id: PhotoId): RenderingIntent =
+        edits.renderingIntentFor(id.toString())
 
     /** Number of frames with a look applied. */
     val editedCount: Int get() = edits.applied.size
@@ -82,6 +89,11 @@ class GalleryViewModel(
             viewModelScope.launch {
                 store.intensityFlow.collect { persisted ->
                     _state.update { it.copy(stickyIntensity = persisted) }
+                }
+            }
+            viewModelScope.launch {
+                store.renderingIntentFlow.collect { persisted ->
+                    _state.update { it.copy(stickyRenderingIntent = persisted) }
                 }
             }
         }
@@ -129,25 +141,43 @@ class GalleryViewModel(
      * `null` (Standard) resets the frame (clears its edited mark) — but Standard is still
      * remembered as sticky, so "reset the roll" pre-selects Standard next.
      */
-    fun applyLook(id: PhotoId, look: String?, intensity: Float = 1f) {
+    fun applyLook(
+        id: PhotoId,
+        look: String?,
+        intensity: Float = 1f,
+        renderingIntent: RenderingIntent = RenderingIntent.SMART,
+    ) {
         val safeIntensity = intensity.coerceIn(0.5f, 1.5f)
         _state.update {
-            it.copy(edits = it.edits.apply(id.toString(), look, safeIntensity))
+            it.copy(
+                edits = it.edits.apply(
+                    id.toString(),
+                    look,
+                    safeIntensity,
+                    renderingIntent,
+                ),
+            )
         }
-        persistSticky(look, safeIntensity)
+        persistSticky(look, safeIntensity, renderingIntent)
     }
 
     /**
      * Apply [look] to every currently selected frame (batch styling) and make it sticky.
      * No-op on the edit map if nothing is selected, but still records the sticky look.
      */
-    fun applyLookToSelection(look: String?, intensity: Float? = null) {
+    fun applyLookToSelection(
+        look: String?,
+        intensity: Float? = null,
+        renderingIntent: RenderingIntent = _state.value.stickyRenderingIntent,
+    ) {
         val safeIntensity = (intensity ?: _state.value.stickyIntensity).coerceIn(0.5f, 1.5f)
         _state.update {
             val ids = it.selected.map { id -> id.toString() }
-            it.copy(edits = it.edits.applyAll(ids, look, safeIntensity))
+            it.copy(
+                edits = it.edits.applyAll(ids, look, safeIntensity, renderingIntent),
+            )
         }
-        persistSticky(look, safeIntensity)
+        persistSticky(look, safeIntensity, renderingIntent)
     }
 
     /** Clear the look on [id], returning it to Standard (unedited). */
@@ -158,14 +188,48 @@ class GalleryViewModel(
     /** Set the sticky (last-used) look without touching any frame. */
     fun setStickyLook(look: String?) {
         _state.update { it.copy(stickyLook = look) }
-        persistSticky(look, _state.value.stickyIntensity)
+        persistSticky(
+            look,
+            _state.value.stickyIntensity,
+            _state.value.stickyRenderingIntent,
+        )
     }
 
-    private fun persistSticky(look: String?, intensity: Float) {
+    /** Change the batch/next-frame intensity without applying an edit yet. */
+    fun setStickyIntensity(intensity: Float) {
+        persistSticky(
+            _state.value.stickyLook,
+            intensity.coerceIn(0.5f, 1.5f),
+            _state.value.stickyRenderingIntent,
+        )
+    }
+
+    /** Change the batch/next-frame Stock or Smart contract without applying an edit yet. */
+    fun setStickyRenderingIntent(renderingIntent: RenderingIntent) {
+        persistSticky(
+            _state.value.stickyLook,
+            _state.value.stickyIntensity,
+            renderingIntent,
+        )
+    }
+
+    private fun persistSticky(
+        look: String?,
+        intensity: Float,
+        renderingIntent: RenderingIntent,
+    ) {
         val safeIntensity = intensity.coerceIn(0.5f, 1.5f)
-        _state.update { it.copy(stickyLook = look, stickyIntensity = safeIntensity) }
+        _state.update {
+            it.copy(
+                stickyLook = look,
+                stickyIntensity = safeIntensity,
+                stickyRenderingIntent = renderingIntent,
+            )
+        }
         stickyLookStore?.let { store ->
-            viewModelScope.launch { store.setLook(look, safeIntensity) }
+            viewModelScope.launch {
+                store.setLook(look, safeIntensity, renderingIntent)
+            }
         }
     }
 

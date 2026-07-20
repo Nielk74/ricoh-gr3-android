@@ -42,8 +42,34 @@ class AppUpdateChecker(
     }
 
     private fun fetchLatestInstallableRelease(): AppRelease? {
+        var pageNumber = 1
+        var latest: AppRelease? = null
+
+        do {
+            val page = fetchReleasePage(pageNumber)
+            page.releases
+                .mapNotNull { it.toAppRelease() }
+                .forEach { candidate ->
+                    val current = latest
+                    if (
+                        current == null ||
+                        compareSemVer(candidate.versionName, current.versionName) > 0
+                    ) {
+                        latest = candidate
+                    }
+                }
+            pageNumber += 1
+        } while (page.hasNext)
+
+        return latest
+    }
+
+    private fun fetchReleasePage(pageNumber: Int): GithubReleasePage {
         val request = Request.Builder()
-            .url("https://api.github.com/repos/$repo/releases?per_page=$ReleasePageSize")
+            .url(
+                "https://api.github.com/repos/$repo/releases" +
+                    "?per_page=$ReleasePageSize&page=$pageNumber",
+            )
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
             .header("User-Agent", "Ricoh-GR3-Android/${BuildConfig.VERSION_NAME}")
@@ -61,16 +87,34 @@ class AppUpdateChecker(
                 ListSerializer(GithubReleaseDto.serializer()),
                 body,
             )
-            return releases
-                .mapNotNull { it.toAppRelease() }
-                .maxWithOrNull { left, right ->
-                    compareSemVer(left.versionName, right.versionName)
-                }
+            return GithubReleasePage(
+                releases = releases,
+                hasNext = response.header("Link").hasNextGithubPage(),
+            )
         }
     }
 
     companion object {
-        private const val ReleasePageSize = 10
+        private const val ReleasePageSize = 100
+
+        /**
+         * GitHub exposes pagination through an RFC 8288-style `Link` header. Inspect relation
+         * parameters instead of constructing a fixed number of pages, so the checker continues
+         * until GitHub says there is no next page.
+         */
+        private fun String?.hasNextGithubPage(): Boolean =
+            this
+                ?.split(',')
+                ?.any { link ->
+                    link
+                        .substringAfter('>', missingDelimiterValue = "")
+                        .split(';')
+                        .any { parameter ->
+                            parameter.trim().removePrefix("rel=").trim('"')
+                                .split(' ')
+                                .any { relation -> relation == "next" }
+                        }
+                } == true
 
         /** Maps `v0.7.0` (and the older `android-v0.7.0` form) to `0.7.0`. */
         internal fun tagToVersion(tag: String): String =
@@ -127,4 +171,9 @@ class AppUpdateChecker(
             return core.split('.').map { it.toIntOrNull() ?: 0 } to prerelease
         }
     }
+
+    private data class GithubReleasePage(
+        val releases: List<GithubReleaseDto>,
+        val hasNext: Boolean,
+    )
 }

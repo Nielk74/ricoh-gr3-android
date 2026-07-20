@@ -23,12 +23,18 @@ sourceSets {
         kotlin.include(
             "com/ricohgr3/app/tools/**",
             "com/ricohgr3/app/looks/emulation/DevelopPipeline.kt",
+            "com/ricohgr3/app/looks/emulation/ColorMath.kt",
+            "com/ricohgr3/app/looks/emulation/DevelopOptions.kt",
             "com/ricohgr3/app/looks/emulation/SkinTone.kt",
             "com/ricohgr3/app/looks/emulation/SceneAnalyzer.kt",
             "com/ricohgr3/app/looks/emulation/LutCube.kt",
             "com/ricohgr3/app/looks/emulation/FilmLook.kt",
+            "com/ricohgr3/app/looks/emulation/FilmStockProfile.kt",
+            "com/ricohgr3/app/looks/emulation/FilmFidelityMetrics.kt",
+            "com/ricohgr3/app/looks/emulation/FilmOptics.kt",
             "com/ricohgr3/app/looks/emulation/FilmLutFactory.kt",
             "com/ricohgr3/app/looks/emulation/FilmLookCatalog.kt",
+            "com/ricohgr3/app/looks/emulation/PhysicalFilmGrain.kt",
         )
     }
     test {

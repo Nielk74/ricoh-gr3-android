@@ -1,11 +1,13 @@
 package com.ricohgr3.app.tools
 
 import com.ricohgr3.app.looks.emulation.DevelopPipeline
+import com.ricohgr3.app.looks.emulation.DevelopOptions
 import com.ricohgr3.app.looks.emulation.FaceRegion
 import com.ricohgr3.app.looks.emulation.FilmLook
 import com.ricohgr3.app.looks.emulation.FilmLookCatalog
 import com.ricohgr3.app.looks.emulation.FilmLutFactory
 import com.ricohgr3.app.looks.emulation.LutCube
+import com.ricohgr3.app.looks.emulation.stableRenderSeed
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.File
@@ -47,6 +49,7 @@ fun main(args: Array<String>) {
     // to the image. JPEG q≈0.9 keeps each thumbnail ~150–250 KB.
     val maxW = 1600
     val work = if (src.width > maxW) scaleTo(src, maxW) else toRgb(src)
+    val developOptions = DevelopOptions(renderSeed = stableRenderSeed(sample.name))
 
     // Standard (as-shot) baseline first.
     writeJpg(work, File(outDir, "standard.jpg"))
@@ -55,7 +58,7 @@ fun main(args: Array<String>) {
     for (entry in FilmLookCatalog.entries) {
         val look = entry.look
         val lut = loadLut(look, lutDir)
-        val out = develop(work, look, lut)
+        val out = develop(work, look, lut, options = developOptions)
         val name = look.id + ".jpg"
         writeJpg(out, File(outDir, name))
         println("  ${look.displayName} -> $name")
@@ -83,6 +86,7 @@ internal fun develop(
     effectStrength: Float = 1f,
     filmExposureEv: Float = 0f,
     faceRegions: List<FaceRegion> = emptyList(),
+    options: DevelopOptions = DevelopOptions(),
 ): BufferedImage {
     val w = src.width; val h = src.height; val n = w * h
     val r = FloatArray(n); val g = FloatArray(n); val b = FloatArray(n)
@@ -100,6 +104,7 @@ internal fun develop(
         effectStrength = effectStrength,
         filmExposureEv = filmExposureEv,
         faceRegions = faceRegions,
+        options = options,
     )
     val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
     i = 0

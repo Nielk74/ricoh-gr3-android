@@ -108,7 +108,7 @@ class SkinToneTest {
         val out = FloatArray(3)
         val scratch = FloatArray(3)
         val rendered = floatArrayOf(0.66f, 0.23f, 0.14f)
-        val renderedLuma = luma(rendered[0], rendered[1], rendered[2])
+        val renderedLuma = ColorMath.linearLuminance(rendered[0], rendered[1], rendered[2])
         SkinTone.naturalize(
             sourceR = 0.52f,
             sourceG = 0.31f,
@@ -127,7 +127,12 @@ class SkinToneTest {
             scratch = scratch,
         )
 
-        assertEquals("facial luminance is preserved", renderedLuma, luma(out[0], out[1], out[2]), 1e-5f)
+        assertEquals(
+            "facial luminance is preserved",
+            renderedLuma,
+            ColorMath.linearLuminance(out[0], out[1], out[2]),
+            1e-5f,
+        )
         assertTrue("excess red dominance is reduced", out[0] - out[1] < rendered[0] - rendered[1])
         assertTrue("excess saturation is reduced", saturation(out) < saturation(rendered))
         assertTrue("the correction remains warm", out[0] > out[1] && out[1] > out[2])
@@ -151,11 +156,14 @@ class SkinToneTest {
             scratch = scratch,
         )
 
-        val sourceAtRenderedLuma = floatArrayOf(0.0f, 0.0f, 0.0f)
-        val scale = luma(rendered[0], rendered[1], rendered[2]) / luma(0.62f, 0.39f, 0.31f)
-        sourceAtRenderedLuma[0] = 0.62f * scale
-        sourceAtRenderedLuma[1] = 0.39f * scale
-        sourceAtRenderedLuma[2] = 0.31f * scale
+        val sourceAtRenderedLuma = FloatArray(3)
+        ColorMath.putAtLinearLuminance(
+            0.62f,
+            0.39f,
+            0.31f,
+            ColorMath.linearLuminance(rendered[0], rendered[1], rendered[2]),
+            sourceAtRenderedLuma,
+        )
         assertTrue(
             "muted stock colour stays much closer to the render than the saturated source",
             saturation(out) - saturation(rendered) <
@@ -186,8 +194,8 @@ class SkinToneTest {
 
         assertEquals(
             "hue correction preserves the rendered light",
-            luma(rendered[0], rendered[1], rendered[2]),
-            luma(out[0], out[1], out[2]),
+            ColorMath.linearLuminance(rendered[0], rendered[1], rendered[2]),
+            ColorMath.linearLuminance(out[0], out[1], out[2]),
             1e-5f,
         )
         assertTrue(

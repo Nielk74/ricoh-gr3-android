@@ -18,10 +18,11 @@ object DevelopEngine {
      * [src] is not modified. Runs synchronously on the calling thread — call it off the main
      * thread (e.g. `withContext(Dispatchers.Default)`).
      *
-     * [preGrade] (optional) is a mild base grade applied before the film look, used for RAW/DNG
-     * input whose decoded preview is flatter than a camera JPEG (see `PhotoSave`).
-     * [iso] lets the adaptive pipeline avoid stacking excessive emulsion grain over sensor noise.
-     * [effectStrength] is the editor's 0–150% intensity control (`1f` = calibrated stock).
+     * [preGrade] (optional) is a mild base grade applied before the film look, used for a
+     * platform-rendered DNG whose display rendition is flatter than a camera JPEG (see
+     * `PhotoSave`). [iso] lets Smart intent avoid stacking excessive emulsion grain over sensor
+     * noise.
+     * [effectStrength] is the editor's 0–150% intensity control (`1f` = authored stock baseline).
      */
     fun render(
         src: Bitmap,
@@ -30,6 +31,7 @@ object DevelopEngine {
         preGrade: DevelopPipeline.PreGrade? = null,
         iso: Int? = null,
         effectStrength: Float = 1f,
+        options: DevelopOptions = DevelopOptions(),
     ): Bitmap {
         val w = src.width
         val h = src.height
@@ -47,7 +49,11 @@ object DevelopEngine {
             bb[i] = (p and 0xFF) / 255f
         }
 
-        val faceRegions = if (look.skinTone.enabled && effectStrength > 0f) {
+        val faceRegions = if (
+            options.intent == RenderingIntent.SMART &&
+            look.skinTone.enabled &&
+            effectStrength > 0f
+        ) {
             FaceRegionDetector.detect(src)
         } else {
             emptyList()
@@ -58,6 +64,7 @@ object DevelopEngine {
             iso = iso,
             effectStrength = effectStrength,
             faceRegions = faceRegions,
+            options = options,
         )
 
         for (i in 0 until n) {

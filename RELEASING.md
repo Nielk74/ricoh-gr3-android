@@ -15,9 +15,9 @@ Configure these under **Settings → Secrets and variables → Actions**:
 | `KEY_ALIAS`      | Alias of the signing key inside the keystore.                      |
 | `KEY_PASSWORD`   | Password for the signing key (often equal to `STORE_PASSWORD`).    |
 
-If any of these are missing, the release build falls back to producing an
-unsigned artifact rather than failing — but a published release should always
-be signed, so set all four.
+Local release builds can fall back to an unsigned artifact, but the tag-driven
+release workflow requires all four secrets and verifies the resulting APK
+signature before publication.
 
 ## Generating a keystore
 
@@ -64,17 +64,19 @@ git push origin v1.0.0
 The workflow then:
 
 1. Computes `VERSION_NAME` (`1.0.0`) and `VERSION_CODE` (`github.run_number`).
-2. Decodes `KEYSTORE_B64` to a file and exports the signing credentials.
-3. Runs `./gradlew assembleRelease bundleRelease`.
-4. Generates `<apk-name>.apk.sha256`.
-5. Creates the GitHub Release and uploads the signed `.apk`, its checksum, and
+2. Runs Android/JVM tests, lint, a debug build, and the preview-drift check.
+3. Requires and decodes `KEYSTORE_B64`, then exports the signing credentials.
+4. Runs `./gradlew assembleRelease bundleRelease` and verifies the APK signature.
+5. Generates `<apk-name>.apk.sha256`.
+6. Creates the GitHub Release and uploads the signed `.apk`, its checksum, and
    the `.aab`.
 
 ## In-app updates
 
-Once every 24 hours, the app checks the public GitHub Releases API for this
-repository. It skips drafts, prereleases, and incomplete releases without an
-APK, then offers a newer semantic version in an in-app banner.
+At most once every 24 hours, the app automatically checks the public GitHub
+Releases API for this repository. The user can also request a manual check from
+the app-update screen. It skips drafts, prereleases, and incomplete releases
+without an APK, then offers a newer semantic version in an in-app banner.
 
 The release workflow sets `GITHUB_REPO` to `${{ github.repository }}`, so fork
 releases check their own public repository. Local builds default to
@@ -101,9 +103,12 @@ properties (`-P`):
 ```bash
 KEYSTORE_FILE=/path/to/release-keystore.jks \
 STORE_PASSWORD='...' KEY_ALIAS=ricohgr3 KEY_PASSWORD='...' \
-VERSION_NAME=1.0.0 VERSION_CODE=1 \
+VERSION_NAME=1.0.0 VERSION_CODE=100 \
 ./gradlew assembleRelease
 ```
+
+`VERSION_CODE` must be greater than the code in every APK already published or installed. Tagged
+GitHub builds use the monotonically increasing release-workflow run number.
 
 `KEYSTORE_FILE` (a path) and `KEYSTORE_B64` (inline base64) are interchangeable;
 if both are present, `KEYSTORE_FILE` wins.

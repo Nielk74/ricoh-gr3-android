@@ -57,6 +57,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         client = updateClient,
     )
     private var updateDownloadJob: Job? = null
+    private var updateCheckJob: Job? = null
 
     private val _updateStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
     val updateStatus: StateFlow<UpdateStatus> = _updateStatus.asStateFlow()
@@ -75,7 +76,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val wifiSession: CameraWifiSession? = CameraWifiSession.createOrNull(app.applicationContext)
 
     init {
-        viewModelScope.launch { maybeAutoCheckForUpdates() }
+        updateCheckJob = viewModelScope.launch { maybeAutoCheckForUpdates() }
 
         // Keep the join-flow flags consistent with the actual session state:
         //  - once Connected, the join succeeded → drop the one-shot intent so a later credential
@@ -253,8 +254,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val now = System.currentTimeMillis()
         if (now - lastCheck < UpdateCheckIntervalMillis) return
 
+        performUpdateCheck(now)
+    }
+
+    /** User-requested checks bypass the 24-hour automatic-check throttle. */
+    fun checkForUpdates() {
+        if (updateCheckJob?.isActive == true) return
+        updateCheckJob = viewModelScope.launch {
+            performUpdateCheck(System.currentTimeMillis())
+        }
+    }
+
+    private suspend fun performUpdateCheck(now: Long) {
         _updateStatus.value = UpdateStatus.Checking
-        _updateStatus.value = updateChecker.check()
+        val result = updateChecker.check()
+        _updateStatus.value = result
         updatePreferences.setLastCheckMillis(now)
     }
 

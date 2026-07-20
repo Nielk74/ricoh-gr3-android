@@ -3,11 +3,103 @@ package com.ricohgr3.app.looks.emulation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.PI
+import kotlin.math.sin
 
 class SceneAnalyzerTest {
     private fun neutralFrame(width: Int, height: Int, value: (Int) -> Float): Triple<FloatArray, FloatArray, FloatArray> {
         val r = FloatArray(width * height) { value(it) }
         return Triple(r, r.copyOf(), r.copyOf())
+    }
+
+    private fun syntheticContinuousScene(width: Int, height: Int): SceneProfile {
+        val size = width * height
+        val r = FloatArray(size)
+        val g = FloatArray(size)
+        val b = FloatArray(size)
+        var index = 0
+        for (y in 0 until height) {
+            val ny = (y + 0.5f) / height
+            for (x in 0 until width) {
+                val nx = (x + 0.5f) / width
+                val texture =
+                    0.035f * sin(2.0 * PI * (18.0 * nx + 11.0 * ny)).toFloat() +
+                        0.018f * sin(2.0 * PI * (41.0 * nx - 23.0 * ny)).toFloat()
+                val base = (0.10f + 0.68f * nx + 0.08f * ny + texture).coerceIn(0f, 1f)
+                r[index] = (base + 0.07f * ny).coerceIn(0f, 1f)
+                g[index] = base
+                b[index] = (base - 0.05f * nx).coerceIn(0f, 1f)
+                index++
+            }
+        }
+        return SceneAnalyzer.analyze(r, g, b, width, height)
+    }
+
+    private fun assertAdjustmentNear(
+        expected: SceneAdjustment,
+        actual: SceneAdjustment,
+        tolerance: Float,
+    ) {
+        assertEquals(expected.exposureEv, actual.exposureEv, tolerance)
+        assertEquals(expected.shadowLift, actual.shadowLift, tolerance)
+        assertEquals(expected.highlightCompression, actual.highlightCompression, tolerance)
+        assertEquals(expected.contrast, actual.contrast, tolerance)
+        assertEquals(expected.saturation, actual.saturation, tolerance)
+        assertEquals(expected.lookStrength, actual.lookStrength, tolerance)
+        assertEquals(expected.grainScale, actual.grainScale, tolerance)
+        assertEquals(expected.halationScale, actual.halationScale, tolerance)
+    }
+
+    @Test fun sceneAnalysisAndAdjustmentAreStableAcrossRenderResolutions() {
+        val at720 = syntheticContinuousScene(720, 480)
+        val at960 = syntheticContinuousScene(960, 640)
+        val at3000 = syntheticContinuousScene(3000, 2000)
+
+        for (profile in listOf(at960, at3000)) {
+            assertEquals(at720.p01, profile.p01, 0.002f)
+            assertEquals(at720.p10, profile.p10, 0.002f)
+            assertEquals(at720.p50, profile.p50, 0.002f)
+            assertEquals(at720.p90, profile.p90, 0.002f)
+            assertEquals(at720.p99, profile.p99, 0.002f)
+            assertEquals(at720.meanLuma, profile.meanLuma, 0.001f)
+            assertEquals(at720.meanSaturation, profile.meanSaturation, 0.001f)
+            assertEquals(at720.neutralWarmth, profile.neutralWarmth, 0.001f)
+            assertEquals(
+                "canonical microcontrast must not treat a larger render as a different scene",
+                at720.microContrast,
+                profile.microContrast,
+                0.001f,
+            )
+        }
+
+        val params = AdaptiveParams()
+        val adjustment720 = SceneAnalyzer.adjustment(at720, params, iso = 400)
+        assertAdjustmentNear(
+            adjustment720,
+            SceneAnalyzer.adjustment(at960, params, iso = 400),
+            tolerance = 0.002f,
+        )
+        assertAdjustmentNear(
+            adjustment720,
+            SceneAnalyzer.adjustment(at3000, params, iso = 400),
+            tolerance = 0.002f,
+        )
+    }
+
+    @Test fun sceneLuminanceIsMeasuredInExactLinearLight() {
+        val encodedMiddleGray = 0.5f
+        val (r, g, b) = neutralFrame(32, 24) { encodedMiddleGray }
+        val profile = SceneAnalyzer.analyze(r, g, b, 32, 24)
+
+        assertEquals(
+            ColorMath.srgbToLinear(encodedMiddleGray),
+            profile.meanLuma,
+            1e-6f,
+        )
+        assertTrue(
+            "50% sRGB is about 21% linear light, not 50% luminance",
+            profile.meanLuma in 0.213f..0.215f,
+        )
     }
 
     @Test fun highKeyClippedSceneProtectsHighlightsAndDoesNotBrighten() {
@@ -36,14 +128,17 @@ class SceneAnalyzerTest {
         val warmG = FloatArray(n) { 0.42f }
         val warmB = FloatArray(n) { 0.28f }
         val neutral = FloatArray(n) { 0.42f }
-        val params = AdaptiveParams(lookStrength = 0.84f)
+        val params = AdaptiveParams()
+        val stock = StockRenderParams(lookStrength = 0.84f)
         val warmAdjustment = SceneAnalyzer.adjustment(
             SceneAnalyzer.analyze(warmR, warmG, warmB, 80, 80),
             params,
+            stock = stock,
         )
         val neutralAdjustment = SceneAnalyzer.adjustment(
             SceneAnalyzer.analyze(neutral, neutral, neutral, 80, 80),
             params,
+            stock = stock,
         )
         assertTrue(warmAdjustment.lookStrength < neutralAdjustment.lookStrength)
 

@@ -1,8 +1,10 @@
 package com.ricohgr3.app.tools
 
+import com.ricohgr3.app.looks.emulation.DevelopOptions
 import com.ricohgr3.app.looks.emulation.FilmLookCatalog
 import com.ricohgr3.app.looks.emulation.SceneAnalyzer
 import com.ricohgr3.app.looks.emulation.SceneProfile
+import com.ricohgr3.app.looks.emulation.stableRenderSeed
 import java.awt.image.BufferedImage
 import java.io.File
 import java.time.Instant
@@ -80,14 +82,19 @@ fun reviewSiteMain(args: Array<String>) {
         writeJpg(skinMaskImage, File(sceneDir, "skin-mask.jpg"), quality = 0.94f)
         skinMaskImage.flush()
 
-        val analysisImage = if (work.width > 960) scaleTo(work, 960) else work
-        val profile = profileOf(analysisImage)
-        if (analysisImage !== work) analysisImage.flush()
+        // Analyse the exact work buffer once, then pass this same immutable decision input to every
+        // render. A former 960 px proxy made the manifest describe different microcontrast/grain
+        // decisions from the 3000 px output.
+        val profile = profileOf(work)
+        val developOptions = DevelopOptions(
+            sceneProfile = profile,
+            renderSeed = stableRenderSeed("${source.kind}:${source.file.name}"),
+        )
 
         val perLook = ArrayList<String>(FilmLookCatalog.entries.size)
         FilmLookCatalog.entries.forEach { entry ->
             val look = entry.look
-            val adjustment = SceneAnalyzer.adjustment(profile, look.adaptive)
+            val adjustment = SceneAnalyzer.adjustment(profile, look.adaptive, stock = look.stock)
             val lut = loadLut(look, lutDir)
             val output = develop(
                 work,
@@ -95,6 +102,7 @@ fun reviewSiteMain(args: Array<String>) {
                 lut,
                 effectStrength = 1f,
                 faceRegions = faceRegions,
+                options = developOptions,
             )
             val filename = "${look.id}.jpg"
             writeJpg(output, File(sceneDir, filename), quality = 0.97f)
@@ -105,6 +113,7 @@ fun reviewSiteMain(args: Array<String>) {
                 lut,
                 effectStrength = 1.5f,
                 faceRegions = faceRegions,
+                options = developOptions,
             )
             val strongFilename = "${look.id}-150.jpg"
             writeJpg(strongOutput, File(sceneDir, strongFilename), quality = 0.97f)
@@ -121,6 +130,7 @@ fun reviewSiteMain(args: Array<String>) {
                         effectStrength = strength,
                         filmExposureEv = ev.toFloat(),
                         faceRegions = faceRegions,
+                        options = developOptions,
                     )
                     writeJpg(bracketOutput, File(sceneDir, bracketFilename), quality = 0.97f)
                     bracketOutput.flush()
@@ -151,9 +161,11 @@ fun reviewSiteMain(args: Array<String>) {
                   "ev":${adjustment.exposureEv.json()},
                   "shadows":${adjustment.shadowLift.json()},
                   "highlights":${adjustment.highlightCompression.json()},
+                  "contrast":${adjustment.contrast.json()},
                   "mix":${adjustment.lookStrength.json()},
                   "saturation":${adjustment.saturation.json()},
                   "grain":${adjustment.grainScale.json()},
+                  "halationScale":${adjustment.halationScale.json()},
                   "halation":${(
                       if (look.halation.enabled) {
                           look.halation.strength * adjustment.halationScale
@@ -186,10 +198,14 @@ fun reviewSiteMain(args: Array<String>) {
                 "p50":${profile.p50.json()},
                 "p90":${profile.p90.json()},
                 "p99":${profile.p99.json()},
+                "meanLuma":${profile.meanLuma.json()},
+                "dynamicRange":${profile.dynamicRange.json()},
                 "clipped":${profile.clippedHighlights.json()},
                 "crushed":${profile.crushedShadows.json()},
                 "saturation":${profile.meanSaturation.json()},
                 "warmth":${profile.neutralWarmth.json()},
+                "neutralConfidence":${profile.neutralConfidence.json()},
+                "microContrast":${profile.microContrast.json()},
                 "tone":"${profile.toneLabel()}",
                 "contrast":"${if (profile.highContrast) "High contrast" else "Balanced contrast"}"
               },
@@ -217,6 +233,9 @@ fun reviewSiteMain(args: Array<String>) {
         {
           "generatedAt":"${Instant.now()}",
           "renderLongEdge":3000,
+          "analysisBasis":"render-source",
+          "adjustmentBasis":"100-percent-base",
+          "luminanceEncoding":"linear-sRGB",
           "exposureBracketLooks":[
             ${EXPOSURE_BRACKET_LOOKS.joinToString(",") { "\"$it\"" }}
           ],
