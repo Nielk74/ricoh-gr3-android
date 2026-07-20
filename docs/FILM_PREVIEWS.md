@@ -14,7 +14,7 @@ each adaptive look, and writes the thumbnails.
 
 This reads:
 - the sample photo `docs/preview-src/griii-sample.jpg`,
-- the hand-authored stock models in `FilmLookCatalog`,
+- the hand-authored negative/print stock models in `FilmLookCatalog`,
 - the analytic, non-tiling density-grain model in `DevelopPipeline`,
 
 and writes one thumbnail per look to `docs/previews/*.jpg` (Standard + every stock in
@@ -63,7 +63,10 @@ notes for export. The Skin mask view shows the face-detector-gated chromaticity 
 spill onto clothing, décor, hair, glasses, and beard can be audited at full resolution. Its
 50–150% intensity slider blends between original, a real calibrated 100% master, and a real 150%
 master. The Android preview/export path evaluates the same strength directly; 100% and 150%
-therefore match the site exactly.
+therefore match the site exactly. For Portra 400, CineStill 800T, and Vision3 250D, the
+**Film exposure** buttons load real −1/0/+1-stop renders made before negative dye formation; they
+are not post-render brightness changes. **Inspect grain** jumps directly to the developed image at
+150% effect and 200% zoom; the same control remains visible in the mobile layout.
 
 ## Licensing / attribution
 

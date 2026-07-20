@@ -57,6 +57,55 @@ class DevelopPipelineTest {
         assertTrue("150% must deepen the stock character", distance(render(1.5f)) > distance(render(1f)))
     }
 
+    @Test fun filmExposureBracketActsBeforeTheNegative() {
+        val entry = FilmLookCatalog.entryFor("portra400")!!
+        val look = entry.look.copy(
+            adaptive = AdaptiveParams.NONE,
+            splitTone = SplitTone.NONE,
+            skinTone = SkinToneParams.NONE,
+            foliageTone = FoliageToneParams.NONE,
+            skyTone = SkyToneParams.NONE,
+            grain = GrainParams.NONE,
+            halation = HalationParams.NONE,
+        )
+        val lut = FilmLutFactory.build(entry.model)
+        fun render(ev: Float): Float {
+            val r = floatArrayOf(0.5f)
+            val g = floatArrayOf(0.5f)
+            val b = floatArrayOf(0.5f)
+            DevelopPipeline.apply(
+                r, g, b, 1, 1, look, lut,
+                filmExposureEv = ev,
+            )
+            return 0.2126f * r[0] + 0.7152f * g[0] + 0.0722f * b[0]
+        }
+        val under = render(-1f)
+        val normal = render(0f)
+        val over = render(1f)
+        assertTrue("negative exposure bracket must be monotonic ($under $normal $over)",
+            under < normal && normal < over)
+        assertEquals("omitted exposure is the calibrated zero-stop path", normal, render(0f), 0f)
+    }
+
+    @Test fun positiveFilmExposureKeepsRenderedHighlightSeparation() {
+        val look = FilmLook(
+            id = "identity-negative",
+            displayName = "Identity negative",
+            lutAsset = null,
+            adaptive = AdaptiveParams.NONE,
+        )
+        val r = floatArrayOf(0.80f, 0.90f)
+        val g = r.copyOf()
+        val b = r.copyOf()
+        DevelopPipeline.apply(
+            r, g, b, 2, 1, look, LutCube.identity(65),
+            filmExposureEv = 1f,
+        )
+        assertTrue("one-stop bracket brightens upper tones", r[0] > 0.80f)
+        assertTrue("already-rendered highlights must not pre-clip", r[1] < 0.999f)
+        assertTrue("highlight ordering survives the negative input", r[1] > r[0] + 0.025f)
+    }
+
     @Test fun grainIsDeterministicForFixedSeed() {
         fun run(): FloatArray {
             val r = FloatArray(64) { 0.5f }; val g = FloatArray(64) { 0.5f }; val b = FloatArray(64) { 0.5f }
@@ -99,6 +148,49 @@ class DevelopPipelineTest {
         assertTrue(portra400.size < portra800.size)
         assertTrue(ektar.amount < cinestill800.amount)
         assertTrue(ektar.size < cinestill800.size)
+    }
+
+    @Test fun portraGrainIsVisibleAndKeepsTheMeasuredStockSeparationAtExportSize() {
+        fun codeValueStandardDeviation(lookId: String): Double {
+            val entry = FilmLookCatalog.entryFor(lookId)!!
+            // A short 3000px-wide strip exercises the same resolution scaling as the review
+            // exports without allocating a complete six-megapixel frame. The effective amount
+            // includes the stock's calibrated 100% adaptive/layer strength.
+            val width = 3_000
+            val height = 72
+            val n = width * height
+            val r = FloatArray(n) { 0.42f }
+            val g = r.copyOf()
+            val b = r.copyOf()
+            val effective = entry.look.grain.copy(
+                amount = entry.look.grain.amount *
+                    entry.look.adaptive.grainScale *
+                    entry.look.adaptive.lookStrength,
+            )
+            DevelopPipeline.applyGrain(r, g, b, width, height, effective)
+            val mean = r.average()
+            val variance = r.sumOf {
+                val delta = it - mean
+                delta * delta
+            } / n
+            return kotlin.math.sqrt(variance) * 255.0
+        }
+
+        val portra400 = codeValueStandardDeviation("portra400")
+        val portra800 = codeValueStandardDeviation("portra800")
+        assertTrue(
+            "Portra 400 baseline must remain visibly textured at 3000px ($portra400/255)",
+            portra400 in 3.0..4.6,
+        )
+        assertTrue(
+            "Portra 800 baseline must be clearly stronger at 3000px ($portra800/255)",
+            portra800 in 4.2..6.2,
+        )
+        assertTrue(
+            "Kodak's 35mm print-grain separation must survive adaptation " +
+                "(400=$portra400, 800=$portra800)",
+            portra800 / portra400 in 1.28..1.58,
+        )
     }
 
     @Test fun grainIsCorrelatedRgbNotMonochrome() {
@@ -174,6 +266,48 @@ class DevelopPipelineTest {
             "large-area density drift must stay below pixel texture " +
                 "(block=$blockStd pixel=$globalStd)",
             blockStd < globalStd * 0.20,
+        )
+    }
+
+    @Test fun clumpingAddsIrregularTailsWithoutChangingTheMean() {
+        fun moments(clumping: Float): Pair<Double, Double> {
+            val width = 256
+            val height = 256
+            val n = width * height
+            val r = FloatArray(n) { 0.38f }
+            val g = r.copyOf()
+            val b = r.copyOf()
+            DevelopPipeline.applyGrain(
+                r, g, b, width, height,
+                GrainParams(
+                    amount = 0.065f,
+                    size = 2f,
+                    shadowBias = 0.6f,
+                    chroma = 0f,
+                    clumping = clumping,
+                    seed = 71,
+                ),
+            )
+            val mean = r.average()
+            var variance = 0.0
+            var fourth = 0.0
+            for (value in r) {
+                val d = value - mean
+                val d2 = d * d
+                variance += d2
+                fourth += d2 * d2
+            }
+            variance /= n
+            fourth /= n
+            return mean to (fourth / (variance * variance))
+        }
+        val clean = moments(0f)
+        val clumped = moments(0.30f)
+        assertEquals("clumping must not veil the frame", clean.first, clumped.first, 0.002)
+        assertTrue(
+            "fast-stock grain needs heavier, less digital tails " +
+                "(clean=${clean.second}, clumped=${clumped.second})",
+            clumped.second > clean.second + 0.08,
         )
     }
 
@@ -326,11 +460,35 @@ class DevelopPipelineTest {
         assertEquals("isolated blue object's blue stays untouched", objectBefore.third, b[objectIndex], 0f)
     }
 
-    @Test fun onlyPortraStocksEnableTheSelectiveSkyResponse() {
+    @Test fun portraFoliageShiftTouchesOnlyVegetationGreensAndPreservesLuma() {
+        val r = floatArrayOf(0.32f, 0.72f, 0.45f, 0.10f)
+        val g = floatArrayOf(0.58f, 0.36f, 0.45f, 0.50f)
+        val b = floatArrayOf(0.12f, 0.24f, 0.45f, 0.48f)
+        val originals = r.indices.map { Triple(r[it], g[it], b[it]) }
+        val foliageLumaBefore = 0.2126f * r[0] + 0.7152f * g[0] + 0.0722f * b[0]
+
+        DevelopPipeline.applyFoliageCyanShift(r, g, b, cyanShift = 0.18f)
+
+        val foliageLumaAfter = 0.2126f * r[0] + 0.7152f * g[0] + 0.0722f * b[0]
+        assertTrue("vegetation green moves toward cyan-green", b[0] > originals[0].third + 0.05f)
+        assertTrue("warm component is restrained", r[0] < originals[0].first)
+        assertEquals("foliage hue move keeps exposure", foliageLumaBefore, foliageLumaAfter, 1e-5f)
+        for (index in 1..3) {
+            assertEquals("skin/neutral/cyan red stays untouched", originals[index].first, r[index], 0f)
+            assertEquals("skin/neutral/cyan green stays untouched", originals[index].second, g[index], 0f)
+            assertEquals("skin/neutral/cyan blue stays untouched", originals[index].third, b[index], 0f)
+        }
+    }
+
+    @Test fun onlyPortraStocksEnableSelectiveFoliageAndSkyResponses() {
         assertTrue(FilmLookCatalog.entryFor("portra400")!!.look.skyTone.enabled)
         assertTrue(FilmLookCatalog.entryFor("portra800")!!.look.skyTone.enabled)
+        assertTrue(FilmLookCatalog.entryFor("portra400")!!.look.foliageTone.enabled)
+        assertTrue(FilmLookCatalog.entryFor("portra800")!!.look.foliageTone.enabled)
         assertTrue(!FilmLookCatalog.entryFor("cinestill800t")!!.look.skyTone.enabled)
         assertTrue(!FilmLookCatalog.entryFor("vision3_250d")!!.look.skyTone.enabled)
+        assertTrue(!FilmLookCatalog.entryFor("cinestill800t")!!.look.foliageTone.enabled)
+        assertTrue(!FilmLookCatalog.entryFor("vision3_250d")!!.look.foliageTone.enabled)
     }
 
     @Test fun gaussianBlurConservesRoughMeanAndSpreads() {

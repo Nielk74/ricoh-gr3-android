@@ -38,13 +38,17 @@ fun resolveKeystoreFile(): File? {
 android {
     namespace = "com.ricohgr3.app"
     compileSdk = 34
+    val githubRepo = buildParam("GITHUB_REPO") ?: "Nielk74/ricoh-gr3-android"
 
     defaultConfig {
         applicationId = "com.ricohgr3.app"
         minSdk = 26
         targetSdk = 34
         versionCode = (buildParam("VERSION_CODE")?.toIntOrNull()) ?: 1
-        versionName = buildParam("VERSION_NAME") ?: "0.1.0"
+        // Keep the local fallback aligned with the newest published tag. Release
+        // builds override it from the tag in .github/workflows/release.yml.
+        versionName = buildParam("VERSION_NAME") ?: "0.7.0"
+        buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
     }
 
     // Optional release signing. Only wired up when a keystore and all
@@ -93,6 +97,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

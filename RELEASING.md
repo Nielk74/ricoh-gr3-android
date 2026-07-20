@@ -1,8 +1,8 @@
 # Releasing
 
 Releases are automated by [`.github/workflows/release.yml`](.github/workflows/release.yml).
-Pushing a tag matching `v*` builds a signed APK + AAB and publishes them to a
-GitHub Release for that tag.
+Pushing a tag matching `v*` builds a signed APK + AAB, generates an APK
+SHA-256 checksum, and publishes them to a GitHub Release for that tag.
 
 ## Required GitHub secrets
 
@@ -51,6 +51,11 @@ Paste the contents of `keystore.b64` into the `KEYSTORE_B64` secret, and set
 The tag name (minus the leading `v`) becomes `versionName`; the workflow's run
 number becomes `versionCode`.
 
+Before tagging, update the local fallback `versionName` in
+[`app/build.gradle.kts`](app/build.gradle.kts) to the release version. Tagged
+builds override it automatically, but keeping the fallback current prevents
+development builds from offering an already-installed release.
+
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
@@ -61,7 +66,25 @@ The workflow then:
 1. Computes `VERSION_NAME` (`1.0.0`) and `VERSION_CODE` (`github.run_number`).
 2. Decodes `KEYSTORE_B64` to a file and exports the signing credentials.
 3. Runs `./gradlew assembleRelease bundleRelease`.
-4. Creates the GitHub Release and uploads the signed `.apk` and `.aab`.
+4. Generates `<apk-name>.apk.sha256`.
+5. Creates the GitHub Release and uploads the signed `.apk`, its checksum, and
+   the `.aab`.
+
+## In-app updates
+
+Once every 24 hours, the app checks the public GitHub Releases API for this
+repository. It skips drafts, prereleases, and incomplete releases without an
+APK, then offers a newer semantic version in an in-app banner.
+
+The release workflow sets `GITHUB_REPO` to `${{ github.repository }}`, so fork
+releases check their own public repository. Local builds default to
+`Nielk74/ricoh-gr3-android`; this can be overridden with the `GITHUB_REPO`
+environment variable or Gradle property.
+
+After the user accepts an update, the app downloads the APK, verifies its
+published SHA-256 checksum when present, and hands it to Android's package
+installer. Android requires user confirmation and enforces that the APK is
+signed by the same key as the installed app.
 
 ## Local release builds
 

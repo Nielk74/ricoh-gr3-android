@@ -17,8 +17,11 @@ display-referred photographs:
 2. It derives bounded decisions for exposure, shadow separation, highlight shoulder, saturation,
    LUT mix, halation, and grain. It deliberately preserves night, backlight, tungsten, and
    blue-hour intent; this is input normalisation, not aggressive auto-enhance/auto-WB.
-3. `FilmLutFactory` builds licence-clean 33³ stock transforms with a bounded display-referred
-   print curve, linear-light channel gain/dye cross-talk, and stock saturation.
+3. `FilmLutFactory` builds licence-clean 33³ stock transforms as an explicit two-stage system:
+   per-channel negative dye density in bounded log-exposure space, density-layer coupling, then
+   an independent positive print/scan characteristic with its own contrast, toe, shoulder,
+   print-light balance, black point, and paper white. Divergent channel curves create
+   exposure-dependent colour crossover instead of a constant tint.
 4. The stock transform is blended rather than blindly replacing every pixel. Existing strong
    casts reduce added stock colour. For colour stocks, a bundled on-device face detector first
    establishes a semantic region; normalized-RGB chromaticity then trims hair, glasses, beard,
@@ -26,18 +29,27 @@ display-referred photographs:
    the rendered luminance, preserving face lighting and texture. If face detection fails, the
    correction fails closed instead of becoming a global warm-colour key.
 5. Split toning is luminance-neutral. Portra's blue-to-cyan response is limited to blue regions
-   connected to the top frame edge, so it changes sky rather than clothing/signage. Halation is a
-   linear-light, edge-only spill whose radius follows output size; the bright source core is
-   subtracted so flat highlights do not turn red. CineStill uses a high-threshold red fringe while
-   the quieter cinema stocks retain warmer, weaker spill.
+   connected to the top frame edge, so it changes sky rather than clothing/signage. A separate
+   hue/chroma/luminance gate moves vegetation-range yellow-greens slightly toward cyan-green while
+   excluding skin, neutrals, existing cyan, deep shadows, and pale highlights. Both selective
+   transforms restore the original luminance. Halation is a linear-light, edge-only spill whose
+   radius follows output size; the bright source core is subtracted so flat highlights do not
+   turn red. CineStill uses a high-threshold red fringe while the quieter cinema stocks retain
+   warmer, weaker spill.
 6. Grain perturbs optical-density-like luminance from a deterministic, non-tiling coordinate
-   field correlated only across immediate neighbours. It is sharp on the film plane,
-   midtone-weighted, resolution-scaled, and gently reduced when the digital source is already
-   high-ISO/noisy. Low-key frames are not globally suppressed; true black still masks grain.
+   field correlated only across immediate neighbours. A bounded zero-mean cubic crystal term
+   gives fast stocks heavier, irregular density tails without a blurred low-frequency layer. It
+   is sharp on the film plane, weighted toward shadows and midtones, resolution-scaled, and
+   gently reduced when the digital source is already high-ISO/noisy. Low-key frames are not
+   globally suppressed; only printed black and bright highlights strongly mask grain.
 7. DNG and wide-gamut inputs are explicitly converted to sRGB before the sRGB-authored pipeline.
 8. A persisted 50–150% stock-strength control scales colour and emulsion layers. Tonal scene
    protection fades below 100% but is not amplified above it, preventing a stronger look from
    becoming aggressive auto-HDR.
+9. The review lab renders true −1/0/+1-stop negative-input brackets for selected stocks. Because
+   the source is already a rendered JPEG or DNG preview, the bracket uses a bounded linear-light
+   log-odds shift: it behaves like exposure through the shadows and midtones while retaining
+   existing highlight separation for the stock shoulder instead of clipping before the LUT.
 
 The calibration loop is reproducible: `./gradlew :tools:renderReferences` renders all local
 `.references` JPEG/PNG scenes and writes contact sheets plus exact scene decisions under
@@ -96,24 +108,25 @@ darktable film simulations, Fuji's in-camera Film Simulation) is some subset of:
    is essential: a uniform bright field receives no red fog and the highlight itself stays clean.
 
 6. **Grain.** `logit(I_out) = logit(I) + A(I)·G` (see §2.6 for the shipped model). `G` is
-   non-tiling, locally correlated RGB grain; `A(I)` is a **midtone-peaked**
-   density response. Real film grain is strongest in the midtones (falling off in both deep
-   shadows and highlights), correlated (not per-pixel white noise), varies in size/clumping, and
-   is correlated-but-distinct across R/G/B (identical mono = flat; independent RGB = electronic).
+   non-tiling, locally correlated density grain; `A(I)` is a shadow-biased, **midtone-peaked**
+   response. Useful shadows and midtones show the structure most clearly, while printed black and
+   bright highlights mask it. The field is correlated (not per-pixel white noise), varies in
+   size/clumping, and is correlated-but-distinct across R/G/B (identical mono = flat; independent
+   RGB = electronic).
 
 7. **Optional: vignette, soft bloom, slight desaturation of extremes, black/white point.**
 
 **Order matters:** linearise → tone → colour(LUT) → split-tone → selective complexion colour →
-selective sky colour → halation → (re-encode) → grain → vignette. Grain and vignette go last, in
-display space.
+selective foliage colour → selective sky colour → halation → (re-encode) → grain → vignette.
+Grain and vignette go last, in display space.
 
 ### The 3D LUT is the workhorse
 A **3D LUT** partitions RGB space into a grid (typically 17³, 33³, or 64³); each vertex
 holds an output RGB. At runtime you find the cube a pixel falls in and **trilinear-
 interpolate** the 8 corners. One lookup captures tone + colour + cross-talk together — which
 is exactly why the industry ships film looks as `.cube` files. Split-tone, face-gated complexion
-colour, connected-sky colour, halation, and grain are layered *around* the LUT because they're
-spatial or parametric and don't belong in a pointwise colour map.
+colour, selective foliage/connected-sky colour, halation, and grain are layered *around* the LUT
+because they're spatial or parametric and don't belong in a pointwise colour map.
 
 **File formats:** `.cube` (Adobe/Resolve text format — easiest to parse), `.3dl`, and
 **HaldCLUT** (a PNG that is the identity LUT laid out as an image; apply any edit to the
@@ -132,6 +145,10 @@ guideline:
   without scaled textures, blurry octaves, tiling, or density clouds. The kernel is
   variance-normalized to zero mean and stable strength. Tiny channel differences come from
   neighbouring taps of the same luma crystal, keeping RGB correlated rather than electronic.
+- **Fast-stock clumping**: a bounded zero-mean cubic term changes the density distribution rather
+  than overlaying a second noise map. Portra 800, CineStill 800T, Tri-X, and HP5 therefore gain
+  occasional denser crystals, especially in shadows, while fine stocks stay closer to a clean
+  Gaussian field. A high-frequency amplitude jitter breaks uniformity without adding clouds.
 - **`A(I)` — the strength**: a **midtone-peaked hump** (`grainDensity`) that falls off in both the
   deepest shadows *and* the brightest highlights (real silver-grain density), biasable toward the
   shadows by `shadowBias`. Measured: peak ~0.95 at luma 0.25–0.5, ~0.54 at black, ~0.04 near white.
@@ -147,7 +164,11 @@ guideline:
   thread; peak memory bounded (≤ ~4 float buffers over the ~6 MP edit image) to respect the
   no-crash / no-OOM rule.
 
-Per-stock density amount ranges from 0.014 (Ektar 100, finest) to 0.043 (Tri-X 400, grittiest).
+Per-stock density amount ranges from 0.018 (Ektar 100, finest) to 0.088 (Portra 800, the most
+pronounced colour stock in the calibrated set); the edited JPEG export uses quality 97 so the
+final encode does not immediately erase the fine structure. The cross-scanner evidence,
+matched-output measurements, and Portra 400/800 decision are recorded in
+[`PORTRA_GRAIN_CALIBRATION.md`](PORTRA_GRAIN_CALIBRATION.md).
 
 ---
 
@@ -172,10 +193,10 @@ Per-stock density amount ranges from 0.014 (Ektar 100, finest) to 0.043 (Tri-X 4
 - **Plan:** ship the **CPU engine first** (correct, testable, powers edited-export), add an
   **AGSL fast-path for preview** behind an SDK-33 check later. Avoid RenderScript entirely.
 
-We store looks as **`.cube` 3D LUTs in assets** (small: 33³ ≈ 36k floats) parsed into a flat
-float array, plus per-look parametric metadata (grain amount, halation strength, split-tone
-tints) in a small manifest. That keeps looks data-driven — adding a stock is dropping in a
-`.cube` + a manifest row, no code.
+The shipped looks are licence-clean procedural 33³ LUTs generated from the negative/print models
+in `FilmLookCatalog`, plus per-look spatial metadata (grain, halation, split tone, skin, foliage,
+and sky handling). `FilmLookLoader` can still prefer a future licensed `.cube` asset when one has
+a documented input transform and redistribution permission.
 
 ---
 
@@ -184,11 +205,11 @@ tints) in a small manifest. That keeps looks data-driven — adding a stock is d
 ```
 looks/emulation/
   LutCube.kt          # parse .cube -> FloatArray(size^3 * 3) + size; trilinear sample()
-  FilmLook.kt         # stock + skin/sky/split-tone/halation/grain parameters
+  FilmLook.kt         # stock + skin/foliage/sky/split-tone/halation/grain parameters
   FilmLookCatalog.kt  # curated authored stock models
   FaceRegionDetector  # bundled on-device ML Kit semantic face bounds
   SkinTone.kt         # proxy chromaticity mask + luminance-preserving correction
-  DevelopPipeline.kt  # scene -> LUT -> split -> skin -> sky -> halation -> grain
+  DevelopPipeline.kt  # scene -> negative/print LUT -> split -> skin -> foliage -> sky -> halation -> grain
   DevelopEngine.kt    # Android Bitmap/face-detection glue over the pure pipeline
   (later) LutShader.kt / AgslDevelop.kt  # SDK33+ preview fast-path
 ```
@@ -204,9 +225,9 @@ looks/emulation/
 ### Look set (shipped — emulation names only)
 Curated, not 300, and every entry named after a real stock (no invented "Retro Fade" labels).
 The shipped set (`FilmLookCatalog`): **Portra 400**, **Portra 800**, **Gold 200**, **Ektar 100**,
-**Superia 400**, **Pro 400H**, **CineStill 800T** (strong red halation), **CineStill 400D**,
-**Vision3 500T**, **Tri-X 400**, **HP5 Plus**. Each = a procedural film-density model +
-parametric grain/halation/split-tone.
+**Superia 400**, **CineStill 800T** (strong red halation), **Vision3 250D**,
+**Vision3 500T**, **Eterna Cinema**, **Tri-X 400**, and **HP5 Plus**. Each combines a procedural
+film-density model with parametric grain, halation, split-tone, and selective-colour layers.
 
 ---
 
@@ -232,25 +253,29 @@ Verified by `FujiLutVerify` (mid-grey band, differentiation, bleach-bypass desat
 transform could not handle the supplied backlit/high-key/blue-hour/mixed-light scenes. The current
 adaptive, hand-authored catalog avoids that runtime/licensing dependency.
 
-## 4b. The (fallback) procedural colour engine — why the first LUTs were too subtle
+## 4b. The active procedural colour engine — negative → print/scan
 
 The first `FilmLutFactory` applied a gentle mid-grey S-curve plus per-channel `gain*gamma`
 **in display (sRGB-gamma) space**, with gains ~1.03 — barely perceptible. Colour math in gamma
-space also compresses every operation. The remake (`FilmLutFactory.kt`) fixes both:
+space also compresses every operation. The current factory instead builds each 33³ transform as a
+restrained two-stage photographic system for already-rendered camera files:
 
-- **All tone/colour math in scene-linear light** (sRGB→linear in, linear→sRGB out). The same
-  parameter reads far stronger, and film's characteristic curve / dye coupling are only
-  physically meaningful in linear.
-- **Per-channel characteristic ("density") curves** with *independent* contrast, toe, and
-  shoulder (`FilmLutFactory.Channel`). Divergent per-channel curves are what create a stock's
-  shadow/highlight colour **crossover** (CineStill's cyan shadows, Portra's warm highlights).
-- **A 3×3 dye cross-talk matrix** (`Model.crossTalk`) mixing channels the way real film dye
-  layers couple — colour rotations a per-channel curve can't do (Fuji's foliage/sky shift).
-- **Saturation** around Rec.709 luma (0 = mono for B&W stocks).
+- **Negative dye formation:** sRGB is decoded to linear exposure. Each layer has independent
+  speed, straight-line slope, toe, and shoulder in bounded log-exposure space.
+- **Density-layer coupling:** a 3×3 `Model.crossTalk` matrix operates on the formed dye densities.
+- **Positive print/scan:** `PrintStage` supplies a second contrast/toe/shoulder characteristic,
+  print-light exposure and channel balance, black point, and paper white.
+- **Scanner colour:** saturation is applied around Rec.709 luma after the positive is encoded.
+
+The neutral negative plus neutral print is tested as an identity round-trip. Each stock then
+separately calibrates both stages: Portra and Vision3 use softer print shoulders, Eterna a low
+contrast wide-latitude print, and Ektar/Tri-X a harder print. Divergent layer curves create a
+stock's shadow/highlight colour **crossover** (for example, CineStill's cooler shadows relative to
+its upper tones) rather than applying one constant tint.
 
 The grades are intentionally **strong and clearly film** (the "much better filters" ask), with
-regression tests (`LutCubeTest.strongGradeVisiblyShiftsMidtones`, `channelsCanDivergeForColourCrossover`)
-that fail if a look ever goes back to being a whisper.
+regression tests for the paired stage, neutral identity, crossover, monotonic exposure brackets,
+and retained highlight separation.
 
 ### DNG (RAW) develop → JPEG
 `PhotoSave.saveEdited` now develops **DNG** originals too (previously they were saved untouched):

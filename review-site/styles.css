@@ -501,6 +501,18 @@ p {
   align-items: center;
 }
 
+.grain-loupe {
+  border-color: rgba(226, 34, 45, 0.42);
+  color: var(--text);
+  background: var(--accent-soft);
+  white-space: nowrap;
+}
+
+.grain-loupe:hover {
+  border-color: rgba(226, 34, 45, 0.72);
+  background: rgba(226, 34, 45, 0.2);
+}
+
 .viewport {
   position: relative;
   min-height: 260px;
@@ -824,6 +836,100 @@ kbd {
   font-weight: 680;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+
+.grain-inspect {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(226, 34, 45, 0.32);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--accent-soft);
+  cursor: pointer;
+  text-align: left;
+}
+
+.grain-inspect:hover {
+  border-color: rgba(226, 34, 45, 0.65);
+  background: rgba(226, 34, 45, 0.2);
+}
+
+.grain-inspect span {
+  display: grid;
+  gap: 2px;
+}
+
+.grain-inspect small {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 680;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.grain-inspect strong,
+.grain-inspect b {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.grain-inspect b {
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.negative-exposure {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.negative-exposure-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.negative-exposure-heading h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 630;
+}
+
+.negative-exposure-heading strong {
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+#filmExposureModes {
+  width: 100%;
+}
+
+#filmExposureModes button {
+  flex: 1;
+}
+
+#filmExposureModes button:disabled {
+  color: #56544f;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.exposure-hint {
+  margin: -2px 0 0;
+  color: var(--quiet);
+  font-size: 9px;
+  line-height: 1.4;
 }
 
 .look-item {
@@ -1204,7 +1310,6 @@ kbd {
 
 @media (max-width: 600px) {
   .brand-copy,
-  .button.subtle,
   .toolbar-cluster .segmented {
     display: none;
   }

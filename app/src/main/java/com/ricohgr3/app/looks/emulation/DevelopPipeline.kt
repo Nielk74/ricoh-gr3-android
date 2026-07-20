@@ -1,5 +1,6 @@
 package com.ricohgr3.app.looks.emulation
 
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -11,10 +12,11 @@ import kotlin.math.sqrt
  * dependencies**, so the entire look-rendering math is JVM-unit-testable — the device/GPU
  * `Bitmap` path (see the Android glue in `DevelopEngine`) merely marshals pixels in and out.
  *
- * Pipeline order: optional RAW base → scene analysis/adaptation → adaptively blended stock LUT
- * → luminance-neutral split-tone → connected-region skin naturalisation → optional connected-sky
- * colour → scaled halation → ISO/scene-aware grain. Grain runs last in display space; halation is
- * computed from a linear-light highlight mask.
+ * Pipeline order: optional RAW base → scene analysis/adaptation → optional film-negative exposure
+ * → adaptively blended negative/print LUT → luminance-neutral split-tone → connected-region skin
+ * naturalisation → optional selective foliage and connected-sky colour → scaled halation →
+ * ISO/scene-aware density grain. Grain runs last in display space; halation is computed from a
+ * linear-light highlight mask.
  */
 object DevelopPipeline {
 
@@ -42,8 +44,10 @@ object DevelopPipeline {
     /**
      * Render [look] over the RGB planes [r],[g],[b] in place. Each array is row-major,
      * length `width*height`, sRGB `[0,1]`. [lut] is the parsed colour table (identity if the
-     * look has no `lutAsset`). [faceRegions] are normalized semantic gates from the platform face
-     * detector; an empty list safely disables selective skin correction.
+     * look has no `lutAsset`). [filmExposureEv] shifts exposure only at the negative input, before
+     * the stock response; it is not a post-render brightness control. [faceRegions] are normalized
+     * semantic gates from the platform face detector; an empty list safely disables selective
+     * skin correction.
      */
     fun apply(
         r: FloatArray, g: FloatArray, b: FloatArray,
@@ -52,12 +56,15 @@ object DevelopPipeline {
         preGrade: PreGrade? = null,
         iso: Int? = null,
         effectStrength: Float = 1f,
+        filmExposureEv: Float = 0f,
         faceRegions: List<FaceRegion> = emptyList(),
     ) {
         val lutSample = FloatArray(3)
         val skinOutput = FloatArray(3)
         val skinScratch = FloatArray(3)
         val effect = effectStrength.coerceIn(0f, 1.5f)
+        val negativeExposureGain =
+            exp(0.69314718056f * filmExposureEv.coerceIn(-2f, 2f))
 
         // 0. Optional RAW base grade (before analysis) — only for a genuinely flatter DNG render.
         if (preGrade != null) applyPreGrade(r, g, b, preGrade)
@@ -131,13 +138,19 @@ object DevelopPipeline {
                 val sourceR = r[i]
                 val sourceG = g[i]
                 val sourceB = b[i]
+                // Exposure belongs before negative dye formation. Keep the adapted source
+                // untouched for the final look blend and skin naturalisation: this makes the
+                // bracket a film response, not destructive pre-brightening of the whole frame.
+                val negativeR = negativeExposureInput(sourceR, negativeExposureGain)
+                val negativeG = negativeExposureInput(sourceG, negativeExposureGain)
+                val negativeB = negativeExposureInput(sourceB, negativeExposureGain)
                 if (g0 == 1f) {
-                    lut.sample(sourceR, sourceG, sourceB, lutSample)
+                    lut.sample(negativeR, negativeG, negativeB, lutSample)
                 } else {
                     lut.sample(
-                        pow(sourceR, g0),
-                        pow(sourceG, g0),
-                        pow(sourceB, g0),
+                        pow(negativeR, g0),
+                        pow(negativeG, g0),
+                        pow(negativeB, g0),
                         lutSample,
                     )
                 }
@@ -199,7 +212,17 @@ object DevelopPipeline {
             }
         }
 
-        // 4. Stock-specific sky colour. Connectivity to the top frame edge is the semantic gate:
+        // 4. Stock-specific vegetation colour. A soft hue/chroma/luminance gate rotates only
+        // plausible yellow-green foliage toward cyan-green, with exact luminance restoration.
+        val foliage = look.foliageTone
+        if (foliage.enabled) {
+            applyFoliageCyanShift(
+                r, g, b,
+                cyanShift = foliage.cyanShift * layerMix,
+            )
+        }
+
+        // 5. Stock-specific sky colour. Connectivity to the top frame edge is the semantic gate:
         // this is not a global blue rotation and therefore leaves blue subjects/objects alone.
         val sky = look.skyTone
         if (sky.enabled) {
@@ -209,7 +232,7 @@ object DevelopPipeline {
             )
         }
 
-        // 5. Halation: scale radius with output dimensions so the small on-screen preview matches
+        // 6. Halation: scale radius with output dimensions so the small on-screen preview matches
         // the exported image, and scale strength with scene brightness/highlight availability.
         val h = look.halation
         if (h.enabled) {
@@ -221,13 +244,27 @@ object DevelopPipeline {
             applyHalation(r, g, b, width, height, scaled)
         }
 
-        // 6. Grain (display space, last). High ISO, low-key frames, and already busy/noisy files
+        // 7. Grain (display space, last). High ISO, low-key frames, and already busy/noisy files
         // automatically receive less added texture.
         val gr = look.grain
         if (gr.enabled) {
             val scaled = gr.copy(amount = gr.amount * adjustment.grainScale * layerMix)
             applyGrain(r, g, b, width, height, scaled)
         }
+    }
+
+    /**
+     * Shift an already-rendered source in bounded linear-light log-odds space before the negative
+     * LUT. A literal multiply would clip every JPEG highlight before the film shoulder ever saw
+     * it; this agrees closely with linear exposure in the shadows/midtones while retaining the
+     * source's existing upper-tone separation for the stock response to compress.
+     */
+    private fun negativeExposureInput(channel: Float, gain: Float): Float {
+        if (gain == 1f || channel <= 0f || channel >= 1f) return channel.coerceIn(0f, 1f)
+        val linear = srgbToLinear(channel).coerceIn(0f, 1f)
+        val exposed = (linear * gain) /
+            (1f - linear + linear * gain).coerceAtLeast(1e-6f)
+        return linearToSrgb(exposed)
     }
 
     /**
@@ -324,6 +361,69 @@ object DevelopPipeline {
             }
             r[i] = rr; g[i] = gg; b[i] = bb
         }
+    }
+
+    /**
+     * Move vegetation-like greens slightly toward cyan-green without rotating every hue.
+     *
+     * The mask accepts a bounded yellow-green/green hue range with useful chroma and midtone
+     * detail. Skin and warm objects have red as their dominant channel, existing cyan is outside
+     * the hue window, and near-neutrals fail the saturation gate. Blue is raised in proportion to
+     * the green-blue gap and red is eased slightly, then the original Rec.709 luminance is restored
+     * so foliage colour changes without changing scene exposure.
+     */
+    fun applyFoliageCyanShift(
+        r: FloatArray,
+        g: FloatArray,
+        b: FloatArray,
+        cyanShift: Float,
+    ) {
+        val amount = cyanShift.coerceIn(0f, 0.30f)
+        if (amount <= 0f) return
+
+        for (i in r.indices) {
+            val weight = foliageGreenLikelihood(r[i], g[i], b[i])
+            val mix = amount * weight
+            if (mix <= 0f) continue
+
+            val rr = r[i]
+            val gg = g[i]
+            val bb = b[i]
+            val oldLuma = luma(rr, gg, bb)
+            if (oldLuma <= 0f) continue
+
+            val greenBlueGap = (gg - bb).coerceAtLeast(0f)
+            val warmGreenGap = (rr - bb).coerceAtLeast(0f)
+            val targetR = rr - warmGreenGap * mix * 0.12f
+            val targetB = bb + greenBlueGap * mix
+            val targetLuma = luma(targetR, gg, targetB)
+            val scale = oldLuma / targetLuma.coerceAtLeast(1e-5f)
+            r[i] = (targetR * scale).coerceIn(0f, 1f)
+            g[i] = (gg * scale).coerceIn(0f, 1f)
+            b[i] = (targetB * scale).coerceIn(0f, 1f)
+        }
+    }
+
+    /** Soft likelihood for useful vegetation colour (roughly HSV 60–170°). */
+    private fun foliageGreenLikelihood(r: Float, g: Float, b: Float): Float {
+        val max = maxOf(r, g, b)
+        val min = minOf(r, g, b)
+        val delta = max - min
+        if (g < max || max < 0.08f || delta < 0.025f) return 0f
+        val saturation = delta / max.coerceAtLeast(1e-5f)
+        if (saturation < 0.07f) return 0f
+
+        val hue = 60f * ((b - r) / delta + 2f)
+        val hueWeight =
+            smoothstep(58f, 78f, hue) * (1f - smoothstep(142f, 170f, hue))
+        val saturationWeight = smoothstep(0.07f, 0.24f, saturation)
+        val light = luma(r, g, b)
+        val lightWeight =
+            smoothstep(0.05f, 0.18f, light) * (1f - smoothstep(0.80f, 0.96f, light))
+        val greenDominance = smoothstep(0.01f, 0.09f, g - maxOf(r, b))
+        return (
+            hueWeight * saturationWeight * lightWeight * greenDominance
+            ).coerceIn(0f, 1f)
     }
 
     /**
@@ -479,8 +579,9 @@ object DevelopPipeline {
      * A coordinate hash creates one deterministic density sample per output pixel. A compact 3×3
      * convolution correlates only immediate neighbours, producing small crystal-like structure
      * without the low-frequency clouds and repeating stamps of a texture plate. [GrainParams.size]
-     * changes those local weights rather than scaling up a bitmap. Shadows receive only a slight
-     * increase in local correlation; they never gain a separate blurry octave.
+     * changes those local weights rather than scaling up a bitmap. A zero-mean cubic density term
+     * gives fast stocks occasional irregular clumps; shadows receive a little more of that
+     * non-Gaussian structure, never a separate blurry octave.
      *
      * The field is independent of image edges, focus, and motion blur. It is applied last and
      * perturbs log-odds/optical-density-like luminance through [compositeDensityGrain], preserving
@@ -535,8 +636,23 @@ object DevelopPipeline {
                 val center = current[x + 1]
                 val axial = above[x + 1] + below[x + 1] + current[x] + current[x + 2]
                 val diagonal = above[x] + above[x + 2] + below[x] + below[x + 2]
-                val grain = center * centerWeight + axial * axialWeight +
+                val gaussianGrain = center * centerWeight + axial * axialWeight +
                     diagonal * diagonalWeight
+                val clumpStrength =
+                    gp.clumping.coerceIn(0f, 0.5f) * (0.55f + 0.75f * shadow)
+                // H3-like term: for the variance-normalised field (σ≈0.42),
+                // g³ - 3σ²g remains approximately zero mean while replacing a too-perfect
+                // Gaussian texture with occasional denser crystals. Independent amplitude
+                // jitter breaks up uniform kernels without adding a lower-frequency layer.
+                val cubic =
+                    gaussianGrain * gaussianGrain * gaussianGrain -
+                        0.5292f * gaussianGrain
+                val jitter = grainHash(x, y, seed xor 0x6D2B79F5)
+                val grain = (
+                    gaussianGrain +
+                        1.70f * clumpStrength * cubic +
+                        0.16f * clumpStrength * jitter * abs(gaussianGrain)
+                    ).coerceIn(-1.75f, 1.75f)
 
                 // Chroma remains tightly coupled to the luma crystal. Neighbour taps provide a
                 // very small channel difference without independent RGB "sensor noise".

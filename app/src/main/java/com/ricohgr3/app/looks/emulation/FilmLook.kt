@@ -2,8 +2,8 @@ package com.ricohgr3.app.looks.emulation
 
 /**
  * A film-emulation look: a 3D LUT plus the parametric spatial/tonal layers that a pointwise
- * colour map can't express (selective skin/sky colour, split toning, halation, grain). Rendered
- * on-device by [DevelopEngine]. See `research/FILM_EMULATION.md` §4.
+ * colour map can't express (selective skin/foliage/sky colour, split toning, halation, grain).
+ * Rendered on-device by [DevelopEngine]. See `research/FILM_EMULATION.md` §4.
  *
  * @property id stable identifier (asset key / persisted value).
  * @property displayName UI label.
@@ -11,6 +11,7 @@ package com.ricohgr3.app.looks.emulation
  *   (identity — useful for looks defined purely by the parametric layers).
  * @property splitTone shadow/highlight tint, applied after the LUT.
  * @property skinTone connected-region skin isolation and natural colour protection.
+ * @property foliageTone selective vegetation-green colour adjustment; disabled by default.
  * @property skyTone top-connected blue-sky colour adjustment; disabled by default.
  * @property halation stock-coloured highlight bloom; [HalationParams.NONE] to disable.
  * @property grain film grain; [GrainParams.NONE] to disable.
@@ -30,6 +31,7 @@ data class FilmLook(
     val lutAsset: String?,
     val splitTone: SplitTone = SplitTone.NONE,
     val skinTone: SkinToneParams = SkinToneParams.NONE,
+    val foliageTone: FoliageToneParams = FoliageToneParams.NONE,
     val skyTone: SkyToneParams = SkyToneParams.NONE,
     val halation: HalationParams = HalationParams.NONE,
     val grain: GrainParams = GrainParams.NONE,
@@ -38,6 +40,25 @@ data class FilmLook(
     val lutInputGamma: Float = 1f,
     val adaptive: AdaptiveParams = AdaptiveParams.NONE,
 )
+
+/**
+ * A restrained colour move for vegetation-like yellow-green and green pixels. The soft
+ * hue/chroma/luminance gate leaves skin, neutrals, blue-cyan objects, deep shadows, and pale
+ * highlights alone; the transform then preserves luminance. This is intentionally a local
+ * foliage-colour response rather than a global green-channel or hue rotation.
+ *
+ * @property cyanShift how far eligible greens move toward cyan-green (`0` = disabled; values
+ *   around `0.15` are deliberately subtle).
+ */
+data class FoliageToneParams(
+    val cyanShift: Float,
+) {
+    val enabled: Boolean get() = cyanShift > 0f
+
+    companion object {
+        val NONE = FoliageToneParams(cyanShift = 0f)
+    }
+}
 
 /**
  * Selective skin-colour handling applied after the stock LUT and split tone. Detection is
@@ -122,7 +143,8 @@ data class HalationParams(
  * Film grain — a physically-motivated model, not uniform digital noise. See
  * `research/FILM_EMULATION.md` and [DevelopPipeline.applyGrain]. A deterministic, non-tiling
  * coordinate field is correlated only across immediate neighbours, then perturbs
- * log-odds/optical-density-like luminance. The response peaks in the midtones, preserves
+ * log-odds/optical-density-like luminance. A bounded non-Gaussian crystal term makes faster
+ * stocks irregular rather than digitally uniform. The response peaks in the midtones, preserves
  * black/white endpoints, and can be biased toward shadows.
  *
  * @property amount overall density-variation strength.
@@ -133,6 +155,9 @@ data class HalationParams(
  *   still falls off in both the deepest shadows and the brightest highlights.
  * @property chroma fraction of a tiny luminance-neutral neighbour variation. It stays coupled to
  *   the luma crystal so it cannot turn into independent RGB sensor-noise speckles. 0 = monochrome.
+ * @property clumping non-Gaussian density irregularity (`0` = very clean/fine grain; values around
+ *   `0.2` give a fast stock more occasional dense crystals). This never introduces a blurred or
+ *   low-frequency grain layer.
  * @property seed fixes the field for deterministic (testable, non-flickering) output.
  */
 data class GrainParams(
@@ -140,6 +165,7 @@ data class GrainParams(
     val size: Float,
     val shadowBias: Float,
     val chroma: Float = 0.1f,
+    val clumping: Float = 0.12f,
     val seed: Long = 0L,
 ) {
     val enabled: Boolean get() = amount > 0f

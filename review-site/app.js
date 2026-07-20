@@ -28,8 +28,12 @@ const elements = {
   resolution: document.querySelector("#resolution"),
   openImage: document.querySelector("#openImage"),
   fullscreen: document.querySelector("#fullscreen"),
+  grainLoupeButtons: document.querySelectorAll("[data-grain-loupe]"),
   intensitySlider: document.querySelector("#intensitySlider"),
   intensityValue: document.querySelector("#intensityValue"),
+  filmExposureModes: document.querySelector("#filmExposureModes"),
+  filmExposureValue: document.querySelector("#filmExposureValue"),
+  filmExposureHint: document.querySelector("#filmExposureHint"),
   adaptationMetrics: document.querySelector("#adaptationMetrics"),
   verdicts: document.querySelector("#verdicts"),
   reviewNotes: document.querySelector("#reviewNotes"),
@@ -50,6 +54,7 @@ const state = {
   zoom: "fit",
   split: 50,
   intensity: 100,
+  filmExposure: 0,
   reviews: loadReviews(),
   spaceDown: false,
   panning: null,
@@ -83,6 +88,9 @@ function bindEvents() {
   elements.previousScene.addEventListener("click", () => stepScene(-1));
   elements.nextScene.addEventListener("click", () => stepScene(1));
   elements.fullscreen.addEventListener("click", toggleFullscreen);
+  elements.grainLoupeButtons.forEach((button) => {
+    button.addEventListener("click", inspectGrain);
+  });
   elements.exportReview.addEventListener("click", exportReview);
   elements.intensitySlider.addEventListener("input", () => {
     setIntensity(Number(elements.intensitySlider.value));
@@ -113,12 +121,19 @@ function bindEvents() {
     setZoom(button.dataset.zoom);
   });
 
+  elements.filmExposureModes.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-film-exposure]");
+    if (!button || button.disabled) return;
+    setFilmExposure(Number(button.dataset.filmExposure));
+  });
+
   elements.verdicts.addEventListener("click", (event) => {
     const button = event.target.closest("[data-verdict]");
     if (!button) return;
     const review = currentReview();
     review.verdict = review.verdict === button.dataset.verdict ? "" : button.dataset.verdict;
     review.intensity = state.intensity;
+    review.filmExposureEv = state.filmExposure;
     review.updatedAt = new Date().toISOString();
     persistReviews();
     renderFeedback();
@@ -130,6 +145,7 @@ function bindEvents() {
     const review = currentReview();
     review.notes = elements.reviewNotes.value;
     review.intensity = state.intensity;
+    review.filmExposureEv = state.filmExposure;
     review.updatedAt = new Date().toISOString();
     elements.saveState.textContent = "Saving…";
     clearTimeout(noteTimer);
@@ -242,6 +258,7 @@ function renderCurrentResult() {
   const look = currentLook();
   if (!scene || !look) return;
   const result = scene.looks[look.id];
+  syncFilmExposureControl(result);
 
   elements.scenePosition.textContent =
     `Scene ${state.sceneIndex + 1} of ${state.data.scenes.length}`;
@@ -273,13 +290,16 @@ function renderCurrentResult() {
 let imageLoadGeneration = 0;
 function loadResultImages(scene, look, result) {
   const generation = ++imageLoadGeneration;
+  const masters = resultMasters(result);
+  const exposureLabel =
+    state.filmExposure === 0 ? "" : `, ${filmExposureText(state.filmExposure)}`;
   const sources = [
     [elements.originalImage, scene.original, `${scene.name}, original`],
-    [elements.lookImage, result.src, `${scene.name}, ${look.name} at 100%`],
+    [elements.lookImage, masters.src, `${scene.name}, ${look.name}${exposureLabel} at 100%`],
     [
       elements.strongLookImage,
-      result.strongSrc || result.src,
-      `${scene.name}, ${look.name} at 150%`,
+      masters.strongSrc || masters.src,
+      `${scene.name}, ${look.name}${exposureLabel} at 150%`,
     ],
     [elements.skinMaskImage, scene.skinMask, `${scene.name}, isolated skin mask`],
   ];
@@ -331,7 +351,7 @@ function renderFeedback() {
   });
   elements.reviewNotes.value = review.notes || "";
   elements.saveState.textContent = review.updatedAt
-    ? `Saved · ${review.intensity || 100}%`
+    ? `Saved · ${review.intensity || 100}% · ${filmExposureText(review.filmExposureEv || 0)}`
     : "Local";
 }
 
@@ -342,7 +362,8 @@ function currentReview() {
 }
 
 function reviewKey() {
-  return `${currentScene()?.id || "scene"}::${currentLook()?.id || "look"}`;
+  const base = `${currentScene()?.id || "scene"}::${currentLook()?.id || "look"}`;
+  return state.filmExposure === 0 ? base : `${base}::ev${state.filmExposure}`;
 }
 
 function sceneHasReview(sceneId) {
@@ -368,7 +389,7 @@ function exportReview() {
   const entries = Object.entries(state.reviews)
     .filter(([, review]) => review.verdict || review.notes?.trim())
     .map(([key, review]) => {
-      const [sceneId, lookId] = key.split("::");
+      const [sceneId, lookId, exposureKey] = key.split("::");
       const scene = state.data.scenes.find((item) => item.id === sceneId);
       const look = state.data.looks.find((item) => item.id === lookId);
       return {
@@ -377,6 +398,9 @@ function exportReview() {
         sourceType: scene?.sourceType,
         lookId,
         lookName: look?.name || lookId,
+        filmExposureEv:
+          review.filmExposureEv ??
+          (exposureKey ? Number(exposureKey.replace("ev", "")) : 0),
         ...review,
       };
     });
@@ -438,22 +462,72 @@ function setIntensity(value) {
   if (result) renderAdaptation(result);
 }
 
+function inspectGrain() {
+  setMode("look");
+  setIntensity(150);
+  setZoom("2");
+  if (window.innerWidth <= 900) {
+    requestAnimationFrame(() => {
+      elements.viewport.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+  showToast("Grain inspection · 150% effect · 200% zoom");
+}
+
+function setFilmExposure(value) {
+  const target = clamp(Math.round(Number(value)), -1, 1);
+  const result = currentScene()?.looks[currentLook()?.id];
+  if (target !== 0 && !result?.exposureMasters?.[String(target)]) {
+    showToast("Exposure brackets are rendered for Portra 400, CineStill 800T, and Vision3 250D.");
+    return;
+  }
+  state.filmExposure = target;
+  renderCurrentResult();
+}
+
+function syncFilmExposureControl(result) {
+  const hasBracket = Boolean(result?.exposureMasters);
+  if (!hasBracket) state.filmExposure = 0;
+  elements.filmExposureModes.querySelectorAll("[data-film-exposure]").forEach((button) => {
+    const value = Number(button.dataset.filmExposure);
+    button.disabled = value !== 0 && !hasBracket;
+    button.classList.toggle("active", value === state.filmExposure);
+  });
+  elements.filmExposureValue.textContent = filmExposureText(state.filmExposure);
+  elements.filmExposureHint.textContent = hasBracket
+    ? "Exposure is applied before dye formation; intensity remains an independent control."
+    : "Bracketed calibration is available on Portra 400, CineStill 800T, and Vision3 250D.";
+}
+
+function resultMasters(result) {
+  return (
+    result.exposureMasters?.[String(state.filmExposure)] || {
+      src: result.src,
+      strongSrc: result.strongSrc || result.src,
+    }
+  );
+}
+
 function applyIntensityLayers() {
   const scene = currentScene();
   const look = currentLook();
   const result = scene?.looks[look?.id];
   if (!scene || !look || !result) return;
+  const masters = resultMasters(result);
 
   const baseOpacity = Math.min(state.intensity / 100, 1);
   const strongOpacity = Math.max(0, (state.intensity - 100) / 50);
   elements.lookImage.style.opacity = baseOpacity.toFixed(3);
   elements.strongLookImage.style.opacity = strongOpacity.toFixed(3);
-  elements.lookLabel.textContent = `${look.name} · ${state.intensity}%`;
+  const exposure =
+    state.filmExposure === 0 ? "" : ` · ${filmExposureText(state.filmExposure)}`;
+  elements.lookLabel.textContent = `${look.name} · ${state.intensity}%${exposure}`;
 
-  const useStrongMaster = state.intensity >= 125 && result.strongSrc;
-  elements.openImage.href = useStrongMaster ? result.strongSrc : result.src;
+  const useStrongMaster = state.intensity >= 125 && masters.strongSrc;
+  elements.openImage.href = useStrongMaster ? masters.strongSrc : masters.src;
   elements.openImage.title =
-    `Open ${look.name} ${useStrongMaster ? "150%" : "100%"} master at full resolution`;
+    `Open ${look.name} ${useStrongMaster ? "150%" : "100%"} ` +
+    `${filmExposureText(state.filmExposure)} master at full resolution`;
 }
 
 function setZoom(zoom) {
@@ -575,6 +649,10 @@ function onKeyDown(event) {
     setIntensity(state.intensity - 5);
   } else if (event.key === "+" || event.key === "=") {
     setIntensity(state.intensity + 5);
+  } else if (event.key === "," || event.key === "<") {
+    setFilmExposure(state.filmExposure - 1);
+  } else if (event.key === "." || event.key === ">") {
+    setFilmExposure(state.filmExposure + 1);
   } else if (event.key === "?") {
     setShortcutsOpen(true);
   }
@@ -602,10 +680,11 @@ function preloadNeighbors() {
   const nextScene = state.data.scenes[wrap(state.sceneIndex + 1, state.data.scenes.length)];
   const look = currentLook();
   const nextResult = nextScene.looks[look.id];
+  const nextMasters = resultMasters(nextResult);
   [
     nextScene.original,
-    nextResult.src,
-    nextResult.strongSrc || nextResult.src,
+    nextMasters.src,
+    nextMasters.strongSrc || nextMasters.src,
     nextScene.skinMask,
   ].forEach((src) => {
     const image = new Image();
@@ -647,6 +726,11 @@ function percent(value) {
 function signed(value, decimals = 2) {
   const number = Number(value);
   return `${number >= 0 ? "+" : ""}${number.toFixed(decimals)}`;
+}
+
+function filmExposureText(value) {
+  const number = Number(value) || 0;
+  return `${number > 0 ? "+" : ""}${number} EV`;
 }
 
 function wrap(value, length) {

@@ -86,6 +86,14 @@
                   <button type="button" data-zoom="1">100%</button>
                   <button type="button" data-zoom="2">200%</button>
                 </div>
+                <button
+                  class="button subtle grain-loupe"
+                  id="grainLoupe"
+                  type="button"
+                  data-grain-loupe
+                >
+                  Inspect grain
+                </button>
                 <a class="button subtle open-image" id="openImage" href="#" target="_blank" rel="noreferrer">
                   Open image ↗
                 </a>
@@ -155,6 +163,36 @@
               <span>Calibrated</span>
               <span>150</span>
             </div>
+
+            <button class="grain-inspect" type="button" data-grain-loupe>
+              <span>
+                <small>Texture inspection</small>
+                <strong>Grain at 150% effect</strong>
+              </span>
+              <b>200% ↗</b>
+            </button>
+
+            <div class="negative-exposure">
+              <div class="negative-exposure-heading">
+                <div>
+                  <p class="eyebrow">Negative latitude</p>
+                  <h3>Film exposure</h3>
+                </div>
+                <strong id="filmExposureValue">0 EV</strong>
+              </div>
+              <div
+                class="segmented compact"
+                id="filmExposureModes"
+                aria-label="Film negative exposure"
+              >
+                <button type="button" data-film-exposure="-1">−1</button>
+                <button type="button" class="active" data-film-exposure="0">0</button>
+                <button type="button" data-film-exposure="1">+1</button>
+              </div>
+              <p class="exposure-hint" id="filmExposureHint">
+                Bracketed calibration for Portra 400, CineStill 800T, and Vision3 250D.
+              </p>
+            </div>
           </section>
 
           <div class="look-list" id="lookList" role="list"></div>
@@ -207,6 +245,7 @@
             <div><dt><kbd>O</kbd></dt><dd>Toggle original and comparison</dd></div>
             <div><dt><kbd>0</kbd> <kbd>1</kbd> <kbd>2</kbd></dt><dd>Fit, 100%, or 200% zoom</dd></div>
             <div><dt><kbd>−</kbd> <kbd>+</kbd></dt><dd>Decrease or increase effect intensity</dd></div>
+            <div><dt><kbd>,</kbd> <kbd>.</kbd></dt><dd>Underexpose or overexpose the negative</dd></div>
             <div><dt><kbd>F</kbd></dt><dd>Toggle fullscreen</dd></div>
             <div><dt><kbd>Space</kbd> + drag</dt><dd>Pan while zoomed</dd></div>
           </dl>

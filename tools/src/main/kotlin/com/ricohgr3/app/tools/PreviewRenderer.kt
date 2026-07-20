@@ -81,6 +81,7 @@ internal fun develop(
     lut: LutCube,
     iso: Int? = null,
     effectStrength: Float = 1f,
+    filmExposureEv: Float = 0f,
     faceRegions: List<FaceRegion> = emptyList(),
 ): BufferedImage {
     val w = src.width; val h = src.height; val n = w * h
@@ -97,6 +98,7 @@ internal fun develop(
         r, g, b, w, h, look, lut,
         iso = iso,
         effectStrength = effectStrength,
+        filmExposureEv = filmExposureEv,
         faceRegions = faceRegions,
     )
     val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)

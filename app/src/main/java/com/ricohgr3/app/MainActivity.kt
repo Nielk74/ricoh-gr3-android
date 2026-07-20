@@ -7,20 +7,33 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.gallery.GalleryViewModel
 import com.ricohgr3.app.looks.StickyLookStore
 import com.ricohgr3.app.nav.AppNavHost
 import com.ricohgr3.app.ui.theme.GrTheme
+import com.ricohgr3.app.ui.update.UpdateBanner
+import com.ricohgr3.app.update.UpdateStatus
 import com.ricohgr3.app.wifi.CameraHttpClient
 import com.ricohgr3.app.wifi.SessionBoundWifiController
 
@@ -61,16 +74,38 @@ class MainActivity : ComponentActivity() {
                         granted = result.values.all { it }
                     }
 
-                    AppNavHost(
-                        viewModel = vm,
-                        galleryViewModel = galleryViewModel,
-                        photoRepository = photoRepository,
-                        photoExporter = photoExporter,
-                        filmLookLoader = filmLookLoader,
-                        cameraWifiController = cameraWifiController,
-                        permissionsGranted = granted,
-                        onRequestPermissions = { launcher.launch(requiredPermissions()) },
-                    )
+                    val updateStatus by vm.updateStatus.collectAsStateWithLifecycle()
+                    val updateDownload by vm.updateDownload.collectAsStateWithLifecycle()
+                    val updateDismissed by vm.updateDismissed.collectAsStateWithLifecycle()
+
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        AnimatedVisibility(
+                            visible = !updateDismissed && updateStatus is UpdateStatus.Available,
+                            enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                            exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+                        ) {
+                            UpdateBanner(
+                                status = updateStatus,
+                                download = updateDownload,
+                                onInstall = vm::downloadAndInstallUpdate,
+                                onDismiss = vm::dismissUpdate,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            )
+                        }
+
+                        Box(modifier = Modifier.weight(1f)) {
+                            AppNavHost(
+                                viewModel = vm,
+                                galleryViewModel = galleryViewModel,
+                                photoRepository = photoRepository,
+                                photoExporter = photoExporter,
+                                filmLookLoader = filmLookLoader,
+                                cameraWifiController = cameraWifiController,
+                                permissionsGranted = granted,
+                                onRequestPermissions = { launcher.launch(requiredPermissions()) },
+                            )
+                        }
+                    }
                 }
             }
         }

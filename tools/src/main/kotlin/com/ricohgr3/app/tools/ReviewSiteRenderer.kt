@@ -9,6 +9,9 @@ import java.time.Instant
 import java.util.Locale
 import javax.imageio.ImageIO
 
+private val EXPOSURE_BRACKET_LOOKS =
+    setOf("portra400", "cinestill800t", "vision3_250d")
+
 /**
  * Generates the high-resolution assets and manifest consumed by `review-site/`.
  *
@@ -94,7 +97,7 @@ fun reviewSiteMain(args: Array<String>) {
                 faceRegions = faceRegions,
             )
             val filename = "${look.id}.jpg"
-            writeJpg(output, File(sceneDir, filename), quality = 0.94f)
+            writeJpg(output, File(sceneDir, filename), quality = 0.97f)
             output.flush()
             val strongOutput = develop(
                 work,
@@ -104,12 +107,47 @@ fun reviewSiteMain(args: Array<String>) {
                 faceRegions = faceRegions,
             )
             val strongFilename = "${look.id}-150.jpg"
-            writeJpg(strongOutput, File(sceneDir, strongFilename), quality = 0.94f)
+            writeJpg(strongOutput, File(sceneDir, strongFilename), quality = 0.97f)
             strongOutput.flush()
+
+            val exposureMasters = if (look.id in EXPOSURE_BRACKET_LOOKS) {
+                fun bracket(ev: Int, suffix: String, strength: Float): String {
+                    val strengthSuffix = if (strength > 1f) "-150" else ""
+                    val bracketFilename = "${look.id}-$suffix$strengthSuffix.jpg"
+                    val bracketOutput = develop(
+                        work,
+                        look,
+                        lut,
+                        effectStrength = strength,
+                        filmExposureEv = ev.toFloat(),
+                        faceRegions = faceRegions,
+                    )
+                    writeJpg(bracketOutput, File(sceneDir, bracketFilename), quality = 0.97f)
+                    bracketOutput.flush()
+                    return "assets/scenes/$sceneId/$bracketFilename"
+                }
+                val under = bracket(ev = -1, suffix = "evm1", strength = 1f)
+                val underStrong = bracket(ev = -1, suffix = "evm1", strength = 1.5f)
+                val over = bracket(ev = 1, suffix = "evp1", strength = 1f)
+                val overStrong = bracket(ev = 1, suffix = "evp1", strength = 1.5f)
+                """
+                    {
+                      "-1":{"src":"$under","strongSrc":"$underStrong"},
+                      "0":{
+                        "src":"assets/scenes/$sceneId/$filename",
+                        "strongSrc":"assets/scenes/$sceneId/$strongFilename"
+                      },
+                      "1":{"src":"$over","strongSrc":"$overStrong"}
+                    }
+                """.trimIndent().replace("\n", "")
+            } else {
+                "null"
+            }
             perLook += """
                 "${look.id}":{
                   "src":"assets/scenes/$sceneId/$filename",
                   "strongSrc":"assets/scenes/$sceneId/$strongFilename",
+                  "exposureMasters":$exposureMasters,
                   "ev":${adjustment.exposureEv.json()},
                   "shadows":${adjustment.shadowLift.json()},
                   "highlights":${adjustment.highlightCompression.json()},
@@ -125,7 +163,10 @@ fun reviewSiteMain(args: Array<String>) {
                   ).json()}
                 }
             """.trimIndent().replace("\n", "")
-            println("    ${look.displayName} · 100/150%")
+            println(
+                "    ${look.displayName} · 100/150%" +
+                    if (look.id in EXPOSURE_BRACKET_LOOKS) " · -1/0/+1 EV" else "",
+            )
         }
 
         sceneJson += """
@@ -176,6 +217,9 @@ fun reviewSiteMain(args: Array<String>) {
         {
           "generatedAt":"${Instant.now()}",
           "renderLongEdge":3000,
+          "exposureBracketLooks":[
+            ${EXPOSURE_BRACKET_LOOKS.joinToString(",") { "\"$it\"" }}
+          ],
           "looks":[$looksJson],
           "scenes":[${sceneJson.joinToString(",")}]
         }
@@ -228,8 +272,8 @@ private fun SceneProfile.toneLabel(): String = when {
 }
 
 private fun descriptionFor(id: String): String = when (id) {
-    "portra400" -> "Soft contrast · warm skin · cyan-biased skies"
-    "portra800" -> "Low-light warmth · cyan-biased skies · visible grain"
+    "portra400" -> "Soft contrast · warm skin · cyan sky and foliage"
+    "portra800" -> "Low-light warmth · cyan sky and foliage · visible grain"
     "gold200" -> "Golden highlights · nostalgic warmth"
     "ektar100" -> "Clean grain · vivid color · crisp contrast"
     "superia400" -> "Cool greens · lively color · candid character"

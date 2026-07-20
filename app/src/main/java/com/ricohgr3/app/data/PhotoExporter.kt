@@ -43,12 +43,14 @@ class PhotoExporter(private val context: Context) {
 
     /**
      * Compress [bitmap] to JPEG and write it to the gallery under [displayName]. Used for the
-     * edited-export path (the look-tinted rendition). Returns the inserted content [Uri].
+     * edited-export path (the developed rendition). The high default quality is intentional:
+     * fine film-plane grain is one of the first details a second JPEG encode erases. Returns the
+     * inserted content [Uri].
      */
     suspend fun saveBitmap(
         bitmap: Bitmap,
         displayName: String,
-        quality: Int = 95,
+        quality: Int = 97,
     ): Uri = withContext(Dispatchers.IO) {
         insert(displayName, "image/jpeg") { out ->
             if (!bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)) {

@@ -1,32 +1,31 @@
 package com.ricohgr3.app.looks.emulation
 
 import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.math.pow
 
 /**
- * Builds 3D [LutCube]s procedurally from a film-density colour model, so the look set is
- * genuinely differentiated and **strong** — a real film grade, not a whisper of tint —
- * **without bundling third-party `.cube` assets** (whose redistribution rights must be cleared
- * first — see `research/FILM_EMULATION.md` §5). When a licensed `.cube` is later dropped into
- * `assets/`, the catalog prefers it and this factory is bypassed.
+ * Builds 3D [LutCube]s procedurally from an explicit negative → print/scan model, without
+ * bundling third-party `.cube` assets (whose redistribution rights must be cleared first — see
+ * `research/FILM_EMULATION.md` §5). When a licensed `.cube` is later dropped into `assets/`, the
+ * catalog prefers it and this factory is bypassed.
  *
  * The input is a camera JPEG or a platform-rendered DNG, not untouched scene-linear sensor data.
- * The factory therefore treats it as a display-referred photograph: a bounded print-style tone
- * curve supplies the stock character, while gain and dye coupling still happen in linear light.
- * Applying a second aggressive "RAW" density curve to an already-developed JPEG was the main
+ * It is decoded to linear light before entering the density model, but the response is deliberately
+ * restrained: applying an aggressive RAW-style curve to an already-developed JPEG was the main
  * reason earlier filters crushed shadows, clipped colour, and looked synthetic.
  *
  * ## The model this factory realises (per `research/FILM_EMULATION.md` §2)
  * For each LUT vertex, in order:
- *  1. **White balance / channel gain** in linear (colour temperature of the stock).
- *  2. **Per-channel print characteristic** in display space — a bounded S-curve with independent
- *     contrast, toe (shadow crush/lift) and shoulder (highlight roll-off) per R/G/B. Divergent
- *     per-channel curves are exactly what gives a stock its shadow/highlight colour crossover
- *     (e.g. CineStill's cyan shadows, Portra's warm highlights).
- *  3. **Dye cross-talk** — a 3×3 matrix mixing a little of each channel into the others, the
- *     way real film dye layers couple. This produces colour rotations a per-channel curve
- *     cannot (greens toward yellow, skies toward cyan).
- *  4. **Saturation** around Rec.709 luma (0 = monochrome for B&W stocks).
+ *  1. **Negative exposure** — sRGB is decoded to linear exposure.
+ *  2. **Dye-layer density** — each R/G/B layer has its own speed, straight-line slope, toe and
+ *     shoulder in bounded log-exposure space. Different layer shapes create genuine
+ *     exposure-dependent colour crossover instead of a constant tint.
+ *  3. **Inter-layer coupling** — a 3×3 matrix mixes the formed dye densities.
+ *  4. **Print / scan response** — the coupled density is mapped through a second characteristic
+ *     curve with an independent contrast, toe, shoulder, black point, paper white and channel
+ *     balance.
+ *  5. **Scanner colour** — saturation is adjusted around Rec.709 luma (0 = monochrome).
  * The spatial layers (split-tone, halation, grain) are layered around the LUT by
  * [DevelopPipeline]; they are not part of this pointwise map.
  *
@@ -35,27 +34,50 @@ import kotlin.math.pow
 object FilmLutFactory {
 
     /**
-     * A per-channel film characteristic ("density") curve. Models film's S-shape with
-     * independent control of each end, so channels can diverge and create colour crossover.
+     * An author-friendly per-channel negative dye-layer calibration.
      *
-     * @property contrast overall S-curve strength around mid-grey (0 ≈ linear, ~0.5 punchy).
-     * @property toe shadow behaviour: >0 lifts/softens the toe (faded look), <0 crushes it.
-     * @property shoulder highlight roll-off strength (>0 rolls highlights off gently, film-like).
-     * @property gain linear white-balance multiplier for this channel (colour temperature).
+     * The existing compact catalog uses normalized controls rather than pretending that JPEG
+     * code values are laboratory density measurements. [contrast] is converted to a small
+     * straight-line density-slope increase; [toe] and [shoulder] bend the two ends in log-exposure
+     * space; [gain] becomes an exposure-speed offset for the layer.
+     *
+     * Defaults are neutral so `Model()` is an exact round-trip.
      */
     data class Channel(
-        val contrast: Float = 0.4f,
+        val contrast: Float = 0f,
         val toe: Float = 0f,
-        val shoulder: Float = 0.5f,
+        val shoulder: Float = 0f,
         val gain: Float = 1f,
     )
 
     /**
-     * A full stock model: three characteristic curves, a dye cross-talk matrix, and saturation.
+     * Positive print / scanner response applied after negative dye formation.
      *
-     * @property r/g/b per-channel characteristic curves (post-white-balance).
-     * @property crossTalk row-major 3×3 dye-coupling matrix applied in linear light after the
-     *   curves; identity = no coupling. Rows sum to ~1 to preserve exposure.
+     * [contrast] controls the print straight-line slope. [toe] opens useful shadow separation;
+     * [shoulder] controls paper-highlight compression. [exposureEv] and per-channel [biasR],
+     * [biasG], [biasB] are print-light/scanner balance in stops. [blackPoint] and [paperWhite]
+     * are linear-light output endpoints.
+     */
+    data class PrintStage(
+        val contrast: Float = 1f,
+        val toe: Float = 0f,
+        val shoulder: Float = 0f,
+        val exposureEv: Float = 0f,
+        val biasR: Float = 0f,
+        val biasG: Float = 0f,
+        val biasB: Float = 0f,
+        val blackPoint: Float = 0f,
+        val paperWhite: Float = 1f,
+    )
+
+    /**
+     * A full stock model: negative dye layers, density cross-talk, positive print, and scanner
+     * saturation.
+     *
+     * @property r/g/b per-channel negative dye-layer characteristics.
+     * @property crossTalk row-major 3×3 coupling matrix applied to formed dye density; identity
+     *   means no coupling. Rows sum to approximately one to preserve neutral exposure.
+     * @property print positive print/scanner characteristic.
      * @property saturation global saturation scale in display space (1 = unchanged, 0 = mono).
      */
     data class Model(
@@ -63,6 +85,7 @@ object FilmLutFactory {
         val g: Channel = Channel(),
         val b: Channel = Channel(),
         val crossTalk: FloatArray = IDENTITY_3X3,
+        val print: PrintStage = PrintStage(),
         val saturation: Float = 1f,
     ) {
         // Value semantics not needed (models are static catalog data); silence the array warning.
@@ -71,6 +94,8 @@ object FilmLutFactory {
     }
 
     private val IDENTITY_3X3 = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
+    private const val LN_2 = 0.69314718056f
+    private const val DENSITY_EPSILON = 0.000001f
 
     private fun srgbToLinear(c: Float): Float =
         if (c <= 0.04045f) c / 12.92f else ((c + 0.055f) / 1.055f).pow(2.4f)
@@ -81,39 +106,47 @@ object FilmLutFactory {
         else 1.055f * x.pow(1f / 2.4f) - 0.055f
     }
 
+    private fun logit(value: Float): Float {
+        val x = value.coerceIn(DENSITY_EPSILON, 1f - DENSITY_EPSILON)
+        return ln(x / (1f - x))
+    }
+
+    private fun logistic(value: Float): Float =
+        (1f / (1f + exp(-value))).coerceIn(0f, 1f)
+
     /**
-     * Bounded print-film curve on display-referred input/output. Black and white remain stable
-     * unless [Channel.toe] deliberately lifts/crushes the toe; the shoulder is monotonic and
-     * always compresses instead of accidentally brightening upper mids.
+     * Form normalized dye density from linear scene exposure. Logit space is a bounded proxy for
+     * log exposure: it gives a long straight section while retaining stable zero/one endpoints.
+     * The stock controls are intentionally small because the source already contains a camera
+     * rendering curve.
      */
-    private fun characteristic(input: Float, ch: Channel): Float {
-        // A stock's colour-temperature gain belongs in linear light.
-        val gained = linearToSrgb(srgbToLinear(input.coerceIn(0f, 1f)) * ch.gain)
-            .coerceIn(0f, 1f)
+    private fun negativeDensity(exposure: Float, channel: Channel): Float {
+        if (exposure <= 0f) return 0f
+        if (exposure >= 1f) return 1f
+        val x = exposure.coerceIn(DENSITY_EPSILON, 1f - DENSITY_EPSILON)
+        val slope = 1f + channel.contrast.coerceIn(-0.5f, 1f) * 0.34f
+        val speed = ln(channel.gain.coerceIn(0.5f, 2f))
+        val toe = channel.toe.coerceIn(-0.12f, 0.12f) * 4f * (1f - x) * (1f - x)
+        val shoulder =
+            channel.shoulder.coerceIn(0f, 1.2f) * 0.46f * x * x
+        return logistic(logit(x) * slope + speed + toe - shoulder)
+    }
 
-        // Smoothstep is a stable S-curve with fixed black/white endpoints. Blend toward it rather
-        // than applying a power pivot, which was much too destructive on rendered camera JPEGs.
-        val smooth = gained * gained * (3f - 2f * gained)
-        var y = gained + (smooth - gained) * ch.contrast.coerceIn(-0.5f, 1f)
-
-        // Toe: small and heavily shadow-weighted. Positive values lift, negative values deepen.
-        if (ch.toe != 0f) {
-            val shadowWeight = (1f - y).coerceIn(0f, 1f).pow(3f)
-            y += ch.toe * 0.5f * shadowWeight
-        }
-
-        // Shoulder: exponential easing below the linear segment, normalised to still reach white.
-        // Blend is capped so even a strong stock retains separation in bright JPEG highlights.
-        val knee = 0.55f
-        if (ch.shoulder > 0f && y > knee) {
-            val t = ((y - knee) / (1f - knee)).coerceIn(0f, 1f)
-            val a = 2.2f
-            val rolled = (exp(a * t) - 1f) / (exp(a) - 1f)
-            val target = knee + (1f - knee) * rolled
-            val mix = (ch.shoulder * 0.58f).coerceIn(0f, 0.72f)
-            y += (target - y) * mix
-        }
-        return y.coerceIn(0f, 1f)
+    /** Convert coupled negative dye density into linear positive-print light. */
+    private fun printPositive(density: Float, stage: PrintStage, channelBiasEv: Float): Float {
+        if (density <= 0f) return stage.blackPoint.coerceIn(0f, 0.2f)
+        if (density >= 1f) return stage.paperWhite.coerceIn(0.5f, 1f)
+        val x = density.coerceIn(DENSITY_EPSILON, 1f - DENSITY_EPSILON)
+        val toe = stage.toe.coerceIn(-0.5f, 0.8f) * (1f - x) * (1f - x)
+        val shoulder = stage.shoulder.coerceIn(0f, 1.2f) * x * x
+        val exposure = (stage.exposureEv + channelBiasEv).coerceIn(-1f, 1f) * LN_2
+        val positive = logistic(
+            logit(x) * stage.contrast.coerceIn(0.65f, 1.35f) +
+                exposure + toe - shoulder,
+        )
+        val black = stage.blackPoint.coerceIn(0f, 0.2f)
+        val white = stage.paperWhite.coerceIn(black + 0.1f, 1f)
+        return black + positive * (white - black)
     }
 
     private fun luma(r: Float, g: Float, b: Float): Float = 0.2126f * r + 0.7152f * g + 0.0722f * b
@@ -125,20 +158,21 @@ object FilmLutFactory {
         val m = model.crossTalk
         var i = 0
         for (bi in 0 until size) for (gi in 0 until size) for (ri in 0 until size) {
-            // Display-referred, bounded per-channel print curves (gain is applied in linear light
-            // inside `characteristic`).
-            var r = characteristic(ri / max, model.r)
-            var g = characteristic(gi / max, model.g)
-            var b = characteristic(bi / max, model.b)
+            // 1. Decode display RGB to linear exposure and form negative dye density.
+            val rd = negativeDensity(srgbToLinear(ri / max), model.r)
+            val gd = negativeDensity(srgbToLinear(gi / max), model.g)
+            val bd = negativeDensity(srgbToLinear(bi / max), model.b)
 
-            // Dye cross-talk still belongs in linear light.
-            val rl = srgbToLinear(r); val gl = srgbToLinear(g); val bl = srgbToLinear(b)
-            val mr = m[0] * rl + m[1] * gl + m[2] * bl
-            val mg = m[3] * rl + m[4] * gl + m[5] * bl
-            val mb = m[6] * rl + m[7] * gl + m[8] * bl
+            // 2. Couple the formed dye layers. Small negative coefficients are allowed for
+            // calibrated colour separation, then bounded before the positive print.
+            val mr = (m[0] * rd + m[1] * gd + m[2] * bd).coerceIn(0f, 1f)
+            val mg = (m[3] * rd + m[4] * gd + m[5] * bd).coerceIn(0f, 1f)
+            val mb = (m[6] * rd + m[7] * gd + m[8] * bd).coerceIn(0f, 1f)
 
-            // Back to display space for saturation + output.
-            r = linearToSrgb(mr); g = linearToSrgb(mg); b = linearToSrgb(mb)
+            // 3. Print/scan the negative into a positive, then encode for the display LUT.
+            var r = linearToSrgb(printPositive(mr, model.print, model.print.biasR))
+            var g = linearToSrgb(printPositive(mg, model.print, model.print.biasG))
+            var b = linearToSrgb(printPositive(mb, model.print, model.print.biasB))
 
             if (model.saturation != 1f) {
                 val l = luma(r, g, b)

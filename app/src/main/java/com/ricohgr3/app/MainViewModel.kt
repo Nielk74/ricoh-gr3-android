@@ -6,12 +6,21 @@ import androidx.lifecycle.viewModelScope
 import com.ricohgr3.app.ble.CameraBleManager
 import com.ricohgr3.app.ble.CameraController
 import com.ricohgr3.app.ble.WlanCredentials
+import com.ricohgr3.app.update.ApkDownloader
+import com.ricohgr3.app.update.AppRelease
+import com.ricohgr3.app.update.AppUpdateChecker
+import com.ricohgr3.app.update.DownloadState
+import com.ricohgr3.app.update.UpdateNetwork
+import com.ricohgr3.app.update.UpdatePreferences
+import com.ricohgr3.app.update.UpdateStatus
 import com.ricohgr3.app.wifi.CameraCredentialStore
 import com.ricohgr3.app.wifi.CameraWifiSession
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -37,6 +46,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _transport = MutableStateFlow<Transport?>(null)
     val transport: StateFlow<Transport?> = _transport.asStateFlow()
 
+    private val updatePreferences = UpdatePreferences(app.applicationContext)
+    private val updateClient = UpdateNetwork.createClient()
+    private val updateChecker = AppUpdateChecker(
+        client = updateClient,
+        json = UpdateNetwork.createJson(),
+    )
+    private val apkDownloader = ApkDownloader(
+        context = app.applicationContext,
+        client = updateClient,
+    )
+    private var updateDownloadJob: Job? = null
+
+    private val _updateStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
+    val updateStatus: StateFlow<UpdateStatus> = _updateStatus.asStateFlow()
+
+    private val _updateDownload = MutableStateFlow<DownloadState>(DownloadState.Idle)
+    val updateDownload: StateFlow<DownloadState> = _updateDownload.asStateFlow()
+
+    private val _updateDismissed = MutableStateFlow(false)
+    val updateDismissed: StateFlow<Boolean> = _updateDismissed.asStateFlow()
+
     /**
      * The Wi-Fi AP session (null on API < 29, where [CameraWifiSession] is unsupported). Owns the
      * join-and-bind state machine; its [CameraWifiSession.state] drives the connect flow's Wi-Fi
@@ -45,6 +75,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val wifiSession: CameraWifiSession? = CameraWifiSession.createOrNull(app.applicationContext)
 
     init {
+        viewModelScope.launch { maybeAutoCheckForUpdates() }
+
         // Keep the join-flow flags consistent with the actual session state:
         //  - once Connected, the join succeeded → drop the one-shot intent so a later credential
         //    re-read can't re-trigger an auto-join (bug: intent outliving its action).
@@ -215,9 +247,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _wifiJoinRequested.value = false
     }
 
+    /** Check the public GitHub repository at most once every 24 hours. */
+    private suspend fun maybeAutoCheckForUpdates() {
+        val lastCheck = updatePreferences.lastCheckMillis.first()
+        val now = System.currentTimeMillis()
+        if (now - lastCheck < UpdateCheckIntervalMillis) return
+
+        _updateStatus.value = UpdateStatus.Checking
+        _updateStatus.value = updateChecker.check()
+        updatePreferences.setLastCheckMillis(now)
+    }
+
+    fun dismissUpdate() {
+        _updateDismissed.value = true
+    }
+
+    fun downloadAndInstallUpdate() {
+        val release = (_updateStatus.value as? UpdateStatus.Available)?.release ?: return
+        downloadRelease(release)
+    }
+
+    private fun downloadRelease(release: AppRelease) {
+        if (updateDownloadJob?.isActive == true) return
+        _updateDownload.value = DownloadState.Downloading(0f)
+        updateDownloadJob = viewModelScope.launch {
+            apkDownloader.downloadAndInstall(release).collect { state ->
+                _updateDownload.value = state
+            }
+        }
+    }
+
     override fun onCleared() {
         wifiSession?.disconnect()
         ble.close()
         super.onCleared()
+    }
+
+    private companion object {
+        const val UpdateCheckIntervalMillis = 24L * 60L * 60L * 1000L
     }
 }

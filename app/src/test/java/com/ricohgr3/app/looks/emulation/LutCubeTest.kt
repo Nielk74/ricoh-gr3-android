@@ -83,13 +83,14 @@ class LutCubeTest {
         assertTrue("white stays near white", white.first > 0.9f)
     }
 
-    @Test fun strongGradeShapesQuarterTonesWithoutMovingTheGreyPivot() {
-        // Camera JPEGs already have a base tone curve. The print transform should shape lower/
-        // upper tones visibly while keeping neutral mid-grey stable instead of double-developing.
+    @Test fun pairedNegativeAndPrintShapeQuarterTonesWithoutMovingTheGreyPivot() {
+        // Camera JPEGs already have a base tone curve. A steeper negative can shape lower tones,
+        // while a separate print exposure deliberately returns neutral mid-grey to its pivot.
         val model = FilmLutFactory.Model(
             r = FilmLutFactory.Channel(contrast = 0.5f, shoulder = 0.85f),
             g = FilmLutFactory.Channel(contrast = 0.5f, shoulder = 0.85f),
             b = FilmLutFactory.Channel(contrast = 0.5f, shoulder = 0.85f),
+            print = FilmLutFactory.PrintStage(exposureEv = 0.35f),
             saturation = 1.25f,
         )
         val lut = FilmLutFactory.build(model)
@@ -99,6 +100,30 @@ class LutCubeTest {
         assertTrue("lower quarter receives visible print contrast ($quarter)", quarter < 0.23f)
         val red = sample(lut, 0.7f, 0.2f, 0.2f)
         assertTrue("high-sat model widens red-green separation", (red.first - red.second) > (0.7f - 0.2f) * 0.5f)
+    }
+
+    @Test fun neutralNegativeAndPrintAreAnIdentityPair() {
+        val lut = FilmLutFactory.build(FilmLutFactory.Model(), size = 33)
+        for (value in listOf(0.05f, 0.18f, 0.5f, 0.82f, 0.97f)) {
+            val (r, g, b) = sample(lut, value, value, value)
+            assertEquals("neutral R at $value", value, r, 0.002f)
+            assertEquals("neutral G at $value", value, g, 0.002f)
+            assertEquals("neutral B at $value", value, b, 0.002f)
+        }
+    }
+
+    @Test fun dyeLayerCrossoverChangesWithExposure() {
+        val entry = FilmLookCatalog.entryFor("cinestill800t")!!
+        val lut = FilmLutFactory.build(entry.model)
+        val shadow = sample(lut, 0.20f, 0.20f, 0.20f)
+        val highlight = sample(lut, 0.84f, 0.84f, 0.84f)
+        val shadowBlueMinusRed = shadow.third - shadow.first
+        val highlightBlueMinusRed = highlight.third - highlight.first
+        assertTrue(
+            "CineStill layer colour must vary by exposure zone " +
+                "(shadow=$shadowBlueMinusRed highlight=$highlightBlueMinusRed)",
+            kotlin.math.abs(shadowBlueMinusRed - highlightBlueMinusRed) > 0.003f,
+        )
     }
 
     @Test fun channelsCanDivergeForColourCrossover() {

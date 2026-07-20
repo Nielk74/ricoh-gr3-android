@@ -2,6 +2,7 @@ package com.ricohgr3.app.looks.emulation
 
 import com.ricohgr3.app.looks.emulation.FilmLutFactory.Channel
 import com.ricohgr3.app.looks.emulation.FilmLutFactory.Model
+import com.ricohgr3.app.looks.emulation.FilmLutFactory.PrintStage
 import com.ricohgr3.app.looks.emulation.FilmLutFactory.crossTalk
 
 /**
@@ -26,6 +27,7 @@ object FilmLookCatalog {
         adaptive: AdaptiveParams = AdaptiveParams(),
         splitTone: SplitTone = SplitTone.NONE,
         skinTone: SkinToneParams = SkinToneParams.NONE,
+        foliageTone: FoliageToneParams = FoliageToneParams.NONE,
         skyTone: SkyToneParams = SkyToneParams.NONE,
         halation: HalationParams = HalationParams.NONE,
         grain: GrainParams = GrainParams.NONE,
@@ -36,6 +38,7 @@ object FilmLookCatalog {
             lutAsset = null,
             splitTone = splitTone,
             skinTone = skinTone,
+            foliageTone = foliageTone,
             skyTone = skyTone,
             halation = halation,
             grain = grain,
@@ -46,11 +49,17 @@ object FilmLookCatalog {
         model = model,
     )
 
-    private fun grain(amount: Float, size: Float, seed: Long) = GrainParams(
+    private fun grain(
+        amount: Float,
+        size: Float,
+        clumping: Float,
+        seed: Long,
+    ) = GrainParams(
         amount = amount,
         size = size,
         shadowBias = 0.52f,
         chroma = 0.06f,
+        clumping = clumping,
         seed = seed,
     )
 
@@ -62,6 +71,28 @@ object FilmLookCatalog {
         protection = protection,
         naturalness = naturalness,
         saturationCeiling = saturationCeiling,
+    )
+
+    private fun print(
+        contrast: Float,
+        toe: Float,
+        shoulder: Float,
+        exposureEv: Float = 0f,
+        biasR: Float = 0f,
+        biasG: Float = 0f,
+        biasB: Float = 0f,
+        blackPoint: Float = 0.0005f,
+        paperWhite: Float = 0.992f,
+    ) = PrintStage(
+        contrast = contrast,
+        toe = toe,
+        shoulder = shoulder,
+        exposureEv = exposureEv,
+        biasR = biasR,
+        biasG = biasG,
+        biasB = biasB,
+        blackPoint = blackPoint,
+        paperWhite = paperWhite,
     )
 
     val entries: List<Entry> = listOf(
@@ -82,12 +113,19 @@ object FilmLookCatalog {
                 amount = 0.78f,
             ),
             skyTone = SkyToneParams(cyanShift = 0.22f),
-            grain = grain(amount = 0.020f, size = 1.7f, seed = 400),
+            foliageTone = FoliageToneParams(cyanShift = 0.14f),
+            grain = grain(amount = 0.058f, size = 1.65f, clumping = 0.13f, seed = 400),
             model = Model(
                 r = Channel(contrast = 0.23f, toe = 0.035f, shoulder = 0.82f, gain = 1.035f),
                 g = Channel(contrast = 0.24f, toe = 0.025f, shoulder = 0.78f, gain = 1.0f),
                 b = Channel(contrast = 0.27f, toe = 0.012f, shoulder = 0.70f, gain = 0.97f),
                 crossTalk = crossTalk(0.025f, warm = 0.008f),
+                print = print(
+                    contrast = 0.92f,
+                    toe = 0.10f,
+                    shoulder = 0.44f,
+                    exposureEv = 0.02f,
+                ),
                 saturation = 0.91f,
             ),
         ),
@@ -109,12 +147,19 @@ object FilmLookCatalog {
                 amount = 0.82f,
             ),
             skyTone = SkyToneParams(cyanShift = 0.25f),
-            grain = grain(amount = 0.030f, size = 1.9f, seed = 800),
+            foliageTone = FoliageToneParams(cyanShift = 0.16f),
+            grain = grain(amount = 0.088f, size = 1.95f, clumping = 0.22f, seed = 800),
             model = Model(
                 r = Channel(contrast = 0.28f, toe = 0.025f, shoulder = 0.78f, gain = 1.045f),
                 g = Channel(contrast = 0.29f, toe = 0.018f, shoulder = 0.74f, gain = 1.0f),
                 b = Channel(contrast = 0.32f, toe = 0f, shoulder = 0.66f, gain = 0.955f),
                 crossTalk = crossTalk(0.028f, warm = 0.010f),
+                print = print(
+                    contrast = 0.94f,
+                    toe = 0.11f,
+                    shoulder = 0.40f,
+                    exposureEv = 0.015f,
+                ),
                 saturation = 0.94f,
             ),
         ),
@@ -134,12 +179,18 @@ object FilmLookCatalog {
                 highR = 0.040f, highG = 0.027f, highB = 0f,
                 amount = 0.82f,
             ),
-            grain = grain(amount = 0.024f, size = 1.8f, seed = 200),
+            grain = grain(amount = 0.031f, size = 1.75f, clumping = 0.15f, seed = 200),
             model = Model(
                 r = Channel(contrast = 0.31f, toe = 0.038f, shoulder = 0.70f, gain = 1.05f),
                 g = Channel(contrast = 0.31f, toe = 0.026f, shoulder = 0.68f, gain = 1.005f),
                 b = Channel(contrast = 0.34f, toe = 0.010f, shoulder = 0.62f, gain = 0.93f),
                 crossTalk = crossTalk(0.032f, warm = 0.014f),
+                print = print(
+                    contrast = 0.98f,
+                    toe = 0.08f,
+                    shoulder = 0.34f,
+                    exposureEv = 0.01f,
+                ),
                 saturation = 1.01f,
             ),
         ),
@@ -159,12 +210,20 @@ object FilmLookCatalog {
                 naturalness = 0.68f,
                 saturationCeiling = 0.64f,
             ),
-            grain = grain(amount = 0.014f, size = 1.35f, seed = 100),
+            grain = grain(amount = 0.018f, size = 1.25f, clumping = 0.06f, seed = 100),
             model = Model(
                 r = Channel(contrast = 0.39f, toe = -0.012f, shoulder = 0.78f, gain = 1.015f),
                 g = Channel(contrast = 0.38f, toe = -0.010f, shoulder = 0.80f, gain = 1.0f),
                 b = Channel(contrast = 0.40f, toe = -0.014f, shoulder = 0.82f, gain = 1.0f),
                 crossTalk = crossTalk(0.018f),
+                print = print(
+                    contrast = 1.06f,
+                    toe = -0.02f,
+                    shoulder = 0.32f,
+                    exposureEv = -0.01f,
+                    blackPoint = 0.0002f,
+                    paperWhite = 0.996f,
+                ),
                 saturation = 1.14f,
             ),
         ),
@@ -184,7 +243,7 @@ object FilmLookCatalog {
                 highR = 0.004f, highG = 0.018f, highB = 0.008f,
                 amount = 0.70f,
             ),
-            grain = grain(amount = 0.026f, size = 1.75f, seed = 404),
+            grain = grain(amount = 0.034f, size = 1.75f, clumping = 0.16f, seed = 404),
             model = Model(
                 r = Channel(contrast = 0.32f, toe = 0.005f, shoulder = 0.68f, gain = 0.985f),
                 g = Channel(contrast = 0.31f, toe = 0.015f, shoulder = 0.72f, gain = 1.025f),
@@ -193,6 +252,11 @@ object FilmLookCatalog {
                     0.955f, 0.050f, -0.005f,
                     0.018f, 0.964f, 0.018f,
                     0.002f, 0.045f, 0.953f,
+                ),
+                print = print(
+                    contrast = 1.01f,
+                    toe = 0.04f,
+                    shoulder = 0.32f,
                 ),
                 saturation = 1.07f,
             ),
@@ -221,12 +285,18 @@ object FilmLookCatalog {
                 strength = 1.05f,
                 tintR = 1f, tintG = 0.006f, tintB = 0.012f,
             ),
-            grain = grain(amount = 0.034f, size = 2f, seed = 801),
+            grain = grain(amount = 0.046f, size = 2.05f, clumping = 0.25f, seed = 801),
             model = Model(
                 r = Channel(contrast = 0.28f, toe = 0.014f, shoulder = 0.78f, gain = 0.94f),
                 g = Channel(contrast = 0.27f, toe = 0.024f, shoulder = 0.82f, gain = 1.0f),
                 b = Channel(contrast = 0.29f, toe = 0.035f, shoulder = 0.86f, gain = 1.07f),
                 crossTalk = crossTalk(0.025f),
+                print = print(
+                    contrast = 0.96f,
+                    toe = 0.09f,
+                    shoulder = 0.42f,
+                    exposureEv = 0.01f,
+                ),
                 saturation = 0.98f,
             ),
         ),
@@ -253,12 +323,18 @@ object FilmLookCatalog {
                 strength = 0.22f,
                 tintR = 1f, tintG = 0.28f, tintB = 0.09f,
             ),
-            grain = grain(amount = 0.018f, size = 1.6f, seed = 250),
+            grain = grain(amount = 0.024f, size = 1.55f, clumping = 0.10f, seed = 250),
             model = Model(
                 r = Channel(contrast = 0.19f, toe = 0.035f, shoulder = 0.90f, gain = 1.018f),
                 g = Channel(contrast = 0.19f, toe = 0.032f, shoulder = 0.90f, gain = 1.0f),
                 b = Channel(contrast = 0.21f, toe = 0.025f, shoulder = 0.86f, gain = 0.978f),
                 crossTalk = crossTalk(0.035f, warm = 0.006f),
+                print = print(
+                    contrast = 0.88f,
+                    toe = 0.14f,
+                    shoulder = 0.56f,
+                    exposureEv = 0.03f,
+                ),
                 saturation = 0.94f,
             ),
         ),
@@ -286,12 +362,18 @@ object FilmLookCatalog {
                 strength = 0.30f,
                 tintR = 1f, tintG = 0.14f, tintB = 0.035f,
             ),
-            grain = grain(amount = 0.024f, size = 1.8f, seed = 500),
+            grain = grain(amount = 0.034f, size = 1.85f, clumping = 0.18f, seed = 500),
             model = Model(
                 r = Channel(contrast = 0.20f, toe = 0.038f, shoulder = 0.90f, gain = 0.96f),
                 g = Channel(contrast = 0.19f, toe = 0.035f, shoulder = 0.92f, gain = 1.0f),
                 b = Channel(contrast = 0.21f, toe = 0.042f, shoulder = 0.88f, gain = 1.05f),
                 crossTalk = crossTalk(0.036f, warm = 0.006f),
+                print = print(
+                    contrast = 0.90f,
+                    toe = 0.15f,
+                    shoulder = 0.55f,
+                    exposureEv = 0.02f,
+                ),
                 saturation = 0.92f,
             ),
         ),
@@ -318,12 +400,20 @@ object FilmLookCatalog {
                 strength = 0.15f,
                 tintR = 1f, tintG = 0.24f, tintB = 0.08f,
             ),
-            grain = grain(amount = 0.019f, size = 1.7f, seed = 18),
+            grain = grain(amount = 0.025f, size = 1.65f, clumping = 0.10f, seed = 18),
             model = Model(
                 r = Channel(contrast = 0.15f, toe = 0.050f, shoulder = 0.96f, gain = 1.005f),
                 g = Channel(contrast = 0.15f, toe = 0.048f, shoulder = 0.98f, gain = 1.0f),
                 b = Channel(contrast = 0.17f, toe = 0.045f, shoulder = 0.94f, gain = 0.99f),
                 crossTalk = crossTalk(0.035f),
+                print = print(
+                    contrast = 0.82f,
+                    toe = 0.19f,
+                    shoulder = 0.65f,
+                    exposureEv = 0.05f,
+                    blackPoint = 0.001f,
+                    paperWhite = 0.986f,
+                ),
                 saturation = 0.82f,
             ),
         ),
@@ -341,13 +431,21 @@ object FilmLookCatalog {
                 grainScale = 0.92f,
             ),
             grain = GrainParams(
-                amount = 0.043f, size = 2.0f, shadowBias = 0.55f, chroma = 0f,
-                seed = 320,
+                amount = 0.056f, size = 2.1f, shadowBias = 0.58f, chroma = 0f,
+                clumping = 0.30f, seed = 320,
             ),
             model = Model(
                 r = Channel(contrast = 0.46f, toe = -0.018f, shoulder = 0.72f),
                 g = Channel(contrast = 0.46f, toe = -0.018f, shoulder = 0.72f),
                 b = Channel(contrast = 0.46f, toe = -0.018f, shoulder = 0.72f),
+                print = print(
+                    contrast = 1.11f,
+                    toe = -0.04f,
+                    shoulder = 0.28f,
+                    exposureEv = -0.02f,
+                    blackPoint = 0.0002f,
+                    paperWhite = 0.996f,
+                ),
                 saturation = 0f,
             ),
         ),
@@ -365,13 +463,21 @@ object FilmLookCatalog {
                 grainScale = 0.90f,
             ),
             grain = GrainParams(
-                amount = 0.038f, size = 1.9f, shadowBias = 0.50f, chroma = 0f,
-                seed = 405,
+                amount = 0.050f, size = 2.0f, shadowBias = 0.54f, chroma = 0f,
+                clumping = 0.26f, seed = 405,
             ),
             model = Model(
                 r = Channel(contrast = 0.30f, toe = 0.025f, shoulder = 0.86f),
                 g = Channel(contrast = 0.30f, toe = 0.025f, shoulder = 0.86f),
                 b = Channel(contrast = 0.30f, toe = 0.025f, shoulder = 0.86f),
+                print = print(
+                    contrast = 0.98f,
+                    toe = 0.08f,
+                    shoulder = 0.44f,
+                    exposureEv = 0.02f,
+                    blackPoint = 0.001f,
+                    paperWhite = 0.988f,
+                ),
                 saturation = 0f,
             ),
         ),
