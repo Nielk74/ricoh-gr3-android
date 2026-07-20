@@ -3,6 +3,7 @@ package com.ricohgr3.app.gallery
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.ricohgr3.app.data.EditedExportQuality
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoItem
 import com.ricohgr3.app.data.PhotoRepository
@@ -34,6 +35,8 @@ data class GalleryUiState(
     val stickyIntensity: Float = 1f,
     /** Last-used renderer contract, sticky alongside the stock and intensity. */
     val stickyRenderingIntent: RenderingIntent = RenderingIntent.SMART,
+    /** Persisted quality for developed JPEG copies; High matches pre-selector behaviour. */
+    val editedExportQuality: EditedExportQuality = EditedExportQuality.HIGH,
 ) {
     val hasSelection: Boolean get() = selected.isNotEmpty()
     val selectionCount: Int get() = selected.size
@@ -94,6 +97,11 @@ class GalleryViewModel(
             viewModelScope.launch {
                 store.renderingIntentFlow.collect { persisted ->
                     _state.update { it.copy(stickyRenderingIntent = persisted) }
+                }
+            }
+            viewModelScope.launch {
+                store.editedExportQualityFlow.collect { persisted ->
+                    _state.update { it.copy(editedExportQuality = persisted) }
                 }
             }
         }
@@ -211,6 +219,14 @@ class GalleryViewModel(
             _state.value.stickyIntensity,
             renderingIntent,
         )
+    }
+
+    /** Change and persist the quality used for the next developed JPEG copy. */
+    fun setEditedExportQuality(quality: EditedExportQuality) {
+        _state.update { it.copy(editedExportQuality = quality) }
+        stickyLookStore?.let { store ->
+            viewModelScope.launch { store.setEditedExportQuality(quality) }
+        }
     }
 
     private fun persistSticky(

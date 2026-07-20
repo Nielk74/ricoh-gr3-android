@@ -7,6 +7,7 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
 import androidx.compose.ui.graphics.toArgb
+import com.ricohgr3.app.data.EditedExportQuality
 import com.ricohgr3.app.data.PhotoExporter
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoRepository
@@ -31,8 +32,14 @@ import kotlinx.coroutines.withContext
  * error — nothing is swallowed.
  */
 
-/** Result of a save: the display name it landed under in the gallery. */
-data class SaveOutcome(val displayName: String, val edited: Boolean)
+/** Result of a save, including the exact edited-JPEG decisions when an edit was rendered. */
+data class SaveOutcome(
+    val displayName: String,
+    val edited: Boolean,
+    val width: Int? = null,
+    val height: Int? = null,
+    val jpegQuality: Int? = null,
+)
 
 /**
  * Download the full-resolution original from the camera and write it, untouched, to the gallery.
@@ -77,6 +84,7 @@ suspend fun saveEdited(
     iso: Int? = null,
     effectStrength: Float = 1f,
     renderingIntent: RenderingIntent = RenderingIntent.SMART,
+    exportQuality: EditedExportQuality = EditedExportQuality.HIGH,
 ): SaveOutcome {
     // Standard (null) is the as-shot baseline — nothing to bake; keep the pristine original.
     if (filmLookId == null) {
@@ -84,10 +92,10 @@ suspend fun saveEdited(
     }
     val isRaw = id.file.substringAfterLast('.', "").equals("DNG", true)
     // The develop runs on the CPU and allocates several full-frame buffers. Scale the decode
-    // against this process's actual heap ceiling, with an absolute 6 MP cap. Fetch/decode lives
-    // in a helper scope so the compressed camera payload becomes collectible before the spatial
-    // pipeline reaches its peak.
-    val maxPixels = developmentPixelLimit(Runtime.getRuntime().maxMemory())
+    // against this process's actual heap ceiling and the user's explicit quality preset.
+    // Fetch/decode lives in a helper scope so the compressed camera payload becomes collectible
+    // before the spatial pipeline reaches its peak.
+    val maxPixels = developmentPixelLimit(Runtime.getRuntime().maxMemory(), exportQuality)
     val decoded = fetchDecodedForEdit(id, repository, maxPixels)
         ?: if (isRaw) {
             throw java.io.IOException(
@@ -126,8 +134,20 @@ suspend fun saveEdited(
 
     // DNG develops are finished renditions → always JPEG (see kdoc). JPEG originals keep .jpg.
     val name = editedName(id.file)
-    exporter.saveBitmap(edited, name)
-    return SaveOutcome(displayName = name, edited = true)
+    val width = edited.width
+    val height = edited.height
+    try {
+        exporter.saveBitmap(edited, name, quality = exportQuality.jpegQuality)
+    } finally {
+        edited.recycle()
+    }
+    return SaveOutcome(
+        displayName = name,
+        edited = true,
+        width = width,
+        height = height,
+        jpegQuality = exportQuality.jpegQuality,
+    )
 }
 
 /**
@@ -176,12 +196,6 @@ private suspend fun fetchDecodedForEdit(
     }
 }
 
-/**
- * Hard quality ceiling for an on-device develop. The GR III shoots ~24 MP, while 6 MP is enough
- * to retain fine grain in a finished mobile JPEG without materialising the full sensor frame.
- */
-internal const val MAX_EDIT_PIXELS = 6_000_000
-
 /** Keep at least a VIEW-class output even on an unusually constrained test/runtime heap. */
 internal const val MIN_EDIT_PIXELS = 720 * 480
 
@@ -197,20 +211,25 @@ private const val PEAK_DEVELOP_BYTES_PER_PIXEL = 34L
  *
  * At most 40% of the heap is assigned to the film working set, leaving the rest for Compose,
  * camera payloads, ML state, codecs, and VM overhead. Typical results are about 1.6 MP on a
- * 128 MiB heap, 3.1 MP on 256 MiB, and the full 6 MP ceiling on 512 MiB and above.
+ * 128 MiB heap, 3.1 MP on 256 MiB, 6.3 MP on 512 MiB, and 12.6 MP on 1 GiB. Compact
+ * and High apply a lower preset cap; Maximum uses the full heap-derived limit.
  */
-internal fun developmentPixelLimit(maxHeapBytes: Long): Int {
+internal fun developmentPixelLimit(
+    maxHeapBytes: Long,
+    exportQuality: EditedExportQuality = EditedExportQuality.HIGH,
+): Int {
     val nonNegativeHeap = maxHeapBytes.coerceAtLeast(0L)
     val workingBytes = (nonNegativeHeap / 10L) * 4L
     return (workingBytes / PEAK_DEVELOP_BYTES_PER_PIXEL)
-        .coerceIn(MIN_EDIT_PIXELS.toLong(), MAX_EDIT_PIXELS.toLong())
+        .coerceIn(MIN_EDIT_PIXELS.toLong(), exportQuality.pixelCap.toLong())
         .toInt()
 }
 
 /**
- * Decode [bytes] to an ARGB_8888 bitmap whose pixel count is at most [maxPixels], using
- * `inSampleSize` so the full image is never fully materialised in memory. Returns null if the
- * bytes aren't a decodable image.
+ * Decode [bytes] to an ARGB_8888 bitmap whose pixel count is at most [maxPixels]. BitmapFactory's
+ * power-of-two sampling first bounds the intermediate decode, then a filtered resize uses the
+ * selected budget instead of silently dropping to the next much smaller sampling tier. Returns
+ * null if the bytes aren't a decodable image.
  *
  * JPEG/PNG go through [BitmapFactory]. **DNG** is not decodable by [BitmapFactory] on most
  * devices, so it falls through to [decodeRawBounded], which uses the platform [ImageDecoder]
@@ -224,8 +243,13 @@ private fun decodeBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
         return decodeRawBounded(bytes, maxPixels)
     }
 
+    val (targetWidth, targetHeight) =
+        boundedDecodeDimensions(probe.outWidth, probe.outHeight, maxPixels)
     var sample = 1
-    while ((probe.outWidth / sample).toLong() * (probe.outHeight / sample) > maxPixels) {
+    while (
+        probe.outWidth / (sample * 2) >= targetWidth &&
+        probe.outHeight / (sample * 2) >= targetHeight
+    ) {
         sample *= 2
     }
     val opts = BitmapFactory.Options().apply {
@@ -236,7 +260,25 @@ private fun decodeBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
         inPreferredColorSpace =
             android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
     }
-    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: decodeRawBounded(bytes, maxPixels)
+    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        ?: return decodeRawBounded(bytes, maxPixels)
+    if (decoded.width == targetWidth && decoded.height == targetHeight) return decoded
+    return Bitmap.createScaledBitmap(decoded, targetWidth, targetHeight, true)
+        .also { scaled -> if (scaled !== decoded) decoded.recycle() }
+}
+
+/** Aspect-preserving decode target that never exceeds [maxPixels]. */
+internal fun boundedDecodeDimensions(width: Int, height: Int, maxPixels: Int): Pair<Int, Int> {
+    require(width > 0 && height > 0) { "Image dimensions must be positive" }
+    require(maxPixels > 0) { "Pixel ceiling must be positive" }
+    val sourcePixels = width.toLong() * height.toLong()
+    if (sourcePixels <= maxPixels.toLong()) return width to height
+
+    val scale = kotlin.math.sqrt(maxPixels.toDouble() / sourcePixels.toDouble())
+    val targetWidth = (width * scale).toInt().coerceAtLeast(1)
+    val targetHeight = (height * scale).toInt().coerceAtLeast(1)
+    check(targetWidth.toLong() * targetHeight <= maxPixels.toLong())
+    return targetWidth to targetHeight
 }
 
 /**
@@ -259,9 +301,10 @@ private fun decodeRawBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
             val w = info.size.width
             val h = info.size.height
             if (w > 0 && h > 0) {
-                var sample = 1
-                while ((w / sample).toLong() * (h / sample) > maxPixels) sample *= 2
-                if (sample > 1) decoder.setTargetSize(w / sample, h / sample)
+                val (targetWidth, targetHeight) = boundedDecodeDimensions(w, h, maxPixels)
+                if (targetWidth != w || targetHeight != h) {
+                    decoder.setTargetSize(targetWidth, targetHeight)
+                }
             }
         }.let { bmp ->
             // Ensure ARGB_8888 for the engine's getPixels/setPixels.

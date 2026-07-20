@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.1 — 2026-07-20
+
+- Added a persisted **Edited export** quality selector with Compact (up to 1.5 MP / JPEG 92),
+  High (up to 6 MP / JPEG 97), and Maximum (device-safe maximum / JPEG 100) choices.
+- Kept High as the migration-safe default while allowing Maximum to remove the previous fixed
+  6 MP cap; the heap-derived safety bound remains in place to avoid crashing lower-memory phones.
+- Used the full selected pixel budget instead of falling to BitmapFactory's next lower
+  power-of-two sampling tier.
+- Made each edited-save confirmation disclose its actual pixel dimensions and JPEG quality.
+
 ## v0.8.0 — 2026-07-20
 
 - Rebuilt film rendering around exact sRGB/linear-light colour math, explicit negative and print

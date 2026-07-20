@@ -1,5 +1,6 @@
 package com.ricohgr3.app.gallery
 
+import com.ricohgr3.app.data.EditedExportQuality
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.looks.emulation.RenderingIntent
@@ -257,5 +258,16 @@ class GalleryViewModelTest {
         val s = vm.state.value
         assertEquals("classic_neg", s.stickyLook)
         assertEquals(0, s.editedCount)
+    }
+
+    @Test
+    fun `edited export quality updates without editing a frame`() = runTest {
+        val vm = viewModel(FakeCameraWifiController())
+
+        assertEquals(EditedExportQuality.HIGH, vm.state.value.editedExportQuality)
+        vm.setEditedExportQuality(EditedExportQuality.MAXIMUM)
+
+        assertEquals(EditedExportQuality.MAXIMUM, vm.state.value.editedExportQuality)
+        assertEquals(0, vm.state.value.editedCount)
     }
 }

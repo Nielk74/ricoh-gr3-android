@@ -11,7 +11,7 @@ captures.
 The app is independent and unofficial. It uses the camera's community-documented BLE GATT and
 local HTTP interfaces; it does not require Ricoh's Image Sync app or a cloud account.
 
-> **Current release: v0.8.0.** The app, protocol clients, colour-science core, update path, and
+> **Current release: v0.8.1.** The app, protocol clients, colour-science core, update path, and
 > automated tests are implemented. Real-camera radio behaviour still needs validation across GR
 > III/IIIx firmware and Android vendors; see [Current limitations](#current-limitations).
 
@@ -22,7 +22,7 @@ local HTTP interfaces; it does not require Ricoh's Image Sync app or a cloud acc
 | Bluetooth | Scan, connect, read camera identity and WLAN credentials, cache credentials in private app storage, fire the shutter, and expose basic camera state. |
 | Wi-Fi | Join the camera AP on Android 10+, bind traffic to its internet-less network, show MJPEG live view, fire the Wi-Fi shutter with retry, and read camera properties. |
 | Library | Browse a three-column camera contact sheet, inspect metadata, distinguish RAW files, select batches, download JPEG/DNG originals, and mark edited frames. |
-| Viewer | Render the real developed preview, press and hold for before/after, choose a sticky look, adjust effect from 50–150%, reset, and save original or edited copies to `Pictures/GR3`. |
+| Viewer | Render the real developed preview, press and hold for before/after, choose a sticky look, adjust effect from 50–150%, select edited-export quality, reset, and save original or edited copies to `Pictures/GR3`. |
 | Film Lab | Eleven provenance-labelled film/cinema looks with literal Stock and scene-protected Smart rendering, negative-to-print density, natural skin isolation, physical-scale diffusion, two-lobe halation, and film-plane grain. |
 | Updates | Check GitHub Releases automatically at most once every 24 hours or manually on demand, verify the published APK SHA-256, and hand installation to Android. |
 
@@ -123,8 +123,9 @@ Important details:
 - **Grain:** one infinite crystal field lives in physical film coordinates. Each preview/export
   pixel integrates its footprint analytically, preserving the same field and apparent crystal
   scale across resolution. Density variation peaks through low-mid/mid tones, rolls off near
-  black/white, and uses larger, more irregular crystals for faster stocks. Edited JPEGs export at
-  quality 97 to retain that texture.
+  black/white, and uses larger, more irregular crystals for faster stocks. Edited JPEGs offer
+  Compact (JPEG 92), High (JPEG 97), and Maximum (JPEG 100) output so file size and retained
+  texture are an explicit choice.
 - **DNG boundary:** Android, not this app, renders the DNG into display RGB. It is not a
   scene-linear RAW workflow and can vary by device; the viewer labels that limitation.
 - **No mystery LUT pack:** the negative, print, colour-coupling, grain, and spatial models are
@@ -192,7 +193,8 @@ that permission to track or upload location.
 4. Open **Library** for contact-sheet browsing and transfers, or **Live View** for the MJPEG
    viewfinder and Wi-Fi shutter.
 5. Open a frame, choose a film look, hold the image to compare with the original, set 50–150%
-   intensity, and save either the untouched original or a developed copy.
+   intensity, choose **Compact**, **High**, or **Maximum** edited-export quality, and save either
+   the untouched original or a developed copy.
 
 Original JPEG/DNG downloads are preserved byte-for-byte. Developed output is a new JPEG and never
 overwrites the camera original.
@@ -318,9 +320,11 @@ behaviour on every physical camera and phone.
 - Live view does not yet provide tap-to-focus or the complete exposure-control surface.
 - CPU film development is the portable baseline and can take time on older phones. A future AGSL
   path can accelerate preview.
-- Edited development uses a heap-aware resolution ceiling: roughly 1.6 MP on a 128 MiB heap,
-  3.1 MP on 256 MiB, and at most 6 MP on 512 MiB or larger heaps. The original 24 MP JPEG/DNG
-  remains available and can be saved untouched.
+- Edited development is selectable: Compact caps work at 1.5 MP / JPEG 92; High retains the former
+  6 MP / JPEG 97 behaviour; Maximum uses JPEG 100 and removes the fixed resolution cap. Every mode
+  still obeys a heap-aware safety ceiling (roughly 1.6 MP on a 128 MiB heap, 3.1 MP on 256 MiB,
+  6.3 MP on 512 MiB, and 12.6 MP on 1 GiB). The original 24 MP JPEG/DNG remains available and can
+  always be saved untouched.
 - The working bitmap and edited export remain 8-bit sRGB/ARGB_8888 and JPEG. A high-bit-depth,
   scene-linear, wide-gamut path is still required before this is a reference RAW developer.
 - DNG rendering uses Android's platform `ImageDecoder` on API 28+ and therefore varies by device.

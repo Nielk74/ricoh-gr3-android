@@ -151,6 +151,8 @@ fun AppNavHost(
                     stickyLook = state.stickyLook,
                     stickyIntensity = state.stickyIntensity,
                     stickyRenderingIntent = state.stickyRenderingIntent,
+                    editedExportQuality = state.editedExportQuality,
+                    onEditedExportQualityChange = galleryViewModel::setEditedExportQuality,
                     onApplyLook = { look, intensity, renderingIntent ->
                         galleryViewModel.applyLook(photoId, look, intensity, renderingIntent)
                     },

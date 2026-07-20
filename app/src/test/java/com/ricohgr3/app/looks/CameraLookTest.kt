@@ -1,5 +1,6 @@
 package com.ricohgr3.app.looks
 
+import com.ricohgr3.app.data.EditedExportQuality
 import com.ricohgr3.app.looks.emulation.RenderingIntent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -103,5 +104,26 @@ class CameraLookTest {
         }
         assertEquals(RenderingIntent.SMART, LookPreferenceCodec.decodeRenderingIntent(null))
         assertEquals(RenderingIntent.SMART, LookPreferenceCodec.decodeRenderingIntent("future"))
+    }
+
+    @Test
+    fun editedExportQualityPreferenceCodecIsMigrationSafe() {
+        for (quality in EditedExportQuality.entries) {
+            assertEquals(
+                quality,
+                LookPreferenceCodec.decodeEditedExportQuality(
+                    LookPreferenceCodec.encodeEditedExportQuality(quality),
+                ),
+            )
+        }
+        // Missing and future values retain the exact pre-selector behaviour.
+        assertEquals(
+            EditedExportQuality.HIGH,
+            LookPreferenceCodec.decodeEditedExportQuality(null),
+        )
+        assertEquals(
+            EditedExportQuality.HIGH,
+            LookPreferenceCodec.decodeEditedExportQuality("future"),
+        )
     }
 }

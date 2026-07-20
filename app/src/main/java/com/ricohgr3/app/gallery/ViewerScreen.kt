@@ -39,6 +39,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.ricohgr3.app.data.EditedExportQuality
 import com.ricohgr3.app.data.PhotoExporter
 import com.ricohgr3.app.data.PhotoId
 import com.ricohgr3.app.data.PhotoRepository
@@ -81,6 +82,8 @@ fun ViewerScreen(
     stickyLook: String?,
     stickyIntensity: Float,
     stickyRenderingIntent: RenderingIntent,
+    editedExportQuality: EditedExportQuality,
+    onEditedExportQualityChange: (EditedExportQuality) -> Unit,
     onApplyLook: (String?, Float, RenderingIntent) -> Unit,
     onResetLook: () -> Unit,
     onBack: () -> Unit,
@@ -135,11 +138,11 @@ fun ViewerScreen(
                             iso = parseIso(info?.sv),
                             effectStrength = effectStrength,
                             renderingIntent = renderingIntent,
+                            exportQuality = editedExportQuality,
                         )
                     }
                     else saveOriginal(id, repository, exporter)
-                if (outcome.edited) "Saved ${outcome.displayName} to Pictures/GR3"
-                else "Saved to Pictures/GR3"
+                saveOutcomeMessage(outcome)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e // never swallow structured-concurrency cancellation
             } catch (t: Throwable) {
@@ -309,6 +312,10 @@ fun ViewerScreen(
                 value = effectStrength,
                 onValueChange = { effectStrength = it },
             )
+            EditedExportQualityControl(
+                value = editedExportQuality,
+                onValueChange = onEditedExportQualityChange,
+            )
         }
 
         ViewerActions(
@@ -401,6 +408,21 @@ private fun SaveBar(
 /** Android's platform DNG renderer is only available from API 28. */
 internal fun supportsPlatformDngDevelop(sdkInt: Int): Boolean =
     sdkInt >= android.os.Build.VERSION_CODES.P
+
+/** Make the actual edited-export dimensions and JPEG setting visible after every save. */
+internal fun saveOutcomeMessage(outcome: SaveOutcome): String {
+    if (!outcome.edited) return "Saved to Pictures/GR3"
+    val details = buildList {
+        if (outcome.width != null && outcome.height != null) {
+            add("${outcome.width}×${outcome.height}")
+        }
+        outcome.jpegQuality?.let { add("JPEG $it") }
+    }
+    return buildString {
+        append("Saved ${outcome.displayName} to Pictures/GR3")
+        if (details.isNotEmpty()) append(" · ${details.joinToString(" · ")}")
+    }
+}
 
 @Composable
 private fun ViewerHeader(
@@ -581,6 +603,57 @@ private fun RenderingIntentControl(
 
 private val RenderingIntent.displayName: String
     get() = if (this == RenderingIntent.STOCK) "Stock" else "Smart"
+
+/** Explicit edited-copy resolution and JPEG choice; originals always remain untouched. */
+@Composable
+private fun EditedExportQualityControl(
+    value: EditedExportQuality,
+    onValueChange: (EditedExportQuality) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "EDITED EXPORT",
+                style = MaterialTheme.typography.labelSmall,
+                color = GrTheme.colors.inkSoft,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            EditedExportQuality.entries.forEach { quality ->
+                TextButton(onClick = { onValueChange(quality) }) {
+                    Text(
+                        quality.displayName.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (quality == value) {
+                            GrTheme.colors.accent
+                        } else {
+                            GrTheme.colors.inkSoft
+                        },
+                    )
+                }
+            }
+        }
+        Text(
+            text = exportQualitySummary(value),
+            style = MaterialTheme.typography.labelSmall,
+            color = GrTheme.colors.inkSoft,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+    }
+}
+
+internal fun exportQualitySummary(quality: EditedExportQuality): String =
+    when (quality) {
+        EditedExportQuality.COMPACT -> "Up to 1.5 MP · JPEG 92"
+        EditedExportQuality.HIGH -> "Up to 6 MP · JPEG 97"
+        EditedExportQuality.MAXIMUM ->
+            "Highest resolution this phone can safely develop · JPEG 100"
+    }
 
 /** 50–150% stock intensity. 100% is authored; 5% ticks plus debounce bound preview churn. */
 @Composable

@@ -178,8 +178,9 @@ output pixel rather than redrawing output-resolution noise.
   the main thread. The implementation allocates axis kernels rather than a full-frame grain plate.
 
 Per-stock density amount ranges from 0.018 (Ektar 100, finest) to 0.088 (Portra 800, the most
-pronounced colour stock in the authored set); the edited JPEG export uses quality 97 so the
-final encode does not immediately erase the fine structure. The cross-scanner evidence,
+pronounced colour stock in the authored set). The edited JPEG selector makes the final encode
+explicit: Compact uses quality 92, High uses 97, and Maximum uses 100 to retain the most fine
+structure the Android encoder allows. The cross-scanner evidence,
 matched-output measurements, and Portra 400/800 decision are recorded in
 [`PORTRA_GRAIN_CALIBRATION.md`](PORTRA_GRAIN_CALIBRATION.md).
 
@@ -298,8 +299,8 @@ and retained highlight separation.
 
 ### DNG (platform RAW rendition) → JPEG
 `PhotoSave.saveEdited` now develops **DNG** originals too (previously they were saved untouched):
-the DNG is decoded via the platform `ImageDecoder` path (`decodeRawBounded`, API 28+,
-downsampled to a heap-aware ceiling no larger than `MAX_EDIT_PIXELS`), given a mild **RAW base
+the DNG is decoded via the platform `ImageDecoder` path (`decodeRawBounded`, API 28+), downsampled
+to the selected Compact/High cap or Maximum's device-heap safety ceiling, given a mild **RAW base
 grade** (`DevelopPipeline.PreGrade`: contrast + slight saturation — RAW previews decode flatter
 than the camera JPEG the models were tuned against), then run through the film look. The result is
 **always saved as JPEG** (a developed rendition is a finished image, not sensor data). Edited DNG

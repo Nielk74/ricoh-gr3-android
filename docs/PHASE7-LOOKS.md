@@ -112,6 +112,10 @@ Research + design: **`research/FILM_EMULATION.md`**.
 - [x] **Stock intensity** — a persisted 50–150% control scales LUT, split tone, grain, and
       halation while bounded scene protection stops at its authored 100% value. Per-frame,
       sticky-next-frame, batch-apply, preview, and edited export all carry the same strength.
+- [x] **Edited-export quality** — a persisted Compact / High / Maximum selector controls both
+      the development resolution cap and JPEG encoding quality. High preserves the original
+      6 MP / JPEG 97 behaviour; Maximum removes that fixed cap while retaining a device-heap
+      safety ceiling, and every successful save reports its actual dimensions and JPEG setting.
 - [x] **High-resolution review lab** — `:tools:renderReviewSite` generates 3000 px original,
       100%, and 150% masters for every local JPEG/DNG example; the browser UI provides split
       compare, 100/200% inspection, a false-colour skin-isolation audit, intensity interpolation,

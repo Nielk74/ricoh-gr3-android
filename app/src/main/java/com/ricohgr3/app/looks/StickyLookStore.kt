@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.ricohgr3.app.data.EditedExportQuality
 import com.ricohgr3.app.looks.emulation.FilmLookCatalog
 import com.ricohgr3.app.looks.emulation.RenderingIntent
 import kotlinx.coroutines.flow.Flow
@@ -32,6 +33,13 @@ object LookPreferenceCodec {
         value?.let { encoded ->
             RenderingIntent.entries.firstOrNull { it.name == encoded }
         } ?: RenderingIntent.SMART
+
+    fun encodeEditedExportQuality(quality: EditedExportQuality): String = quality.name
+
+    fun decodeEditedExportQuality(value: String?): EditedExportQuality =
+        value?.let { encoded ->
+            EditedExportQuality.entries.firstOrNull { it.name == encoded }
+        } ?: EditedExportQuality.HIGH
 }
 
 /** The app-wide DataStore for look preferences. */
@@ -59,6 +67,11 @@ class StickyLookStore(private val context: Context) {
         LookPreferenceCodec.decodeRenderingIntent(prefs[LAST_RENDERING_INTENT_KEY])
     }
 
+    /** Edited-export quality; old installs retain the former 6 MP / JPEG 97 behaviour. */
+    val editedExportQualityFlow: Flow<EditedExportQuality> = context.looksDataStore.data.map { prefs ->
+        LookPreferenceCodec.decodeEditedExportQuality(prefs[EDITED_EXPORT_QUALITY_KEY])
+    }
+
     /** Persist [look] as the sticky last-used film-stock id (`null` = Standard). */
     suspend fun setLook(
         look: String?,
@@ -73,9 +86,17 @@ class StickyLookStore(private val context: Context) {
         }
     }
 
+    /** Persist the user's edited-export resolution/encoding preference independently. */
+    suspend fun setEditedExportQuality(quality: EditedExportQuality) {
+        context.looksDataStore.edit { prefs ->
+            prefs[EDITED_EXPORT_QUALITY_KEY] = LookPreferenceCodec.encodeEditedExportQuality(quality)
+        }
+    }
+
     private companion object {
         val LAST_LOOK_KEY = stringPreferencesKey("last_look")
         val LAST_INTENSITY_KEY = floatPreferencesKey("last_look_intensity")
         val LAST_RENDERING_INTENT_KEY = stringPreferencesKey("last_look_rendering_intent")
+        val EDITED_EXPORT_QUALITY_KEY = stringPreferencesKey("edited_export_quality")
     }
 }
