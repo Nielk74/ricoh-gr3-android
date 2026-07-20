@@ -2,14 +2,15 @@ package com.ricohgr3.app.looks.emulation
 
 /**
  * A film-emulation look: a 3D LUT plus the parametric spatial/tonal layers that a pointwise
- * colour map can't express (sky-selective colour, split toning, halation, grain). Rendered on-device by
- * [DevelopEngine]. See `research/FILM_EMULATION.md` §4.
+ * colour map can't express (selective skin/sky colour, split toning, halation, grain). Rendered
+ * on-device by [DevelopEngine]. See `research/FILM_EMULATION.md` §4.
  *
  * @property id stable identifier (asset key / persisted value).
  * @property displayName UI label.
  * @property lutAsset path under `assets/` to the `.cube` file, or `null` for no colour LUT
  *   (identity — useful for looks defined purely by the parametric layers).
  * @property splitTone shadow/highlight tint, applied after the LUT.
+ * @property skinTone connected-region skin isolation and natural colour protection.
  * @property skyTone top-connected blue-sky colour adjustment; disabled by default.
  * @property halation stock-coloured highlight bloom; [HalationParams.NONE] to disable.
  * @property grain film grain; [GrainParams.NONE] to disable.
@@ -28,6 +29,7 @@ data class FilmLook(
     val displayName: String,
     val lutAsset: String?,
     val splitTone: SplitTone = SplitTone.NONE,
+    val skinTone: SkinToneParams = SkinToneParams.NONE,
     val skyTone: SkyToneParams = SkyToneParams.NONE,
     val halation: HalationParams = HalationParams.NONE,
     val grain: GrainParams = GrainParams.NONE,
@@ -36,6 +38,32 @@ data class FilmLook(
     val lutInputGamma: Float = 1f,
     val adaptive: AdaptiveParams = AdaptiveParams.NONE,
 )
+
+/**
+ * Selective skin-colour handling applied after the stock LUT and split tone. Detection is
+ * spatially coherent rather than a global hue key, and the correction preserves rendered
+ * luminance and all local texture.
+ *
+ * @property protection how strongly an excessive stock hue/chroma move is pulled back toward
+ *   the captured complexion. Beneficial desaturation is deliberately retained.
+ * @property naturalness strength of the soft saturation ceiling for strongly coloured light.
+ * @property saturationCeiling normal upper saturation for detected skin; deep shadows receive
+ *   a small extra allowance so warm-lit and dark complexions are not forced toward beige.
+ */
+data class SkinToneParams(
+    val protection: Float,
+    val naturalness: Float,
+    val saturationCeiling: Float = 0.68f,
+) {
+    val enabled: Boolean get() = protection > 0f || naturalness > 0f
+
+    companion object {
+        val NONE = SkinToneParams(
+            protection = 0f,
+            naturalness = 0f,
+        )
+    }
+}
 
 /**
  * A restrained colour move applied only to blue regions connected to the top edge of the frame.

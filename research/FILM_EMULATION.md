@@ -20,7 +20,11 @@ display-referred photographs:
 3. `FilmLutFactory` builds licence-clean 33³ stock transforms with a bounded display-referred
    print curve, linear-light channel gain/dye cross-talk, and stock saturation.
 4. The stock transform is blended rather than blindly replacing every pixel. Existing strong
-   casts reduce added stock colour, and a soft skin-hue mask reduces destructive shifts.
+   casts reduce added stock colour. For colour stocks, a bundled on-device face detector first
+   establishes a semantic region; normalized-RGB chromaticity then trims hair, glasses, beard,
+   clothing, and background. The accepted complexion is corrected after LUT + split tone around
+   the rendered luminance, preserving face lighting and texture. If face detection fails, the
+   correction fails closed instead of becoming a global warm-colour key.
 5. Split toning is luminance-neutral. Portra's blue-to-cyan response is limited to blue regions
    connected to the top frame edge, so it changes sky rather than clothing/signage. Halation is a
    linear-light, edge-only spill whose radius follows output size; the bright source core is
@@ -99,16 +103,17 @@ darktable film simulations, Fuji's in-camera Film Simulation) is some subset of:
 
 7. **Optional: vignette, soft bloom, slight desaturation of extremes, black/white point.**
 
-**Order matters:** linearise → tone → colour(LUT) → split-tone → selective sky colour →
-halation → (re-encode) → grain → vignette. Grain and vignette go last, in display space.
+**Order matters:** linearise → tone → colour(LUT) → split-tone → selective complexion colour →
+selective sky colour → halation → (re-encode) → grain → vignette. Grain and vignette go last, in
+display space.
 
 ### The 3D LUT is the workhorse
 A **3D LUT** partitions RGB space into a grid (typically 17³, 33³, or 64³); each vertex
 holds an output RGB. At runtime you find the cube a pixel falls in and **trilinear-
 interpolate** the 8 corners. One lookup captures tone + colour + cross-talk together — which
-is exactly why the industry ships film looks as `.cube` files. Split-tone, connected-sky colour,
-halation, and grain are layered *around* the LUT because they're spatial or parametric and
-don't belong in a pointwise colour map.
+is exactly why the industry ships film looks as `.cube` files. Split-tone, face-gated complexion
+colour, connected-sky colour, halation, and grain are layered *around* the LUT because they're
+spatial or parametric and don't belong in a pointwise colour map.
 
 **File formats:** `.cube` (Adobe/Resolve text format — easiest to parse), `.3dl`, and
 **HaldCLUT** (a PNG that is the identity LUT laid out as an image; apply any edit to the
@@ -179,16 +184,16 @@ tints) in a small manifest. That keeps looks data-driven — adding a stock is d
 ```
 looks/emulation/
   LutCube.kt          # parse .cube -> FloatArray(size^3 * 3) + size; trilinear sample()
-  FilmLook.kt         # data: id, name, lut asset, toneCurve?, splitTone, halation, grain
-  FilmLookCatalog.kt  # loads manifest (JSON in assets) -> List<FilmLook>
-  DevelopEngine.kt    # applyCpu(bitmap, look): linearise -> LUT -> splitTone -> halation
-                      #                          -> encode -> grain -> vignette
-  Grain.kt            # correlated luminance-weighted noise field
-  Halation.kt         # highlight threshold -> blur -> tint -> screen
+  FilmLook.kt         # stock + skin/sky/split-tone/halation/grain parameters
+  FilmLookCatalog.kt  # curated authored stock models
+  FaceRegionDetector  # bundled on-device ML Kit semantic face bounds
+  SkinTone.kt         # proxy chromaticity mask + luminance-preserving correction
+  DevelopPipeline.kt  # scene -> LUT -> split -> skin -> sky -> halation -> grain
+  DevelopEngine.kt    # Android Bitmap/face-detection glue over the pure pipeline
   (later) LutShader.kt / AgslDevelop.kt  # SDK33+ preview fast-path
 ```
 
-- **Pure-Kotlin core** (`LutCube`, curve math, grain field, split-tone) has **no Android
+- **Pure-Kotlin core** (`LutCube`, curve math, `SkinTone`, grain field, split-tone) has **no Android
   deps** → JVM unit tests, consistent with the repo's "BLE/device can't run in CI, so keep
   logic pure" rule.
 - `DevelopEngine.applyCpu` operates on a pixel `IntArray` off the main thread (coroutine),

@@ -116,6 +116,9 @@ dependencies {
     // Persistence for the sticky last-used look (Phase 6c / 7.1).
     implementation(libs.androidx.datastore.preferences)
 
+    // Bundled on-device model: portrait rendering must not depend on a first-run download.
+    implementation(libs.mlkit.face.detection)
+
     // Wi-Fi HTTP /v1 layer: OkHttp transport + kotlinx.serialization JSON parsing.
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)

@@ -47,7 +47,6 @@ data class AdaptiveParams(
     val shadowProtection: Float = 0.8f,
     val highlightProtection: Float = 0.9f,
     val saturationGuard: Float = 0.8f,
-    val skinProtection: Float = 0.22f,
     val grainScale: Float = 1f,
 ) {
     companion object {
@@ -59,7 +58,6 @@ data class AdaptiveParams(
             shadowProtection = 0f,
             highlightProtection = 0f,
             saturationGuard = 0f,
-            skinProtection = 0f,
             grainScale = 1f,
         )
     }
@@ -73,7 +71,6 @@ data class SceneAdjustment(
     val contrast: Float,
     val saturation: Float,
     val lookStrength: Float,
-    val skinProtection: Float,
     val grainScale: Float,
     val halationScale: Float,
 ) {
@@ -85,7 +82,6 @@ data class SceneAdjustment(
             contrast = 0f,
             saturation = 1f,
             lookStrength = 1f,
-            skinProtection = 0f,
             grainScale = 1f,
             halationScale = 1f,
         )
@@ -297,7 +293,6 @@ object SceneAnalyzer {
             contrast = contrast,
             saturation = saturation,
             lookStrength = lookStrength,
-            skinProtection = params.skinProtection,
             grainScale = grainScale,
             halationScale = halationScale,
         )

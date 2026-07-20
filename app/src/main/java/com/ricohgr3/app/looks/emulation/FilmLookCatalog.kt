@@ -9,8 +9,8 @@ import com.ricohgr3.app.looks.emulation.FilmLutFactory.crossTalk
  *
  * These looks are hand-authored, licence-clean print transforms rather than unidentified LUT
  * packs. Their static colour character is only half of the result: every entry also carries
- * [AdaptiveParams], so [DevelopPipeline] can protect highlights, low-key intent, skin, existing
- * lighting colour, and high-ISO texture before/while applying the stock.
+ * [AdaptiveParams] and [SkinToneParams], so [DevelopPipeline] can protect highlights, low-key
+ * intent, natural complexions, existing lighting colour, and high-ISO texture.
  *
  * The names describe aesthetic emulations, not measured manufacturer profiles.
  */
@@ -25,6 +25,7 @@ object FilmLookCatalog {
         model: Model,
         adaptive: AdaptiveParams = AdaptiveParams(),
         splitTone: SplitTone = SplitTone.NONE,
+        skinTone: SkinToneParams = SkinToneParams.NONE,
         skyTone: SkyToneParams = SkyToneParams.NONE,
         halation: HalationParams = HalationParams.NONE,
         grain: GrainParams = GrainParams.NONE,
@@ -34,6 +35,7 @@ object FilmLookCatalog {
             displayName = name,
             lutAsset = null,
             splitTone = splitTone,
+            skinTone = skinTone,
             skyTone = skyTone,
             halation = halation,
             grain = grain,
@@ -52,6 +54,16 @@ object FilmLookCatalog {
         seed = seed,
     )
 
+    private fun skin(
+        protection: Float,
+        naturalness: Float,
+        saturationCeiling: Float = 0.68f,
+    ) = SkinToneParams(
+        protection = protection,
+        naturalness = naturalness,
+        saturationCeiling = saturationCeiling,
+    )
+
     val entries: List<Entry> = listOf(
         entry(
             id = "portra400",
@@ -62,8 +74,8 @@ object FilmLookCatalog {
                 lookStrength = 0.82f,
                 highlightProtection = 1f,
                 saturationGuard = 0.95f,
-                skinProtection = 0.30f,
             ),
+            skinTone = skin(protection = 0.38f, naturalness = 0.45f),
             splitTone = SplitTone(
                 shadowR = 0f, shadowG = 0.006f, shadowB = 0.016f,
                 highR = 0.030f, highG = 0.017f, highB = 0f,
@@ -88,9 +100,9 @@ object FilmLookCatalog {
                 lookStrength = 0.80f,
                 highlightProtection = 1f,
                 saturationGuard = 0.95f,
-                skinProtection = 0.28f,
                 grainScale = 0.92f,
             ),
+            skinTone = skin(protection = 0.40f, naturalness = 0.48f),
             splitTone = SplitTone(
                 shadowR = 0.003f, shadowG = 0.006f, shadowB = 0.017f,
                 highR = 0.035f, highG = 0.018f, highB = 0f,
@@ -115,8 +127,8 @@ object FilmLookCatalog {
                 lookStrength = 0.78f,
                 highlightProtection = 0.95f,
                 saturationGuard = 0.9f,
-                skinProtection = 0.22f,
             ),
+            skinTone = skin(protection = 0.36f, naturalness = 0.46f),
             splitTone = SplitTone(
                 shadowR = 0.018f, shadowG = 0.010f, shadowB = 0f,
                 highR = 0.040f, highG = 0.027f, highB = 0f,
@@ -141,7 +153,11 @@ object FilmLookCatalog {
                 shadowProtection = 0.72f,
                 highlightProtection = 1f,
                 saturationGuard = 1f,
-                skinProtection = 0.12f,
+            ),
+            skinTone = skin(
+                protection = 0.58f,
+                naturalness = 0.68f,
+                saturationCeiling = 0.64f,
             ),
             grain = grain(amount = 0.014f, size = 1.35f, seed = 100),
             model = Model(
@@ -161,8 +177,8 @@ object FilmLookCatalog {
                 lookStrength = 0.80f,
                 highlightProtection = 0.9f,
                 saturationGuard = 0.95f,
-                skinProtection = 0.18f,
             ),
+            skinTone = skin(protection = 0.48f, naturalness = 0.54f),
             splitTone = SplitTone(
                 shadowR = 0f, shadowG = 0.012f, shadowB = 0.020f,
                 highR = 0.004f, highG = 0.018f, highB = 0.008f,
@@ -191,9 +207,9 @@ object FilmLookCatalog {
                 shadowProtection = 0.9f,
                 highlightProtection = 1f,
                 saturationGuard = 1f,
-                skinProtection = 0.16f,
                 grainScale = 0.88f,
             ),
+            skinTone = skin(protection = 0.48f, naturalness = 0.54f),
             splitTone = SplitTone(
                 shadowR = 0f, shadowG = 0.012f, shadowB = 0.040f,
                 highR = 0.026f, highG = 0.010f, highB = 0f,
@@ -224,8 +240,8 @@ object FilmLookCatalog {
                 shadowProtection = 0.9f,
                 highlightProtection = 1f,
                 saturationGuard = 0.9f,
-                skinProtection = 0.24f,
             ),
+            skinTone = skin(protection = 0.38f, naturalness = 0.44f),
             splitTone = SplitTone(
                 shadowR = 0f, shadowG = 0.010f, shadowB = 0.025f,
                 highR = 0.026f, highG = 0.014f, highB = 0f,
@@ -256,9 +272,9 @@ object FilmLookCatalog {
                 shadowProtection = 0.92f,
                 highlightProtection = 1f,
                 saturationGuard = 0.95f,
-                skinProtection = 0.20f,
                 grainScale = 0.92f,
             ),
+            skinTone = skin(protection = 0.44f, naturalness = 0.50f),
             splitTone = SplitTone(
                 shadowR = 0f, shadowG = 0.014f, shadowB = 0.036f,
                 highR = 0.036f, highG = 0.017f, highB = 0f,
@@ -289,8 +305,8 @@ object FilmLookCatalog {
                 shadowProtection = 0.95f,
                 highlightProtection = 1f,
                 saturationGuard = 0.85f,
-                skinProtection = 0.20f,
             ),
+            skinTone = skin(protection = 0.34f, naturalness = 0.40f),
             splitTone = SplitTone(
                 shadowR = 0f, shadowG = 0.008f, shadowB = 0.018f,
                 highR = 0.018f, highG = 0.010f, highB = 0.003f,
@@ -322,7 +338,6 @@ object FilmLookCatalog {
                 shadowProtection = 0.62f,
                 highlightProtection = 0.86f,
                 saturationGuard = 0f,
-                skinProtection = 0f,
                 grainScale = 0.92f,
             ),
             grain = GrainParams(
@@ -347,7 +362,6 @@ object FilmLookCatalog {
                 shadowProtection = 0.82f,
                 highlightProtection = 1f,
                 saturationGuard = 0f,
-                skinProtection = 0f,
                 grainScale = 0.90f,
             ),
             grain = GrainParams(

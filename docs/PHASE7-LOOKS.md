@@ -89,9 +89,10 @@ Research + design: **`research/FILM_EMULATION.md`**.
 - [x] **CPU adaptive film engine** — pure-Kotlin, JVM-tested, in `looks/emulation/`:
       `SceneAnalyzer` (robust percentiles/cast/texture → bounded per-frame decisions),
       `FilmLutFactory` (display-referred print curve + linear dye cross-talk), `DevelopPipeline`
-      (adaptive tone/mix + skin protection → luminance-neutral split-tone → connected-sky colour
-      → stock-coloured edge-only halation → non-tiling ISO-aware density grain), and
-      `DevelopEngine` (Bitmap glue). The 11-stock catalog includes
+      (adaptive tone/mix → luminance-neutral split-tone → face-gated, luminance-preserving
+      complexion naturalisation → connected-sky colour → stock-coloured edge-only halation →
+      non-tiling ISO-aware density grain), and `DevelopEngine` (Bitmap glue + bundled on-device
+      ML Kit face bounds). The 11-stock catalog includes
       Portra 400/800, Gold, Ektar, Superia, CineStill/Vision3, Eterna, Tri-X, and HP5.
       Preview and edited export use the same render.
 - [x] **Stock intensity** — a persisted 50–150% control scales LUT, split tone, grain, and
@@ -99,7 +100,8 @@ Research + design: **`research/FILM_EMULATION.md`**.
       sticky-next-frame, batch-apply, preview, and edited export all carry the same strength.
 - [x] **High-resolution review lab** — `:tools:renderReviewSite` generates 3000 px original,
       100%, and 150% masters for every local JPEG/DNG example; the browser UI provides split
-      compare, 100/200% inspection, intensity interpolation, and exportable review notes.
+      compare, 100/200% inspection, a false-colour skin-isolation audit, intensity interpolation,
+      and exportable review notes.
 - [x] **Licence-clean runtime assets** — active stock transforms are authored in-repo; no
       unidentified third-party `.cube` or third-party grain scan is required.
 - [x] **Multi-scene calibration loop** — `:tools:renderReferences` produces contact sheets plus

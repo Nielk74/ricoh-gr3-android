@@ -22,6 +22,7 @@ const elements = {
   originalImage: document.querySelector("#originalImage"),
   lookImage: document.querySelector("#lookImage"),
   strongLookImage: document.querySelector("#strongLookImage"),
+  skinMaskImage: document.querySelector("#skinMaskImage"),
   lookLabel: document.querySelector("#lookLabel"),
   imageLoading: document.querySelector("#imageLoading"),
   resolution: document.querySelector("#resolution"),
@@ -249,6 +250,7 @@ function renderCurrentResult() {
   elements.sceneFacts.innerHTML = `
     <span>${scene.profile.tone}</span>
     <span>${scene.profile.contrast}</span>
+    <span>${scene.faces || 0} face${scene.faces === 1 ? "" : "s"} isolated</span>
     <span>${Math.round(scene.profile.clipped * 100)}% clipped highlights</span>
     <span>${Math.round(scene.profile.crushed * 100)}% deep black</span>
   `;
@@ -279,6 +281,7 @@ function loadResultImages(scene, look, result) {
       result.strongSrc || result.src,
       `${scene.name}, ${look.name} at 150%`,
     ],
+    [elements.skinMaskImage, scene.skinMask, `${scene.name}, isolated skin mask`],
   ];
   let pending = sources.length;
 
@@ -399,10 +402,22 @@ function exportReview() {
 
 function setMode(mode) {
   state.mode = mode;
-  elements.imageStage.classList.remove("mode-original", "mode-compare", "mode-look");
+  elements.imageStage.classList.remove(
+    "mode-original",
+    "mode-compare",
+    "mode-look",
+    "mode-mask",
+  );
   elements.imageStage.classList.add(`mode-${mode}`);
   const button = elements.viewModes.querySelector(`[data-mode="${mode}"]`);
   if (button) setActiveButton(elements.viewModes, button);
+  if (mode === "mask") {
+    const scene = currentScene();
+    elements.openImage.href = scene?.skinMask || "#";
+    elements.openImage.title = "Open full-resolution skin isolation audit";
+  } else {
+    applyIntensityLayers();
+  }
 }
 
 function setIntensity(value) {
@@ -587,7 +602,12 @@ function preloadNeighbors() {
   const nextScene = state.data.scenes[wrap(state.sceneIndex + 1, state.data.scenes.length)];
   const look = currentLook();
   const nextResult = nextScene.looks[look.id];
-  [nextScene.original, nextResult.src, nextResult.strongSrc || nextResult.src].forEach((src) => {
+  [
+    nextScene.original,
+    nextResult.src,
+    nextResult.strongSrc || nextResult.src,
+    nextScene.skinMask,
+  ].forEach((src) => {
     const image = new Image();
     image.src = src;
   });

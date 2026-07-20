@@ -30,10 +30,12 @@ See [`research/FEASIBILITY.md`](research/FEASIBILITY.md) for the full analysis, 
 
 The app develops captured photos on-device through a scene-adaptive film engine: robust exposure
 analysis, a hand-authored 3D stock transform, luminance-neutral split tone, edge-only halation, and
-ISO-aware optical-density grain. It protects highlight latitude, low-key intent, skin, and existing
-lighting colour instead of applying one fixed LUT strength to every frame. A 50–150% control lets
-the stock character grow without turning scene protection into an HDR effect; preview and export
-use the same setting. The previews below are rendered
+ISO-aware optical-density grain. A bundled on-device face detector gates a chromaticity mask so
+complexions can stay natural without muting red velvet, wood, gold, clothing, hair, glasses, or
+beard detail. It protects highlight latitude, low-key intent, and existing lighting colour instead
+of applying one fixed LUT strength to every frame. A 50–150% control lets the stock character grow
+without turning scene protection into an HDR effect; preview and export use the same setting. The
+previews below are rendered
 by CI from **one neutral, unedited GR III sample** through the **exact same pipeline** the app
 ships, so they're an honest preview of each look — see
 [`docs/FILM_PREVIEWS.md`](docs/FILM_PREVIEWS.md) for how they're generated.

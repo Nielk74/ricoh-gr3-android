@@ -1,7 +1,6 @@
 package com.ricohgr3.app.looks.emulation
 
 import kotlin.math.exp
-import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -13,9 +12,9 @@ import kotlin.math.sqrt
  * `Bitmap` path (see the Android glue in `DevelopEngine`) merely marshals pixels in and out.
  *
  * Pipeline order: optional RAW base → scene analysis/adaptation → adaptively blended stock LUT
- * → luminance-neutral split-tone → optional connected-sky colour → scaled halation →
- * ISO/scene-aware grain. Grain runs last in display space; halation is computed from a
- * linear-light highlight mask.
+ * → luminance-neutral split-tone → connected-region skin naturalisation → optional connected-sky
+ * colour → scaled halation → ISO/scene-aware grain. Grain runs last in display space; halation is
+ * computed from a linear-light highlight mask.
  */
 object DevelopPipeline {
 
@@ -43,7 +42,8 @@ object DevelopPipeline {
     /**
      * Render [look] over the RGB planes [r],[g],[b] in place. Each array is row-major,
      * length `width*height`, sRGB `[0,1]`. [lut] is the parsed colour table (identity if the
-     * look has no `lutAsset`).
+     * look has no `lutAsset`). [faceRegions] are normalized semantic gates from the platform face
+     * detector; an empty list safely disables selective skin correction.
      */
     fun apply(
         r: FloatArray, g: FloatArray, b: FloatArray,
@@ -52,9 +52,11 @@ object DevelopPipeline {
         preGrade: PreGrade? = null,
         iso: Int? = null,
         effectStrength: Float = 1f,
+        faceRegions: List<FaceRegion> = emptyList(),
     ) {
-        val n = width * height
-        val tmp = FloatArray(3)
+        val lutSample = FloatArray(3)
+        val skinOutput = FloatArray(3)
+        val skinScratch = FloatArray(3)
         val effect = effectStrength.coerceIn(0f, 1.5f)
 
         // 0. Optional RAW base grade (before analysis) — only for a genuinely flatter DNG render.
@@ -89,44 +91,111 @@ object DevelopPipeline {
             applySceneAdaptation(r, g, b, adjustment)
         }
 
-        // 2. Colour LUT (tone + colour response + cross-talk), blended over the scene-normalised
-        // input rather than blindly replacing it. Skin-like hues get a small extra protection;
-        // this is intentionally a soft colour safeguard, not a brittle face detector.
-        val g0 = look.lutInputGamma
-        for (i in 0 until n) {
-            val rr = r[i]; val gg = g[i]; val bb = b[i]
-            if (g0 == 1f) lut.sample(rr, gg, bb, tmp)
-            else lut.sample(pow(rr, g0), pow(gg, g0), pow(bb, g0), tmp)
-            val skin = if (adjustment.skinProtection > 0f) skinLikelihood(rr, gg, bb) else 0f
-            val mix = adjustment.lookStrength * (1f - skin * adjustment.skinProtection)
-            r[i] = rr + (tmp[0] - rr) * mix
-            g[i] = gg + (tmp[1] - gg) * mix
-            b[i] = bb + (tmp[2] - bb) * mix
+        // 2. Detect coherent complexion regions from the scene-normalised source. The proxy mask
+        // is intentionally computed before the stock colour transform, then reused during the
+        // full-resolution LUT pass. This avoids globally keying every red/orange object.
+        val skinMask = if (look.skinTone.enabled && effect > 0f) {
+            SkinTone.detect(
+                r,
+                g,
+                b,
+                width,
+                height,
+                faceRegions,
+            ).takeIf { it.hasSkin }
+        } else {
+            null
+        }
+        val skinXMap = skinMask?.let { mask ->
+            IntArray(width) { x ->
+                (x.toLong() * mask.width / width).toInt().coerceIn(0, mask.width - 1)
+            }
         }
 
-        // 3. Split toning (display space, luminance-weighted and luminance-neutral). The previous
-        // additive implementation brightened an image while tinting it, which contributed to
-        // clipped, washed-out filters.
+        // 3. Apply the stock LUT and split tone, then naturalise only accepted skin regions. The
+        // correction works around the rendered luminance, so it cannot flatten face lighting or
+        // blur texture; halation and film-plane grain still happen afterwards.
+        val g0 = look.lutInputGamma
         val st = look.splitTone
-        if (st.amount > 0f) {
-            val shadowTintLuma = luma(st.shadowR, st.shadowG, st.shadowB)
-            val highTintLuma = luma(st.highR, st.highG, st.highB)
-            val amount = st.amount * layerMix
-            for (i in 0 until n) {
-                val l = luma(r[i], g[i], b[i])
-                // Smoothly concentrate the tints near the ends; leave mid-grey mostly to the LUT.
-                val hw = l * l * amount
-                val inv = 1f - l
-                val sw = inv * inv * amount
-                r[i] = (r[i] +
-                    (st.shadowR - shadowTintLuma) * sw +
-                    (st.highR - highTintLuma) * hw).coerceIn(0f, 1f)
-                g[i] = (g[i] +
-                    (st.shadowG - shadowTintLuma) * sw +
-                    (st.highG - highTintLuma) * hw).coerceIn(0f, 1f)
-                b[i] = (b[i] +
-                    (st.shadowB - shadowTintLuma) * sw +
-                    (st.highB - highTintLuma) * hw).coerceIn(0f, 1f)
+        val splitAmount = st.amount * layerMix
+        val shadowTintLuma = luma(st.shadowR, st.shadowG, st.shadowB)
+        val highTintLuma = luma(st.highR, st.highG, st.highB)
+        for (y in 0 until height) {
+            val row = y * width
+            val skinRow = skinMask?.let { mask ->
+                (y.toLong() * mask.height / height).toInt()
+                    .coerceIn(0, mask.height - 1) * mask.width
+            } ?: 0
+            for (x in 0 until width) {
+                val i = row + x
+                val sourceR = r[i]
+                val sourceG = g[i]
+                val sourceB = b[i]
+                if (g0 == 1f) {
+                    lut.sample(sourceR, sourceG, sourceB, lutSample)
+                } else {
+                    lut.sample(
+                        pow(sourceR, g0),
+                        pow(sourceG, g0),
+                        pow(sourceB, g0),
+                        lutSample,
+                    )
+                }
+                var renderedR =
+                    sourceR + (lutSample[0] - sourceR) * adjustment.lookStrength
+                var renderedG =
+                    sourceG + (lutSample[1] - sourceG) * adjustment.lookStrength
+                var renderedB =
+                    sourceB + (lutSample[2] - sourceB) * adjustment.lookStrength
+
+                // Display-space, luminance-weighted and luminance-neutral split toning. Keeping
+                // this in the same pass lets the skin correction evaluate the complete stock
+                // colour rather than only the LUT.
+                if (splitAmount > 0f) {
+                    val l = luma(renderedR, renderedG, renderedB)
+                    // Smoothly concentrate the tints near the ends; leave mid-grey mostly to the
+                    // LUT.
+                    val hw = l * l * splitAmount
+                    val inv = 1f - l
+                    val sw = inv * inv * splitAmount
+                    renderedR = (renderedR +
+                        (st.shadowR - shadowTintLuma) * sw +
+                        (st.highR - highTintLuma) * hw).coerceIn(0f, 1f)
+                    renderedG = (renderedG +
+                        (st.shadowG - shadowTintLuma) * sw +
+                        (st.highG - highTintLuma) * hw).coerceIn(0f, 1f)
+                    renderedB = (renderedB +
+                        (st.shadowB - shadowTintLuma) * sw +
+                        (st.highB - highTintLuma) * hw).coerceIn(0f, 1f)
+                }
+
+                val maskWeight = if (skinMask != null && skinXMap != null) {
+                    skinMask.weights[skinRow + skinXMap[x]]
+                } else {
+                    0f
+                }
+                if (maskWeight > 0f) {
+                    SkinTone.naturalize(
+                        sourceR = sourceR,
+                        sourceG = sourceG,
+                        sourceB = sourceB,
+                        renderedR = renderedR,
+                        renderedG = renderedG,
+                        renderedB = renderedB,
+                        maskWeight = maskWeight,
+                        params = look.skinTone,
+                        effectStrength = effect,
+                        out = skinOutput,
+                        scratch = skinScratch,
+                    )
+                    r[i] = skinOutput[0]
+                    g[i] = skinOutput[1]
+                    b[i] = skinOutput[2]
+                } else {
+                    r[i] = renderedR
+                    g[i] = renderedG
+                    b[i] = renderedB
+                }
             }
         }
 
@@ -229,30 +298,6 @@ object DevelopPipeline {
             g[i] = gg.coerceIn(0f, 1f)
             b[i] = bb.coerceIn(0f, 1f)
         }
-    }
-
-    /** Soft HSV-ish likelihood for common skin hues; deliberately broad and never binary. */
-    private fun skinLikelihood(r: Float, g: Float, b: Float): Float {
-        val max = maxOf(r, g, b)
-        val min = minOf(r, g, b)
-        val delta = max - min
-        if (delta < 0.035f || max < 0.16f || max > 0.98f) return 0f
-        val saturation = delta / max.coerceAtLeast(1e-5f)
-        if (saturation !in 0.08f..0.72f) return 0f
-
-        val hue = when (max) {
-            r -> 60f * ((g - b) / delta).let { if (it < 0f) it + 6f else it }
-            g -> 60f * ((b - r) / delta + 2f)
-            else -> 60f * ((r - g) / delta + 4f)
-        }
-        if (hue !in 3f..62f) return 0f
-        val hueWeight = (1f - abs(hue - 28f) / 34f).coerceIn(0f, 1f)
-        val satWeight = ((saturation - 0.08f) / 0.18f).coerceIn(0f, 1f) *
-            ((0.72f - saturation) / 0.20f).coerceIn(0f, 1f)
-        val lum = luma(r, g, b)
-        val lumWeight = ((lum - 0.10f) / 0.18f).coerceIn(0f, 1f) *
-            ((0.96f - lum) / 0.16f).coerceIn(0f, 1f)
-        return hueWeight * satWeight * lumWeight
     }
 
     /**

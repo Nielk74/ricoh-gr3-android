@@ -59,9 +59,11 @@ python3 -m http.server 8765 --directory build/film-review
 
 Open `http://localhost:8765`. The site keeps every scene at a 3000 px long edge, offers
 original/developed split comparison plus 100% and 200% zoom, and records local Keep/Tweak/Reject
-notes for export. Its 50–150% intensity slider blends between original, a real calibrated 100%
-master, and a real 150% master. The Android preview/export path evaluates the same strength
-directly; 100% and 150% therefore match the site exactly.
+notes for export. The Skin mask view shows the face-detector-gated chromaticity mask in cyan, so
+spill onto clothing, décor, hair, glasses, and beard can be audited at full resolution. Its
+50–150% intensity slider blends between original, a real calibrated 100% master, and a real 150%
+master. The Android preview/export path evaluates the same strength directly; 100% and 150%
+therefore match the site exactly.
 
 ## Licensing / attribution
 

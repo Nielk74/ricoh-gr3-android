@@ -47,11 +47,17 @@ object DevelopEngine {
             bb[i] = (p and 0xFF) / 255f
         }
 
+        val faceRegions = if (look.skinTone.enabled && effectStrength > 0f) {
+            FaceRegionDetector.detect(src)
+        } else {
+            emptyList()
+        }
         DevelopPipeline.apply(
             rr, gg, bb, w, h, look, lut,
             preGrade = preGrade,
             iso = iso,
             effectStrength = effectStrength,
+            faceRegions = faceRegions,
         )
 
         for (i in 0 until n) {

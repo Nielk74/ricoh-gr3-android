@@ -39,6 +39,7 @@ fun reviewSiteMain(args: Array<String>) {
             .map { Source(kind, it) }
     }
     require(sources.isNotEmpty()) { "no prepared review sources in $inputRoot" }
+    val faceRegionsByPath = detectFaceRegions(repo, sources.map { it.file })
 
     val expectedSceneIds =
         sources.mapTo(mutableSetOf()) { "${it.kind}-${it.file.nameWithoutExtension.lowercase()}" }
@@ -55,13 +56,26 @@ fun reviewSiteMain(args: Array<String>) {
         val sceneDir = File(assetsRoot, sceneId).apply { mkdirs() }
         val decoded = ImageIO.read(source.file) ?: error("could not decode ${source.file}")
         val work = toRgb(decoded)
-        println("[${index + 1}/${sources.size}] ${source.kind.uppercase()} ${source.file.name}")
+        val faceRegions = faceRegionsByPath[source.file.canonicalPath].orEmpty()
+        println(
+            "[${index + 1}/${sources.size}] ${source.kind.uppercase()} ${source.file.name} · " +
+                "${faceRegions.size} face${if (faceRegions.size == 1) "" else "s"}",
+        )
 
         writeJpg(work, File(sceneDir, "original.jpg"), quality = 0.96f)
         val thumbWidth = minOf(480, work.width)
         val thumb = if (work.width > thumbWidth) scaleTo(work, thumbWidth) else work
         writeJpg(thumb, File(sceneDir, "thumb.jpg"), quality = 0.86f)
         if (thumb !== work) thumb.flush()
+
+        val skinMask = skinMaskFor(
+            source = work,
+            lookId = "portra400",
+            faceRegions = faceRegions,
+        )
+        val skinMaskImage = maskOverlay(work, skinMask)
+        writeJpg(skinMaskImage, File(sceneDir, "skin-mask.jpg"), quality = 0.94f)
+        skinMaskImage.flush()
 
         val analysisImage = if (work.width > 960) scaleTo(work, 960) else work
         val profile = profileOf(analysisImage)
@@ -72,11 +86,23 @@ fun reviewSiteMain(args: Array<String>) {
             val look = entry.look
             val adjustment = SceneAnalyzer.adjustment(profile, look.adaptive)
             val lut = loadLut(look, lutDir)
-            val output = develop(work, look, lut, effectStrength = 1f)
+            val output = develop(
+                work,
+                look,
+                lut,
+                effectStrength = 1f,
+                faceRegions = faceRegions,
+            )
             val filename = "${look.id}.jpg"
             writeJpg(output, File(sceneDir, filename), quality = 0.94f)
             output.flush()
-            val strongOutput = develop(work, look, lut, effectStrength = 1.5f)
+            val strongOutput = develop(
+                work,
+                look,
+                lut,
+                effectStrength = 1.5f,
+                faceRegions = faceRegions,
+            )
             val strongFilename = "${look.id}-150.jpg"
             writeJpg(strongOutput, File(sceneDir, strongFilename), quality = 0.94f)
             strongOutput.flush()
@@ -109,8 +135,10 @@ fun reviewSiteMain(args: Array<String>) {
               "sourceType":"${source.kind.uppercase()}",
               "width":${work.width},
               "height":${work.height},
+              "faces":${faceRegions.size},
               "thumbnail":"assets/scenes/$sceneId/thumb.jpg",
               "original":"assets/scenes/$sceneId/original.jpg",
+              "skinMask":"assets/scenes/$sceneId/skin-mask.jpg",
               "profile":{
                 "p01":${profile.p01.json()},
                 "p10":${profile.p10.json()},

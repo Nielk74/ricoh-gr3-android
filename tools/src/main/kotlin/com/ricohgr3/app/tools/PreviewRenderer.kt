@@ -1,6 +1,7 @@
 package com.ricohgr3.app.tools
 
 import com.ricohgr3.app.looks.emulation.DevelopPipeline
+import com.ricohgr3.app.looks.emulation.FaceRegion
 import com.ricohgr3.app.looks.emulation.FilmLook
 import com.ricohgr3.app.looks.emulation.FilmLookCatalog
 import com.ricohgr3.app.looks.emulation.FilmLutFactory
@@ -80,6 +81,7 @@ internal fun develop(
     lut: LutCube,
     iso: Int? = null,
     effectStrength: Float = 1f,
+    faceRegions: List<FaceRegion> = emptyList(),
 ): BufferedImage {
     val w = src.width; val h = src.height; val n = w * h
     val r = FloatArray(n); val g = FloatArray(n); val b = FloatArray(n)
@@ -95,6 +97,7 @@ internal fun develop(
         r, g, b, w, h, look, lut,
         iso = iso,
         effectStrength = effectStrength,
+        faceRegions = faceRegions,
     )
     val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
     i = 0

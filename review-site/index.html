@@ -76,6 +76,7 @@
                 <button type="button" data-mode="original">Original</button>
                 <button type="button" class="active" data-mode="compare">Compare</button>
                 <button type="button" data-mode="look">Look</button>
+                <button type="button" data-mode="mask">Skin mask</button>
               </div>
 
               <div class="toolbar-cluster">
@@ -98,11 +99,13 @@
                   <img id="originalImage" class="review-image original-image" alt="" draggable="false" />
                   <img id="lookImage" class="review-image look-image" alt="" draggable="false" />
                   <img id="strongLookImage" class="review-image strong-look-image" alt="" draggable="false" />
+                  <img id="skinMaskImage" class="review-image skin-mask-image" alt="" draggable="false" />
                   <div class="compare-divider" id="compareDivider" aria-hidden="true">
                     <span class="divider-handle">↔</span>
                   </div>
                   <span class="image-label label-original">Original</span>
                   <span class="image-label label-look" id="lookLabel">Look</span>
+                  <span class="image-label label-mask">Skin isolation audit</span>
                   <div class="image-loading" id="imageLoading">
                     <span class="spinner"></span>
                     <span>Loading 3000 px render</span>
@@ -113,8 +116,8 @@
 
             <div class="viewer-footer">
               <p>
-                Drag across the image to compare. Use <kbd>1</kbd> for pixel-level grain,
-                <kbd>F</kbd> for fullscreen, and hold <kbd>Space</kbd> while dragging to pan.
+                Drag to compare, or open Skin mask to audit face isolation. Use <kbd>1</kbd> for
+                pixel-level grain and hold <kbd>Space</kbd> while dragging to pan.
               </p>
               <p class="resolution" id="resolution">—</p>
             </div>

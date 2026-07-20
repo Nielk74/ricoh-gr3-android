@@ -23,6 +23,7 @@ sourceSets {
         kotlin.include(
             "com/ricohgr3/app/tools/**",
             "com/ricohgr3/app/looks/emulation/DevelopPipeline.kt",
+            "com/ricohgr3/app/looks/emulation/SkinTone.kt",
             "com/ricohgr3/app/looks/emulation/SceneAnalyzer.kt",
             "com/ricohgr3/app/looks/emulation/LutCube.kt",
             "com/ricohgr3/app/looks/emulation/FilmLook.kt",
@@ -109,5 +110,24 @@ tasks.register<JavaExec>("renderReviewSite") {
         reviewInput,
         "review-site",
         reviewOutput,
+    )
+}
+
+/** Render high-resolution false-colour overlays for auditing selective skin isolation. */
+tasks.register<JavaExec>("renderSkinMasks") {
+    group = "verification"
+    description = "Render exact scene-adapted skin masks for the portrait calibration loop"
+    val reviewInput =
+        (project.findProperty("reviewInput") as String?) ?: "build/review-sources"
+    val skinMaskOutput =
+        (project.findProperty("skinMaskOutput") as String?) ?: "build/skin-mask-review"
+    if (!project.hasProperty("reviewInput")) dependsOn(prepareReviewSources)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("com.ricohgr3.app.tools.SkinMaskRendererKt")
+    maxHeapSize = "2g"
+    args(
+        rootProject.projectDir.absolutePath,
+        reviewInput,
+        skinMaskOutput,
     )
 }

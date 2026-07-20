@@ -100,7 +100,6 @@ class SceneAnalyzerTest {
                 contrast = 0f,
                 saturation = 1f,
                 lookStrength = 1f,
-                skinProtection = 0f,
                 grainScale = 1f,
                 halationScale = 1f,
             ),

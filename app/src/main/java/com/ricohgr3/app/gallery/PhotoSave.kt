@@ -50,7 +50,8 @@ suspend fun saveOriginal(
  *
  * [filmLookId] is a [com.ricohgr3.app.looks.emulation.FilmLookCatalog] stock id (or `null` for
  * Standard). When a [loader] is provided the frame is genuinely **developed** through the film
- * engine ([DevelopEngine]: LUT + split-tone + halation + grain). Without a loader (the JVM path)
+ * engine ([DevelopEngine]: LUT + split-tone + selective skin/sky + halation + grain). Without a
+ * loader (the JVM path)
  * it falls back to the honest indicative gradient tint that mirrors [PhotoStage]'s overlay.
  *
  * **DNG (RAW) originals** are decoded via the platform DNG decoder ([decodeBounded]) and
