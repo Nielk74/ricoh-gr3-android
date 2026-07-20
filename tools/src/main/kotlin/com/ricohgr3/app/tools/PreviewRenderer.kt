@@ -20,7 +20,7 @@ import javax.imageio.ImageIO
  * [BufferedImage], mirroring what the Android `DevelopEngine` does with `Bitmap`. Because the
  * develop core has no Android deps, the pixels produced here match the on-device export.
  *
- * Args: `<repoRoot> <sampleRelPath> <lutAssetDir> <outDirRel>`.
+ * Args: `<repoRoot> <sampleRelPath> <optionalLutAssetDir> <outDirRel>`.
  */
 fun main(args: Array<String>) {
     require(args.size == 4) { "usage: <repoRoot> <sampleRelPath> <lutAssetDir> <outDirRel>" }
@@ -28,6 +28,14 @@ fun main(args: Array<String>) {
     val sample = File(repo, args[1])
     val lutDir = File(repo, args[2])
     val outDir = File(repo, args[3]).apply { mkdirs() }
+    val expectedPreviewNames =
+        (listOf("standard") + FilmLookCatalog.ids).mapTo(mutableSetOf()) { "$it.jpg" }
+    // Catalog changes must not leave misleading previews from retired looks in the README/CI
+    // artifact. Only generated JPGs in this dedicated output directory are pruned.
+    outDir.listFiles()
+        .orEmpty()
+        .filter { it.isFile && it.extension.equals("jpg", ignoreCase = true) && it.name !in expectedPreviewNames }
+        .forEach { check(it.delete()) { "could not remove stale preview $it" } }
 
     require(sample.isFile) { "sample not found: $sample" }
     val src = ImageIO.read(sample) ?: error("could not decode $sample")
@@ -39,10 +47,6 @@ fun main(args: Array<String>) {
     val maxW = 1600
     val work = if (src.width > maxW) scaleTo(src, maxW) else toRgb(src)
 
-    // The same film-grain plate the app uses, so the preview grain matches the on-device look.
-    val grain = loadGrainTexture(File(repo, "app/src/main/assets/grain/grain_35mm.png"))
-    println(if (grain != null) "Loaded grain plate ${grain.size}px" else "No grain plate — synthesised grain")
-
     // Standard (as-shot) baseline first.
     writeJpg(work, File(outDir, "standard.jpg"))
     println("  standard -> standard.jpg")
@@ -50,7 +54,7 @@ fun main(args: Array<String>) {
     for (entry in FilmLookCatalog.entries) {
         val look = entry.look
         val lut = loadLut(look, lutDir)
-        val out = develop(work, look, lut, grain)
+        val out = develop(work, look, lut)
         val name = look.id + ".jpg"
         writeJpg(out, File(outDir, name))
         println("  ${look.displayName} -> $name")
@@ -58,8 +62,8 @@ fun main(args: Array<String>) {
     println("Done: ${FilmLookCatalog.entries.size + 1} previews in ${outDir.relativeTo(repo)}")
 }
 
-/** Prefer the `.cube` asset (as the app does); fall back to the procedural model. */
-private fun loadLut(look: FilmLook, lutDir: File): LutCube {
+/** Prefer an explicitly configured `.cube` asset; shipped stocks use the in-repo model. */
+internal fun loadLut(look: FilmLook, lutDir: File): LutCube {
     val asset = look.lutAsset
     if (asset != null) {
         // asset paths are like "luts/provia.cube" -> file lutDir/provia.cube
@@ -70,11 +74,12 @@ private fun loadLut(look: FilmLook, lutDir: File): LutCube {
 }
 
 /** Run the real develop pipeline on a copy of [src]; returns a new image. */
-private fun develop(
+internal fun develop(
     src: BufferedImage,
     look: FilmLook,
     lut: LutCube,
-    grain: com.ricohgr3.app.looks.emulation.GrainTexture?,
+    iso: Int? = null,
+    effectStrength: Float = 1f,
 ): BufferedImage {
     val w = src.width; val h = src.height; val n = w * h
     val r = FloatArray(n); val g = FloatArray(n); val b = FloatArray(n)
@@ -86,7 +91,11 @@ private fun develop(
         b[i] = (p and 0xFF) / 255f
         i++
     }
-    DevelopPipeline.apply(r, g, b, w, h, look, lut, grainTexture = grain)
+    DevelopPipeline.apply(
+        r, g, b, w, h, look, lut,
+        iso = iso,
+        effectStrength = effectStrength,
+    )
     val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
     i = 0
     for (y in 0 until h) for (x in 0 until w) {
@@ -99,19 +108,7 @@ private fun develop(
     return out
 }
 
-/** Load the grayscale grain plate PNG into a [com.ricohgr3.app.looks.emulation.GrainTexture]. */
-private fun loadGrainTexture(file: File): com.ricohgr3.app.looks.emulation.GrainTexture? {
-    if (!file.isFile) return null
-    return runCatching {
-        val img = ImageIO.read(file) ?: return null
-        val s = minOf(img.width, img.height)
-        val gray = IntArray(s * s)
-        for (y in 0 until s) for (x in 0 until s) gray[y * s + x] = img.getRGB(x, y) and 0xFF
-        com.ricohgr3.app.looks.emulation.GrainTexture.fromGray(s, gray)
-    }.getOrNull()
-}
-
-private fun toRgb(src: BufferedImage): BufferedImage {
+internal fun toRgb(src: BufferedImage): BufferedImage {
     if (src.type == BufferedImage.TYPE_INT_RGB) return src
     val out = BufferedImage(src.width, src.height, BufferedImage.TYPE_INT_RGB)
     val gfx = out.createGraphics()
@@ -122,7 +119,7 @@ private fun toRgb(src: BufferedImage): BufferedImage {
     return out
 }
 
-private fun scaleTo(src: BufferedImage, targetW: Int): BufferedImage {
+internal fun scaleTo(src: BufferedImage, targetW: Int): BufferedImage {
     val h = (src.height.toLong() * targetW / src.width).toInt().coerceAtLeast(1)
     val out = BufferedImage(targetW, h, BufferedImage.TYPE_INT_RGB)
     val gfx = out.createGraphics()
@@ -143,7 +140,7 @@ private fun scaleTo(src: BufferedImage, targetW: Int): BufferedImage {
     return out
 }
 
-private fun writeJpg(img: BufferedImage, file: File, quality: Float = 0.9f) {
+internal fun writeJpg(img: BufferedImage, file: File, quality: Float = 0.9f) {
     file.parentFile?.mkdirs()
     val writer = ImageIO.getImageWritersByFormatName("jpg").next()
     val param = writer.defaultWriteParam.apply {

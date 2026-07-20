@@ -29,6 +29,8 @@ data class GalleryUiState(
     val edits: EditState = EditState(),
     /** Last-used look, pre-selected for the next frames ("sticky default"). */
     val stickyLook: String? = null,
+    /** Last-used look intensity (`1f` = calibrated stock), sticky alongside [stickyLook]. */
+    val stickyIntensity: Float = 1f,
 ) {
     val hasSelection: Boolean get() = selected.isNotEmpty()
     val selectionCount: Int get() = selected.size
@@ -39,6 +41,9 @@ data class GalleryUiState(
 
     /** The film-stock id applied to [id], or null (Standard) if none. */
     fun lookFor(id: PhotoId): String? = edits.lookFor(id.toString())
+
+    /** Applied effect multiplier for [id], defaulting to calibrated 100%. */
+    fun intensityFor(id: PhotoId): Float = edits.intensityFor(id.toString())
 
     /** Number of frames with a look applied. */
     val editedCount: Int get() = edits.applied.size
@@ -72,6 +77,11 @@ class GalleryViewModel(
             viewModelScope.launch {
                 store.lookFlow.collect { persisted ->
                     _state.update { it.copy(stickyLook = persisted) }
+                }
+            }
+            viewModelScope.launch {
+                store.intensityFlow.collect { persisted ->
+                    _state.update { it.copy(stickyIntensity = persisted) }
                 }
             }
         }
@@ -119,21 +129,25 @@ class GalleryViewModel(
      * `null` (Standard) resets the frame (clears its edited mark) — but Standard is still
      * remembered as sticky, so "reset the roll" pre-selects Standard next.
      */
-    fun applyLook(id: PhotoId, look: String?) {
-        _state.update { it.copy(edits = it.edits.apply(id.toString(), look)) }
-        persistSticky(look)
+    fun applyLook(id: PhotoId, look: String?, intensity: Float = 1f) {
+        val safeIntensity = intensity.coerceIn(0.5f, 1.5f)
+        _state.update {
+            it.copy(edits = it.edits.apply(id.toString(), look, safeIntensity))
+        }
+        persistSticky(look, safeIntensity)
     }
 
     /**
      * Apply [look] to every currently selected frame (batch styling) and make it sticky.
      * No-op on the edit map if nothing is selected, but still records the sticky look.
      */
-    fun applyLookToSelection(look: String?) {
+    fun applyLookToSelection(look: String?, intensity: Float? = null) {
+        val safeIntensity = (intensity ?: _state.value.stickyIntensity).coerceIn(0.5f, 1.5f)
         _state.update {
             val ids = it.selected.map { id -> id.toString() }
-            it.copy(edits = it.edits.applyAll(ids, look))
+            it.copy(edits = it.edits.applyAll(ids, look, safeIntensity))
         }
-        persistSticky(look)
+        persistSticky(look, safeIntensity)
     }
 
     /** Clear the look on [id], returning it to Standard (unedited). */
@@ -144,13 +158,14 @@ class GalleryViewModel(
     /** Set the sticky (last-used) look without touching any frame. */
     fun setStickyLook(look: String?) {
         _state.update { it.copy(stickyLook = look) }
-        persistSticky(look)
+        persistSticky(look, _state.value.stickyIntensity)
     }
 
-    private fun persistSticky(look: String?) {
-        _state.update { it.copy(stickyLook = look) }
+    private fun persistSticky(look: String?, intensity: Float) {
+        val safeIntensity = intensity.coerceIn(0.5f, 1.5f)
+        _state.update { it.copy(stickyLook = look, stickyIntensity = safeIntensity) }
         stickyLookStore?.let { store ->
-            viewModelScope.launch { store.setLook(look) }
+            viewModelScope.launch { store.setLook(look, safeIntensity) }
         }
     }
 

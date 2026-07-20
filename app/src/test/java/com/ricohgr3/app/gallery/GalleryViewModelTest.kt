@@ -136,6 +136,18 @@ class GalleryViewModelTest {
     }
 
     @Test
+    fun `applyLook keeps per-frame and sticky intensity`() = runTest {
+        val vm = viewModel(FakeCameraWifiController())
+        val id = PhotoId("100RICOH", "R0000001.JPG")
+
+        vm.applyLook(id, "portra400", intensity = 1.4f)
+
+        val state = vm.state.value
+        assertEquals(1.4f, state.intensityFor(id))
+        assertEquals(1.4f, state.stickyIntensity)
+    }
+
+    @Test
     fun `applyLook STANDARD clears the edited mark`() = runTest {
         val vm = viewModel(FakeCameraWifiController())
         val id = PhotoId("100RICOH", "R0000001.JPG")

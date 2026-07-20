@@ -23,3 +23,6 @@ keystore.properties
 # Local worktrees / agent scratch
 .claude/
 build/
+
+# Uploaded reference photos/screenshots (local only)
+.references/

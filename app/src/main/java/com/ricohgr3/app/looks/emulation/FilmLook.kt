@@ -2,7 +2,7 @@ package com.ricohgr3.app.looks.emulation
 
 /**
  * A film-emulation look: a 3D LUT plus the parametric spatial/tonal layers that a pointwise
- * colour map can't express (split toning, halation, grain). Rendered on-device by
+ * colour map can't express (sky-selective colour, split toning, halation, grain). Rendered on-device by
  * [DevelopEngine]. See `research/FILM_EMULATION.md` §4.
  *
  * @property id stable identifier (asset key / persisted value).
@@ -10,29 +10,50 @@ package com.ricohgr3.app.looks.emulation
  * @property lutAsset path under `assets/` to the `.cube` file, or `null` for no colour LUT
  *   (identity — useful for looks defined purely by the parametric layers).
  * @property splitTone shadow/highlight tint, applied after the LUT.
- * @property halation red-orange highlight bloom; [Halation.NONE] to disable.
- * @property grain film grain; [Grain.NONE] to disable.
+ * @property skyTone top-connected blue-sky colour adjustment; disabled by default.
+ * @property halation stock-coloured highlight bloom; [HalationParams.NONE] to disable.
+ * @property grain film grain; [GrainParams.NONE] to disable.
  * @property swatchTop/[swatchBottom] a representative 2-stop gradient (ARGB `0xFFrrggbb`) for
  *   the picker chip — an at-a-glance hint of the stock's colour. Plain `Long`s (not Android
  *   `Color`) so this stays JVM-testable and Android-free.
  * @property lutInputGamma exponent applied to each channel **before** sampling [lutAsset], and
- *   the LUT output is taken as-is (display-referred). `1.0` = feed sRGB directly (our procedural
- *   LUTs, which already map sRGB→sRGB). The bundled Fujifilm `.cube` LUTs were authored for a
- *   linear-ish camera profile input and bake their own tone curve, so they use ~`1.6`: `x^1.6`
- *   places mid-grey correctly (feeding raw sRGB washes mids out; full linearisation crushes
- *   them). See `research/FILM_EMULATION.md`.
+ *   the LUT output is taken as-is (display-referred). `1.0` = feed sRGB directly, which is what
+ *   the hand-authored shipped stocks use. The field remains for any future, licensed asset whose
+ *   documented input transfer differs.
+ * @property adaptive scene-aware input/output protection. [AdaptiveParams.NONE] makes the LUT
+ *   literal, which is useful for identity transforms and tests; shipped stocks enable it.
  */
 data class FilmLook(
     val id: String,
     val displayName: String,
     val lutAsset: String?,
     val splitTone: SplitTone = SplitTone.NONE,
+    val skyTone: SkyToneParams = SkyToneParams.NONE,
     val halation: HalationParams = HalationParams.NONE,
     val grain: GrainParams = GrainParams.NONE,
     val swatchTop: Long = 0xFFECEAE6,
     val swatchBottom: Long = 0xFFCFCCC6,
     val lutInputGamma: Float = 1f,
+    val adaptive: AdaptiveParams = AdaptiveParams.NONE,
 )
+
+/**
+ * A restrained colour move applied only to blue regions connected to the top edge of the frame.
+ * This is intentionally not a global blue-channel or hue rotation: the connectivity gate keeps
+ * blue clothes, glasses, signs, and interior objects out of a sky-specific stock response.
+ *
+ * @property cyanShift how far eligible blue sky moves toward cyan (`0` = disabled, values around
+ *   `0.2` are deliberately subtle).
+ */
+data class SkyToneParams(
+    val cyanShift: Float,
+) {
+    val enabled: Boolean get() = cyanShift > 0f
+
+    companion object {
+        val NONE = SkyToneParams(cyanShift = 0f)
+    }
+}
 
 /**
  * Split toning: tint shadows and highlights toward different colours, blended by a
@@ -50,9 +71,11 @@ data class SplitTone(
 }
 
 /**
- * Halation: red-orange bloom bleeding out of bright edges (film's anti-halation layer
- * failing at highlights). [threshold] is the luminance above which pixels bloom; [radius]
- * the blur spread in pixels; [strength] the add-back intensity; [tint] the bloom colour.
+ * Halation: red-orange light scattered through the emulsion around bright edges. [threshold]
+ * is the luminance where the smooth source mask begins; [radius] is the spread in pixels;
+ * [strength] scales the edge spill; [tint] controls its red-dominant spectral colour. The
+ * pipeline subtracts the source core before compositing, so this is a surrounding fringe rather
+ * than a red wash over the highlight itself.
  */
 data class HalationParams(
     val threshold: Float,
@@ -69,24 +92,19 @@ data class HalationParams(
 
 /**
  * Film grain — a physically-motivated model, not uniform digital noise. See
- * `research/FILM_EMULATION.md` and [DevelopPipeline.applyGrain]. The output is
- * `I_out = I + A(I)·G`, where `G` is spatially-correlated multi-scale grain and `A(I)` is a
- * density response that peaks in the **midtones** (as real film does), biasable toward shadows.
+ * `research/FILM_EMULATION.md` and [DevelopPipeline.applyGrain]. A deterministic, non-tiling
+ * coordinate field is correlated only across immediate neighbours, then perturbs
+ * log-odds/optical-density-like luminance. The response peaks in the midtones, preserves
+ * black/white endpoints, and can be biased toward shadows.
  *
- * @property amount overall grain strength (amplitude of the fine octave).
- * @property size blur radius of the fine grain (larger = coarser individual grains).
+ * @property amount overall density-variation strength.
+ * @property size local crystal correlation (larger = slightly broader neighbouring structure;
+ *   never a scaled texture or low-frequency cloudy octave).
  * @property shadowBias shifts the midtone-peaked density response toward the shadows
  *   (0 = symmetric hump centred on mid-grey; 1 = peak pushed well into the shadows). Grain
  *   still falls off in both the deepest shadows and the brightest highlights.
- * @property chroma fraction of the grain that is **per-channel independent** (chromatic),
- *   layered on the shared luma grain so RGB channels are correlated-but-distinct — avoids the
- *   "electronic" look of identical or fully-independent RGB noise. 0 = pure monochrome.
- * @property coarseAmount amplitude of a second, coarser octave summed in for natural clumping
- *   and size variation (0 = single-scale). Its blur is [size]·[coarseSizeMul].
- * @property coarseSizeMul how much coarser the second octave is than [size].
- * @property smoothBoost how much grain reads *more visible* in smooth/defocused regions than in
- *   busy detail — a subtle **secondary** factor per the film-grain guideline (NOT proportional
- *   to blur). 0 = uniform. Small values (~0.3) only.
+ * @property chroma fraction of a tiny luminance-neutral neighbour variation. It stays coupled to
+ *   the luma crystal so it cannot turn into independent RGB sensor-noise speckles. 0 = monochrome.
  * @property seed fixes the field for deterministic (testable, non-flickering) output.
  */
 data class GrainParams(
@@ -94,9 +112,6 @@ data class GrainParams(
     val size: Float,
     val shadowBias: Float,
     val chroma: Float = 0.1f,
-    val coarseAmount: Float = 0f,
-    val coarseSizeMul: Float = 2.4f,
-    val smoothBoost: Float = 0f,
     val seed: Long = 0L,
 ) {
     val enabled: Boolean get() = amount > 0f

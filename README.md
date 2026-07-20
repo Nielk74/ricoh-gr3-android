@@ -28,23 +28,27 @@ See [`research/FEASIBILITY.md`](research/FEASIBILITY.md) for the full analysis, 
 
 ## Film emulations
 
-The app develops captured photos on-device through a real film-emulation engine (3D LUT + film
-tone/colour + split-tone + halation + a physically-motivated grain model). The previews below are
-rendered by CI from **one neutral, unedited GR III sample** through the **exact same pipeline** the
-app ships, so they're an honest preview of each look — see
+The app develops captured photos on-device through a scene-adaptive film engine: robust exposure
+analysis, a hand-authored 3D stock transform, luminance-neutral split tone, edge-only halation, and
+ISO-aware optical-density grain. It protects highlight latitude, low-key intent, skin, and existing
+lighting colour instead of applying one fixed LUT strength to every frame. A 50–150% control lets
+the stock character grow without turning scene protection into an HDR effect; preview and export
+use the same setting. The previews below are rendered
+by CI from **one neutral, unedited GR III sample** through the **exact same pipeline** the app
+ships, so they're an honest preview of each look — see
 [`docs/FILM_PREVIEWS.md`](docs/FILM_PREVIEWS.md) for how they're generated.
 
-| Standard (as shot) | Provia | Velvia | Astia |
+| Standard (as shot) | Portra 400 | Portra 800 | Gold 200 |
 |:--:|:--:|:--:|:--:|
-| ![Standard](docs/previews/standard.jpg) | ![Provia](docs/previews/provia.jpg) | ![Velvia](docs/previews/velvia.jpg) | ![Astia](docs/previews/astia.jpg) |
-| **Classic Chrome** | **Classic Neg** | **Nostalgic Neg** | **Eterna** |
-| ![Classic Chrome](docs/previews/classic_chrome.jpg) | ![Classic Neg](docs/previews/classic_neg.jpg) | ![Nostalgic Neg](docs/previews/nostalgic_neg.jpg) | ![Eterna](docs/previews/eterna.jpg) |
-| **Pro Neg Hi** | **Pro Neg Std** | **Reala Ace** | **Bleach Bypass** |
-| ![Pro Neg Hi](docs/previews/pro_neg_hi.jpg) | ![Pro Neg Std](docs/previews/pro_neg_std.jpg) | ![Reala Ace](docs/previews/reala_ace.jpg) | ![Bleach Bypass](docs/previews/bleach_bypass.jpg) |
+| ![Standard](docs/previews/standard.jpg) | ![Portra 400](docs/previews/portra400.jpg) | ![Portra 800](docs/previews/portra800.jpg) | ![Gold 200](docs/previews/gold200.jpg) |
+| **Ektar 100** | **Superia 400** | **CineStill 800T** | **Vision3 250D** |
+| ![Ektar 100](docs/previews/ektar100.jpg) | ![Superia 400](docs/previews/superia400.jpg) | ![CineStill 800T](docs/previews/cinestill800t.jpg) | ![Vision3 250D](docs/previews/vision3_250d.jpg) |
+| **Vision3 500T** | **Eterna Cinema** | **Tri-X 400** | **HP5 Plus** |
+| ![Vision3 500T](docs/previews/vision3_500t.jpg) | ![Eterna Cinema](docs/previews/eterna.jpg) | ![Tri-X 400](docs/previews/trix400.jpg) | ![HP5 Plus](docs/previews/hp5.jpg) |
 
-<sub>Sample photo © its author (RICOH GR III sample gallery); film-simulation LUTs from
-[`abpy/FujifilmCameraProfiles`](https://github.com/abpy/FujifilmCameraProfiles). Included for
-preview/illustration; see [`docs/FILM_PREVIEWS.md`](docs/FILM_PREVIEWS.md) for licensing notes.</sub>
+<sub>The stock names describe aesthetic emulations, not measured manufacturer profiles. Colour
+transforms and grain are generated in-repo; no third-party film LUT is required at runtime.
+Sample photo © its author (RICOH GR III sample gallery).</sub>
 
 ## Recommended architecture
 

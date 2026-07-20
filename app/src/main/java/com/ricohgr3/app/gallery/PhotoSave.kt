@@ -69,6 +69,8 @@ suspend fun saveEdited(
     repository: PhotoRepository,
     exporter: PhotoExporter,
     loader: FilmLookLoader? = null,
+    iso: Int? = null,
+    effectStrength: Float = 1f,
 ): SaveOutcome {
     // Standard (null) is the as-shot baseline — nothing to bake; keep the pristine original.
     if (filmLookId == null) {
@@ -93,13 +95,20 @@ suspend fun saveEdited(
         // so recycle it after; `applyLookTint` consumes and recycles its source, so we must not
         // recycle again in that path.
         val developed = loader?.resolve(filmLookId)
-            ?.let { (film, lut) -> developForSave(decoded, film, lut, raw = isRaw, grain = loader.grainTexture()) }
+            ?.let { (film, lut) ->
+                developForSave(
+                    decoded, film, lut,
+                    raw = isRaw,
+                    iso = iso,
+                    effectStrength = effectStrength,
+                )
+            }
         if (developed != null) {
             decoded.recycle()
             developed
         } else {
             // No loader (JVM path) or unknown stock → honest indicative gradient tint.
-            applyLookTint(decoded, filmLookId)
+            applyLookTint(decoded, filmLookId, effectStrength)
         }
     } ?: return saveOriginal(id, repository, exporter)
 
@@ -120,9 +129,17 @@ private fun developForSave(
     look: com.ricohgr3.app.looks.emulation.FilmLook,
     lut: com.ricohgr3.app.looks.emulation.LutCube,
     raw: Boolean,
-    grain: com.ricohgr3.app.looks.emulation.GrainTexture?,
+    iso: Int?,
+    effectStrength: Float,
 ): android.graphics.Bitmap =
-    DevelopEngine.render(decoded, look, lut, preGrade = if (raw) RawPreGrade else null, grainTexture = grain)
+    DevelopEngine.render(
+        decoded,
+        look,
+        lut,
+        preGrade = if (raw) RawPreGrade else null,
+        iso = iso,
+        effectStrength = effectStrength,
+    )
 
 private suspend fun fetchFull(id: PhotoId, repository: PhotoRepository): ByteArray =
     when (val r = repository.downloadPhoto(id, size = ImageSize.FULL)) {
@@ -162,6 +179,10 @@ private fun decodeBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
     val opts = BitmapFactory.Options().apply {
         inSampleSize = sample
         inPreferredConfig = Bitmap.Config.ARGB_8888
+        // The develop math and LUT coordinates are sRGB. Decode embedded profiles into that
+        // space explicitly so Display-P3 DNG previews are not interpreted as sRGB numbers.
+        inPreferredColorSpace =
+            android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
     }
     return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: decodeRawBounded(bytes, maxPixels)
 }
@@ -180,6 +201,9 @@ private fun decodeRawBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
             // Force CPU-readable software pixels (HARDWARE bitmaps can't be getPixels'd).
             decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
             decoder.isMutableRequired = false
+            decoder.setTargetColorSpace(
+                android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB),
+            )
             val w = info.size.width
             val h = info.size.height
             if (w > 0 && h > 0) {
@@ -202,20 +226,23 @@ private fun decodeRawBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
  * so it doesn't fight the look layered on top. See [DevelopPipeline.PreGrade].
  */
 private val RawPreGrade = com.ricohgr3.app.looks.emulation.DevelopPipeline.PreGrade(
-    contrast = 0.18f, saturation = 1.08f,
+    // ImageDecoder's DNG output is already a display rendering on current Android devices.
+    // Keep this nearly neutral and let scene analysis do the bounded tonal work.
+    contrast = 0.05f, saturation = 1.02f,
 )
 
 /** Composite the film stock's indicative vertical-gradient tint onto a copy of [src]. */
-private fun applyLookTint(src: Bitmap, filmLookId: String?): Bitmap {
+private fun applyLookTint(src: Bitmap, filmLookId: String?, effectStrength: Float = 1f): Bitmap {
     val stops = LookSwatch.stopsFor(filmLookId)
     val out = src.copy(Bitmap.Config.ARGB_8888, true)
     val canvas = Canvas(out)
     val paint = Paint().apply {
         // Same alphas as the on-screen PhotoStage overlay (top 0.16, bottom 0.24).
+        val strength = effectStrength.coerceIn(0f, 1.5f)
         shader = LinearGradient(
             0f, 0f, 0f, out.height.toFloat(),
-            stops.top.copy(alpha = 0.16f).toArgb(),
-            stops.bottom.copy(alpha = 0.24f).toArgb(),
+            stops.top.copy(alpha = (0.16f * strength).coerceAtMost(0.36f)).toArgb(),
+            stops.bottom.copy(alpha = (0.24f * strength).coerceAtMost(0.36f)).toArgb(),
             Shader.TileMode.CLAMP,
         )
     }

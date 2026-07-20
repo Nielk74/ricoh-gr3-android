@@ -2,8 +2,9 @@
 
 The README's film-emulation grid is generated automatically from a single neutral GR III photo,
 run through the **same pure-Kotlin develop pipeline the app ships** (`DevelopPipeline` +
-`FilmLookCatalog`). No device or emulator is involved — the colour-science core has no Android
-dependencies, so a plain JVM tool decodes the JPEG, applies each look, and writes the thumbnails.
+`SceneAnalyzer` + `FilmLookCatalog`). No device or emulator is involved — the colour-science core
+has no Android dependencies, so a plain JVM tool decodes the JPEG, analyses the scene, applies
+each adaptive look, and writes the thumbnails.
 
 ## Regenerate locally
 
@@ -13,7 +14,8 @@ dependencies, so a plain JVM tool decodes the JPEG, applies each look, and write
 
 This reads:
 - the sample photo `docs/preview-src/griii-sample.jpg`,
-- the film-sim LUTs in `app/src/main/assets/luts/`,
+- the hand-authored stock models in `FilmLookCatalog`,
+- the analytic, non-tiling density-grain model in `DevelopPipeline`,
 
 and writes one thumbnail per look to `docs/previews/*.jpg` (Standard + every stock in
 `FilmLookCatalog`). The renderer lives in `tools/` (`:tools`, a JVM-only Gradle module).
@@ -32,14 +34,40 @@ Because previews are derived from the catalog, adding a stock or retuning one ne
 edits — just run `renderPreviews` and commit the regenerated `docs/previews/`, then add the new
 cell to the README grid.
 
+## Multi-scene calibration
+
+One pleasant hero image is not enough to tune an adaptive look. For local work, put owned GR III
+JPEGs/PNGs in the ignored `.references/` folder and run:
+
+```bash
+./gradlew :tools:renderReferences
+```
+
+This writes contact sheets and `scene-report.txt` under the ignored
+`build/reference-renders/`. The report records tonal percentiles and the exact exposure,
+highlight, look-mix, saturation, and grain decisions for every scene. DNGs can be rendered to
+temporary PNG previews by the host OS and passed with `-PreferenceInput=/path/to/previews`.
+
+## High-resolution interactive review
+
+For pixel-level comparison of the JPEG and DNG camera examples, build the local review lab:
+
+```bash
+./gradlew :tools:renderReviewSite
+python3 -m http.server 8765 --directory build/film-review
+```
+
+Open `http://localhost:8765`. The site keeps every scene at a 3000 px long edge, offers
+original/developed split comparison plus 100% and 200% zoom, and records local Keep/Tweak/Reject
+notes for export. Its 50–150% intensity slider blends between original, a real calibrated 100%
+master, and a real 150% master. The Android preview/export path evaluates the same strength
+directly; 100% and 150% therefore match the site exactly.
+
 ## Licensing / attribution
 
 - **Sample photo** — a `RICOH GR III` sample-gallery image (downscaled). Copyright remains its
   author's; it is included here purely to illustrate the looks. If redistribution is ever a
   concern (e.g. a public release), swap `docs/preview-src/griii-sample.jpg` for an image you own
   or a CC0 photo and re-run the renderer — nothing else changes.
-- **Film-simulation LUTs** — `.cube` files from
-  [`abpy/FujifilmCameraProfiles`](https://github.com/abpy/FujifilmCameraProfiles), derived from
-  Adobe camera-matching profiles; the source repo carries no explicit licence. See
-  `research/FILM_EMULATION.md` §4a for the full note. Same caveat applies before any public
-  distribution.
+- **Stock transforms and grain** — hand-authored/analytic code in this repository. Stock names are
+  descriptive aesthetic targets, not claims of measured manufacturer colourimetry.

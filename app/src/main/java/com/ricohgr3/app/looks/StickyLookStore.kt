@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.ricohgr3.app.looks.emulation.FilmLookCatalog
@@ -40,14 +41,21 @@ class StickyLookStore(private val context: Context) {
         LookPreferenceCodec.decode(prefs[LAST_LOOK_KEY])
     }
 
+    /** Last-used intensity, independently guarded so old installs naturally migrate to 100%. */
+    val intensityFlow: Flow<Float> = context.looksDataStore.data.map { prefs ->
+        (prefs[LAST_INTENSITY_KEY] ?: 1f).coerceIn(0.5f, 1.5f)
+    }
+
     /** Persist [look] as the sticky last-used film-stock id (`null` = Standard). */
-    suspend fun setLook(look: String?) {
+    suspend fun setLook(look: String?, intensity: Float = 1f) {
         context.looksDataStore.edit { prefs ->
             prefs[LAST_LOOK_KEY] = LookPreferenceCodec.encode(look)
+            prefs[LAST_INTENSITY_KEY] = intensity.coerceIn(0.5f, 1.5f)
         }
     }
 
     private companion object {
         val LAST_LOOK_KEY = stringPreferencesKey("last_look")
+        val LAST_INTENSITY_KEY = floatPreferencesKey("last_look_intensity")
     }
 }

@@ -20,13 +20,16 @@ object DevelopEngine {
      *
      * [preGrade] (optional) is a mild base grade applied before the film look, used for RAW/DNG
      * input whose decoded preview is flatter than a camera JPEG (see `PhotoSave`).
+     * [iso] lets the adaptive pipeline avoid stacking excessive emulsion grain over sensor noise.
+     * [effectStrength] is the editor's 0–150% intensity control (`1f` = calibrated stock).
      */
     fun render(
         src: Bitmap,
         look: FilmLook,
         lut: LutCube,
         preGrade: DevelopPipeline.PreGrade? = null,
-        grainTexture: GrainTexture? = null,
+        iso: Int? = null,
+        effectStrength: Float = 1f,
     ): Bitmap {
         val w = src.width
         val h = src.height
@@ -44,7 +47,12 @@ object DevelopEngine {
             bb[i] = (p and 0xFF) / 255f
         }
 
-        DevelopPipeline.apply(rr, gg, bb, w, h, look, lut, preGrade, grainTexture)
+        DevelopPipeline.apply(
+            rr, gg, bb, w, h, look, lut,
+            preGrade = preGrade,
+            iso = iso,
+            effectStrength = effectStrength,
+        )
 
         for (i in 0 until n) {
             val a = pixels[i] and 0xFF000000.toInt()

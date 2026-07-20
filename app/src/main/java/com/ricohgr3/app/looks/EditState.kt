@@ -17,6 +17,8 @@ package com.ricohgr3.app.looks
  */
 data class EditState(
     val applied: Map<String, String> = emptyMap(),
+    /** Per-frame effect multiplier (`1f` = calibrated stock, clamped to the editor's 0.5–1.5). */
+    val intensities: Map<String, Float> = emptyMap(),
 ) {
     /** True if [id] has a (non-Standard) film look applied. */
     fun isEdited(id: String): Boolean = applied.containsKey(id)
@@ -24,23 +26,39 @@ data class EditState(
     /** The film-stock id applied to [id], or `null` (Standard) if none. */
     fun lookFor(id: String): String? = applied[id]
 
+    /** Effect multiplier for [id], defaulting to the calibrated 100% when absent/unedited. */
+    fun intensityFor(id: String): Float = intensities[id]?.coerceIn(0.5f, 1.5f) ?: 1f
+
     /**
      * Apply film-stock [look] to [id]. Applying `null` (Standard) resets the frame (clears its
      * edited mark) rather than storing an entry.
      */
-    fun apply(id: String, look: String?): EditState =
+    fun apply(id: String, look: String?, intensity: Float = 1f): EditState =
         if (look == null) reset(id)
-        else copy(applied = applied + (id to look))
+        else copy(
+            applied = applied + (id to look),
+            intensities = intensities + (id to intensity.coerceIn(0.5f, 1.5f)),
+        )
 
     /** Apply [look] to every id in [ids] (`null` resets each, as in [apply]). */
-    fun applyAll(ids: Collection<String>, look: String?): EditState =
+    fun applyAll(ids: Collection<String>, look: String?, intensity: Float = 1f): EditState =
         if (look == null) {
-            copy(applied = applied - ids.toSet())
+            copy(
+                applied = applied - ids.toSet(),
+                intensities = intensities - ids.toSet(),
+            )
         } else {
-            copy(applied = applied + ids.associateWith { look })
+            copy(
+                applied = applied + ids.associateWith { look },
+                intensities = intensities + ids.associateWith { intensity.coerceIn(0.5f, 1.5f) },
+            )
         }
 
     /** Clear any look on [id], returning it to the Standard (unedited) baseline. */
     fun reset(id: String): EditState =
-        if (applied.containsKey(id)) copy(applied = applied - id) else this
+        if (applied.containsKey(id) || intensities.containsKey(id)) {
+            copy(applied = applied - id, intensities = intensities - id)
+        } else {
+            this
+        }
 }

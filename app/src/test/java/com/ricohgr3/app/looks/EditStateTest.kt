@@ -20,7 +20,17 @@ class EditStateTest {
         val state = EditState().apply("a", "provia")
         assertTrue(state.isEdited("a"))
         assertEquals("provia", state.lookFor("a"))
+        assertEquals(1f, state.intensityFor("a"))
         assertFalse(state.isEdited("b"))
+    }
+
+    @Test
+    fun intensityIsStoredClampedAndClearedWithTheLook() {
+        val strong = EditState().apply("a", "portra400", intensity = 2f)
+        assertEquals(1.5f, strong.intensityFor("a"))
+        val reset = strong.reset("a")
+        assertEquals(1f, reset.intensityFor("a"))
+        assertTrue(reset.intensities.isEmpty())
     }
 
     @Test
@@ -47,6 +57,7 @@ class EditStateTest {
         assertFalse(state.isEdited("a"))
         assertNull(state.lookFor("a"))
         assertTrue("Standard entries are not stored", state.applied.isEmpty())
+        assertTrue("Standard intensities are not stored", state.intensities.isEmpty())
     }
 
     @Test

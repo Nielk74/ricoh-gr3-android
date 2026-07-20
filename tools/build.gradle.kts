@@ -23,13 +23,23 @@ sourceSets {
         kotlin.include(
             "com/ricohgr3/app/tools/**",
             "com/ricohgr3/app/looks/emulation/DevelopPipeline.kt",
+            "com/ricohgr3/app/looks/emulation/SceneAnalyzer.kt",
             "com/ricohgr3/app/looks/emulation/LutCube.kt",
-            "com/ricohgr3/app/looks/emulation/GrainTexture.kt",
             "com/ricohgr3/app/looks/emulation/FilmLook.kt",
             "com/ricohgr3/app/looks/emulation/FilmLutFactory.kt",
             "com/ricohgr3/app/looks/emulation/FilmLookCatalog.kt",
         )
     }
+    test {
+        // Re-run the pure colour-science tests without configuring/booting Android. This is also
+        // useful on calibration machines that have a JDK but no Android SDK installed.
+        kotlin.srcDir("../app/src/test/java")
+        kotlin.include("com/ricohgr3/app/looks/emulation/**")
+    }
+}
+
+dependencies {
+    testImplementation(libs.junit)
 }
 
 application {
@@ -48,5 +58,56 @@ tasks.register<JavaExec>("renderPreviews") {
         "docs/preview-src/griii-sample.jpg",
         "app/src/main/assets/luts",
         "docs/previews",
+    )
+}
+
+/** Render the local `.references` JPEG calibration set into ignored `build/reference-renders`. */
+tasks.register<JavaExec>("renderReferences") {
+    group = "verification"
+    description = "Render adaptive film contact sheets and a scene-analysis report"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("com.ricohgr3.app.tools.ReferenceRendererKt")
+    val referenceInput = (project.findProperty("referenceInput") as String?) ?: ".references"
+    val referenceOutput =
+        (project.findProperty("referenceOutput") as String?) ?: "build/reference-renders"
+    args(
+        rootProject.projectDir.absolutePath,
+        referenceInput,
+        referenceOutput,
+    )
+}
+
+/** Decode/orient both JPEG and DNG camera references as 3000px, display-referred sRGB masters. */
+val prepareReviewSources by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Prepare high-resolution oriented sRGB sources for the film review site"
+    commandLine(
+        "bash",
+        rootProject.file("tools/prepare-review-sources.sh").absolutePath,
+        rootProject.projectDir.absolutePath,
+        rootProject.file("build/review-sources").absolutePath,
+        "3000",
+    )
+}
+
+/** Build the interactive high-resolution review site into ignored `build/film-review`. */
+tasks.register<JavaExec>("renderReviewSite") {
+    group = "verification"
+    description = "Render all film looks at 3000px and assemble the local review website"
+    val reviewInput =
+        (project.findProperty("reviewInput") as String?) ?: "build/review-sources"
+    val reviewOutput =
+        (project.findProperty("reviewOutput") as String?) ?: "build/film-review"
+    // A caller-supplied prepared input is useful for a fast, focused calibration loop. The full
+    // task still prepares every JPEG/DNG reference automatically.
+    if (!project.hasProperty("reviewInput")) dependsOn(prepareReviewSources)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("com.ricohgr3.app.tools.ReviewSiteRendererKt")
+    maxHeapSize = "3g"
+    args(
+        rootProject.projectDir.absolutePath,
+        reviewInput,
+        "review-site",
+        reviewOutput,
     )
 }

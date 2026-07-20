@@ -131,13 +131,14 @@ Decision: **start on-camera, grow in-app**; Auto-Look kept; sticky look + edited
 - [ ] **7.1 On-camera looks** (ships first): push GR III `effect` before capture (`efc_posiFilm`,
       `efc_bleachBypass`, `efc_hardMonochrome`, `efc_HDRTone`, `col_vivid`…) via `/v1/params/camera`
 - [~] **7.2 Look UX in library**: edited mark ✅, sticky default across frames ✅, batch apply ✅,
-      before/after (press-and-hold) ✅, reset ✅ — all built in Phase 6d/6e. Preview tint is
-      *indicative* (LookSwatch); true per-frame render awaits 7.3. On-device look-push wiring = 7.1.
-- [~] **7.3 In-app develop engine**: film-emulation LUTs ✅ (real colour science: scene-linear
-      per-channel density curves + dye cross-talk + split-tone + halation + grain), ~11 real
-      film stocks shown directly in the picker ✅, DNG decode + develop → JPEG ✅, real
-      developed preview in the viewer ✅. Remaining: **GPU/AGSL preview fast-path** (API 33+) so
-      the full-res develop is instant on new devices (CPU path is the portable baseline).
+      before/after (press-and-hold) ✅, reset ✅, real developed preview ✅. LookSwatch is only the
+      picker chip/fallback; the viewer renders the same adaptive pipeline used for export.
+- [~] **7.3 In-app develop engine**: scene-adaptive film pipeline ✅ (robust tonal analysis,
+      bounded display-referred print curves + dye cross-talk, adaptive stock mix/skin protection,
+      luminance-neutral split-tone, scaled halation, ISO-aware grain), 11 curated stocks ✅,
+      sRGB-managed DNG decode + develop → JPEG ✅, reproducible multi-scene calibration renderer
+      ✅. Remaining: **GPU/AGSL preview fast-path** (API 33+) so full-res develop is instant on
+      new devices (CPU path is the portable baseline).
 - [ ] **7.4 Auto-Look**: heuristic scene→look (EXIF + thumbnail), opt-in; v2 tiny on-device model
 - [ ] **7.5 Presets & sharing**: save/share edit stacks, apply on import (no cloud)
 - [ ] **7.6 Advanced editing** (the **⋮ three-dots** menu on a photo): a per-photo manual editor

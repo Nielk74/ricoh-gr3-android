@@ -6,7 +6,47 @@ compile SDK 34, Jetpack Compose, no RenderScript).
 
 ---
 
-## 1. Why the current "filters" are weak
+## Current implementation (adaptive pipeline, July 2026)
+
+The early fixed-LUT experiments documented later in this file are historical. The shipped path is
+now designed around the fact that both camera JPEGs and Android-rendered DNGs are already
+display-referred photographs:
+
+1. `SceneAnalyzer` samples up to roughly 50k pixels and measures robust luminance percentiles,
+   clipped/crushed area, colourfulness, low-chroma warm/cool bias, and micro-contrast.
+2. It derives bounded decisions for exposure, shadow separation, highlight shoulder, saturation,
+   LUT mix, halation, and grain. It deliberately preserves night, backlight, tungsten, and
+   blue-hour intent; this is input normalisation, not aggressive auto-enhance/auto-WB.
+3. `FilmLutFactory` builds licence-clean 33³ stock transforms with a bounded display-referred
+   print curve, linear-light channel gain/dye cross-talk, and stock saturation.
+4. The stock transform is blended rather than blindly replacing every pixel. Existing strong
+   casts reduce added stock colour, and a soft skin-hue mask reduces destructive shifts.
+5. Split toning is luminance-neutral. Portra's blue-to-cyan response is limited to blue regions
+   connected to the top frame edge, so it changes sky rather than clothing/signage. Halation is a
+   linear-light, edge-only spill whose radius follows output size; the bright source core is
+   subtracted so flat highlights do not turn red. CineStill uses a high-threshold red fringe while
+   the quieter cinema stocks retain warmer, weaker spill.
+6. Grain perturbs optical-density-like luminance from a deterministic, non-tiling coordinate
+   field correlated only across immediate neighbours. It is sharp on the film plane,
+   midtone-weighted, resolution-scaled, and gently reduced when the digital source is already
+   high-ISO/noisy. Low-key frames are not globally suppressed; true black still masks grain.
+7. DNG and wide-gamut inputs are explicitly converted to sRGB before the sRGB-authored pipeline.
+8. A persisted 50–150% stock-strength control scales colour and emulsion layers. Tonal scene
+   protection fades below 100% but is not amplified above it, preventing a stronger look from
+   becoming aggressive auto-HDR.
+
+The calibration loop is reproducible: `./gradlew :tools:renderReferences` renders all local
+`.references` JPEG/PNG scenes and writes contact sheets plus exact scene decisions under
+`build/reference-renders/`. Pure colour-science tests also run without an Android SDK via
+`./gradlew :tools:test`.
+
+The current curated set is Portra 400/800, Gold 200, Ektar 100, Superia 400, CineStill 800T,
+Vision3 250D/500T, Eterna Cinema, Tri-X 400, and HP5 Plus. Names describe aesthetic emulations,
+not measured manufacturer profiles. No third-party film LUT is required at runtime.
+
+---
+
+## 1. Why the original "filters" were weak
 
 Two things exist today and neither actually *renders* a look onto a captured photo:
 
@@ -46,27 +86,28 @@ darktable film simulations, Fuji's in-camera Film Simulation) is some subset of:
 4. **Split toning.** Different tint in shadows vs highlights (classic: teal shadows, warm
    highlights; or the faded "retro" warm shadow). Cheap, huge stylistic payoff.
 
-5. **Halation.** Red-orange bloom bleeding out of bright edges into darker surroundings —
-   film's anti-halation layer failing at highlights. Implemented as: threshold the
-   highlights → Gaussian blur → tint red/orange → screen/add back. Luminance-gated.
+5. **Halation.** Red-orange light scattered through the emulsion around bright edges.
+   Implemented as: build a smooth linear-light highlight mask → blur it → subtract the source
+   core → weight receiving darker pixels → red-dominant screen composite. Subtracting the core
+   is essential: a uniform bright field receives no red fog and the highlight itself stays clean.
 
-6. **Grain.** `I_out = I + A(I)·G` (see §2.6 for the shipped model). `G` is spatially-correlated,
-   multi-scale, correlated-RGB grain; `A(I)` is a **midtone-peaked** density response. Real film
-   grain is *strongest in the midtones* (falling off in both deep shadows and highlights),
-   correlated (not per-pixel white noise), varies in size/clumping, and is correlated-but-distinct
-   across R/G/B (identical mono = flat; independent RGB = electronic).
+6. **Grain.** `logit(I_out) = logit(I) + A(I)·G` (see §2.6 for the shipped model). `G` is
+   non-tiling, locally correlated RGB grain; `A(I)` is a **midtone-peaked**
+   density response. Real film grain is strongest in the midtones (falling off in both deep
+   shadows and highlights), correlated (not per-pixel white noise), varies in size/clumping, and
+   is correlated-but-distinct across R/G/B (identical mono = flat; independent RGB = electronic).
 
 7. **Optional: vignette, soft bloom, slight desaturation of extremes, black/white point.**
 
-**Order matters:** linearise → tone → colour(LUT) → split-tone → halation → (re-encode) →
-grain → vignette. Grain and vignette go last, in display space.
+**Order matters:** linearise → tone → colour(LUT) → split-tone → selective sky colour →
+halation → (re-encode) → grain → vignette. Grain and vignette go last, in display space.
 
 ### The 3D LUT is the workhorse
 A **3D LUT** partitions RGB space into a grid (typically 17³, 33³, or 64³); each vertex
 holds an output RGB. At runtime you find the cube a pixel falls in and **trilinear-
 interpolate** the 8 corners. One lookup captures tone + colour + cross-talk together — which
-is exactly why the industry ships film looks as `.cube` files. Steps 4–7 (split-tone,
-halation, grain) are layered *around* the LUT because they're spatial or parametric and
+is exactly why the industry ships film looks as `.cube` files. Split-tone, connected-sky colour,
+halation, and grain are layered *around* the LUT because they're spatial or parametric and
 don't belong in a pointwise colour map.
 
 **File formats:** `.cube` (Adobe/Resolve text format — easiest to parse), `.3dl`, and
@@ -76,36 +117,32 @@ as a plain PNG asset and there are large free, permissively-usable collections.
 
 ### 2.6 Grain model (shipped, `DevelopPipeline.applyGrain`)
 
-Realistic film grain, `I_out = I + A(I)·G`, checked against the film-grain guideline:
+Realistic film grain, `logit(I_out) = logit(I) + A(I)·G`, checked against the film-grain
+guideline:
 
-- **`G` — the grain field (shipped approach): a real grain PLATE, overlaid.** Synthesising grain
-  per pixel never looked right — additive noise washed out; a multi-octave "clumping" field made
-  ugly low-frequency *blotches* in smooth skies. The fix is what production tools do: composite a
-  fixed, tileable **film-grain plate** (`assets/grain/grain_35mm.png`, a 512² monochrome texture)
-  over the image, tiled to cover the frame (`DevelopPipeline.applyGrainTexture` +
-  `GrainTexture`). Because the plate *is* grain structure, it reads as film. It is **generated**
-  (`tools/generate_grain_plate.py`: wrap-around/toroidal-blurred noise → seamless tile) rather than
-  a third-party scan, so it is unambiguously license-clean to ship. A small per-channel offset
-  (from neighbouring plate taps) keeps it correlated-but-not-pure-mono without looking electronic.
-  The old synthesised path (`applyGrain`) remains as a fallback when no plate is supplied.
+- **`G` — the grain field (shipped approach): a coordinate-hash density field.** The retired
+  512px texture plate produced repeating, low-frequency camouflage blotches at 100% zoom.
+  `DevelopPipeline.applyGrain` now hashes absolute output coordinates and performs a compact 3×3
+  convolution. Correlation never extends beyond immediate neighbours, so crystal size can change
+  without scaled textures, blurry octaves, tiling, or density clouds. The kernel is
+  variance-normalized to zero mean and stable strength. Tiny channel differences come from
+  neighbouring taps of the same luma crystal, keeping RGB correlated rather than electronic.
 - **`A(I)` — the strength**: a **midtone-peaked hump** (`grainDensity`) that falls off in both the
   deepest shadows *and* the brightest highlights (real silver-grain density), biasable toward the
   shadows by `shadowBias`. Measured: peak ~0.95 at luma 0.25–0.5, ~0.54 at black, ~0.04 near white.
-- **Detail/sharpness**: grain strength is applied **independently of image sharpness**; a bounded
-  **secondary** `smoothBoost` makes grain read slightly *more visible* in smooth/defocused regions
-  (`|luma − blur(luma)|`), never proportional to blur.
-- **Blend**: grain is composited with a **soft-light-style** modulation (`x + d·envelope`, where
-  `envelope = 0.3 + 0.7·4x(1−x)` peaks at mid-grey), **not** flat addition. This is the key to it
-  reading as film rather than digital haze: real grain darkens darks and lightens lights around
-  the local tone; additive grain (`x + d`) washes everything toward grey and looks washed-out/flat.
-  `chroma` is kept low (~0.12) — high chroma reads as electronic colour speckle. (Research: film
-  grain tools use soft-light/overlay blends, low colour-noise, resolution-scaled grain, not
-  additive Gaussian noise — see IPOL "Realistic Film Grain Rendering" and the AV1 grain model.)
+- **Detail/sharpness**: grain strength is applied **independently of image sharpness** after lens
+  blur, motion blur, colour, and halation. Smooth/defocused regions reveal the same sharp
+  film-plane field more clearly because less scene detail competes with it; no edge/detail mask is
+  used.
+- **Blend**: grain perturbs log-odds/optical-density-like luminance, then rescales RGB by the new
+  luminance to preserve hue. Unlike flat addition, this keeps black/white endpoints fixed and does
+  not wash the frame toward grey. The tiny chroma vector is constructed to be Rec.709
+  luminance-neutral; `chroma` stays low because strong colour speckle reads as electronic.
 - **Order/perf**: grain is **last**, in display space, before JPEG compression. Runs off the main
   thread; peak memory bounded (≤ ~4 float buffers over the ~6 MP edit image) to respect the
   no-crash / no-OOM rule.
 
-Per-stock midtone amplitude ranges ~3.9/255 (Velvia, finest) → ~7.2/255 (Bleach Bypass, grittiest).
+Per-stock density amount ranges from 0.014 (Ektar 100, finest) to 0.043 (Tri-X 400, grittiest).
 
 ---
 
@@ -168,9 +205,9 @@ parametric grain/halation/split-tone.
 
 ---
 
-## 4a. Shipped LUTs: real Fujifilm `.cube` film sims (current)
+## 4a. Historical experiment: third-party Fujifilm `.cube` film sims (retired)
 
-The procedural LUTs (§4b) were still not good enough ("very bad"). The shipped set now uses **real
+The procedural LUTs (§4b) were still not good enough ("very bad"). A previous build used **real
 Fujifilm film-simulation `.cube` 3D LUTs** from
 [`abpy/FujifilmCameraProfiles`](https://github.com/abpy/FujifilmCameraProfiles) (32³, sRGB
 variants), bundled under `app/src/main/assets/luts/`. The 11 sims: **Provia, Velvia, Astia,
@@ -186,9 +223,9 @@ pipeline raises each channel to that power *before* sampling the LUT, taking the
 display-referred (no re-encode). Procedural LUTs keep `lutInputGamma = 1` (plain sRGB→sRGB).
 Verified by `FujiLutVerify` (mid-grey band, differentiation, bleach-bypass desaturation).
 
-**Licensing note.** The source repo has **no LICENSE file** and the LUTs are derived from Adobe's
-camera-matching profiles — redistribution rights are unclear. Bundling them is a deliberate,
-user-accepted risk for this app; revisit before any public/store release.
+**Why retired.** The source repo has no licence, the input-domain gamma was guessed, and one fixed
+transform could not handle the supplied backlit/high-key/blue-hour/mixed-light scenes. The current
+adaptive, hand-authored catalog avoids that runtime/licensing dependency.
 
 ## 4b. The (fallback) procedural colour engine — why the first LUTs were too subtle
 

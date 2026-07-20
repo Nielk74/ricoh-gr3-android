@@ -142,8 +142,12 @@ fun AppNavHost(
                     exporter = photoExporter,
                     filmLookLoader = filmLookLoader,
                     appliedLook = state.lookFor(photoId),
+                    appliedIntensity = state.intensityFor(photoId),
                     stickyLook = state.stickyLook,
-                    onApplyLook = { look -> galleryViewModel.applyLook(photoId, look) },
+                    stickyIntensity = state.stickyIntensity,
+                    onApplyLook = { look, intensity ->
+                        galleryViewModel.applyLook(photoId, look, intensity)
+                    },
                     onResetLook = { galleryViewModel.resetLook(photoId) },
                     onBack = { navController.popBackStack() },
                 )

@@ -83,9 +83,9 @@ class LutCubeTest {
         assertTrue("white stays near white", white.first > 0.9f)
     }
 
-    @Test fun strongGradeVisiblyShiftsMidtones() {
-        // The procedural fallback engine must NOT be subtle: a high-contrast, high-sat model must
-        // move a mid-grey by a clearly visible amount and widen colour separation.
+    @Test fun strongGradeShapesQuarterTonesWithoutMovingTheGreyPivot() {
+        // Camera JPEGs already have a base tone curve. The print transform should shape lower/
+        // upper tones visibly while keeping neutral mid-grey stable instead of double-developing.
         val model = FilmLutFactory.Model(
             r = FilmLutFactory.Channel(contrast = 0.5f, shoulder = 0.85f),
             g = FilmLutFactory.Channel(contrast = 0.5f, shoulder = 0.85f),
@@ -93,8 +93,10 @@ class LutCubeTest {
             saturation = 1.25f,
         )
         val lut = FilmLutFactory.build(model)
-        val (r, _, _) = sample(lut, 0.5f, 0.5f, 0.5f)
-        assertTrue("mid-grey moved by the grade (was $r)", kotlin.math.abs(r - 0.5f) > 0.03f)
+        val (mid, _, _) = sample(lut, 0.5f, 0.5f, 0.5f)
+        assertEquals("mid-grey is a stable pivot", 0.5f, mid, 0.035f)
+        val (quarter, _, _) = sample(lut, 0.25f, 0.25f, 0.25f)
+        assertTrue("lower quarter receives visible print contrast ($quarter)", quarter < 0.23f)
         val red = sample(lut, 0.7f, 0.2f, 0.2f)
         assertTrue("high-sat model widens red-green separation", (red.first - red.second) > (0.7f - 0.2f) * 0.5f)
     }

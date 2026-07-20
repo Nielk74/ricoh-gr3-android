@@ -18,6 +18,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,6 +50,8 @@ import com.ricohgr3.app.ui.LookSwatch
 import com.ricohgr3.app.ui.theme.GrTheme
 import com.ricohgr3.app.wifi.ImageSize
 import com.ricohgr3.app.wifi.PhotoInfo
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * Full-minimal single-photo viewer. Shows one frame large on paper ground, with:
@@ -58,9 +62,9 @@ import com.ricohgr3.app.wifi.PhotoInfo
  *  - film-rebate metadata (frame id, ISO/shutter/aperture) in mono,
  *  - Reset / Apply, where Apply also updates the sticky default.
  *
- * Honesty note (PHASE7-LOOKS.md caveat): the preview tint is *indicative* — on-camera `effect`
- * is not retroactive, and the true per-frame develop is the Phase 7.3 engine. The UI copy says
- * "preview", never promising the camera re-rendered the stored JPEG.
+ * This is a real in-app develop preview, not an indicative tint: the same adaptive pipeline,
+ * stock intensity, non-tiling density grain, and halation model are used by edited export.
+ * On-camera `effect` remains a separate capture-time feature and is not retroactive.
  */
 @Composable
 fun ViewerScreen(
@@ -69,8 +73,10 @@ fun ViewerScreen(
     exporter: PhotoExporter,
     filmLookLoader: com.ricohgr3.app.looks.emulation.FilmLookLoader? = null,
     appliedLook: String?,
+    appliedIntensity: Float,
     stickyLook: String?,
-    onApplyLook: (String?) -> Unit,
+    stickyIntensity: Float,
+    onApplyLook: (String?, Float) -> Unit,
     onResetLook: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -81,6 +87,11 @@ fun ViewerScreen(
     // The picker starts on the frame's current look, or the sticky default if unedited.
     var picked by remember(id) {
         mutableStateOf(appliedLook ?: stickyLook)
+    }
+    var effectStrength by remember(id) {
+        mutableStateOf(
+            (if (appliedLook != null) appliedIntensity else stickyIntensity).coerceIn(0.5f, 1.5f),
+        )
     }
     var showingBefore by remember { mutableStateOf(false) }
 
@@ -97,7 +108,17 @@ fun ViewerScreen(
         scope.launch {
             saveStatus = try {
                 val outcome =
-                    if (edited) saveEdited(id, picked, repository, exporter, filmLookLoader)
+                    if (edited) {
+                        saveEdited(
+                            id,
+                            picked,
+                            repository,
+                            exporter,
+                            filmLookLoader,
+                            iso = parseIso(info?.sv),
+                            effectStrength = effectStrength,
+                        )
+                    }
                     else saveOriginal(id, repository, exporter)
                 if (outcome.edited) "Saved ${outcome.displayName} to Pictures/GR3"
                 else "Saved to Pictures/GR3"
@@ -145,7 +166,10 @@ fun ViewerScreen(
     // loaded frame) changes, so the on-screen preview matches what "Save with …" will produce —
     // not just an indicative tint. Runs off the main thread; failures fall back to the raw frame
     // (never crash, never block the UI). The develop is on a ~720×480 bitmap, so it's cheap.
-    LaunchedEffect(picked, rawBitmap, filmLookLoader) {
+    LaunchedEffect(picked, effectStrength, rawBitmap, filmLookLoader, info?.sv) {
+        // Debounce slider drags. Superseded effects cancel during this delay, so the CPU renderer
+        // only develops the settled value instead of queueing every intermediate tick.
+        kotlinx.coroutines.delay(90)
         val src = rawBitmap
         val loader = filmLookLoader
         val stockId = picked
@@ -156,7 +180,13 @@ fun ViewerScreen(
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     loader.resolve(stockId)?.let { (film, lut) ->
                         com.ricohgr3.app.looks.emulation.DevelopEngine
-                            .render(src, film, lut, grainTexture = loader.grainTexture())
+                            .render(
+                                src,
+                                film,
+                                lut,
+                                iso = parseIso(info?.sv),
+                                effectStrength = effectStrength,
+                            )
                             .asImageBitmap()
                     }
                 }
@@ -169,6 +199,7 @@ fun ViewerScreen(
             id = id,
             isEdited = appliedLook != null,
             appliedLook = appliedLook,
+            appliedIntensity = appliedIntensity,
             onBack = onBack,
         )
         HorizontalDivider(color = GrTheme.colors.hair)
@@ -189,6 +220,7 @@ fun ViewerScreen(
                     bitmap = if (!showingBefore) (developedPreview ?: bitmap!!) else bitmap!!,
                     look = picked,
                     developed = developedPreview != null,
+                    effectStrength = effectStrength,
                     showingBefore = showingBefore,
                     onPressChange = { showingBefore = it },
                 )
@@ -223,22 +255,36 @@ fun ViewerScreen(
         )
         LookStrip(
             selected = picked,
-            onSelect = { picked = it },
+            onSelect = {
+                picked = it
+                if (it == null) effectStrength = 1f
+            },
             modifier = Modifier.fillMaxWidth(),
         )
+
+        if (picked != null) {
+            EffectStrengthControl(
+                value = effectStrength,
+                onValueChange = { effectStrength = it },
+            )
+        }
 
         ViewerActions(
             picked = picked,
             appliedLook = appliedLook,
-            onApply = { onApplyLook(picked) },
+            effectStrength = effectStrength,
+            appliedIntensity = appliedIntensity,
+            onApply = { onApplyLook(picked, effectStrength) },
             onReset = {
                 picked = null
+                effectStrength = 1f
                 onResetLook()
             },
         )
 
         SaveBar(
             picked = picked,
+            effectStrength = effectStrength,
             saving = saving,
             status = saveStatus,
             onSaveOriginal = { runSave(edited = false) },
@@ -249,13 +295,14 @@ fun ViewerScreen(
 
 /**
  * Download / save-to-device row. "Save original" pulls the full-resolution file untouched;
- * "Save with <look>" bakes the indicative preview tint into a copy (only offered when a
+ * "Save with <look>" bakes the selected adaptive stock and intensity into a copy (only offered when a
  * non-Standard look is picked). Both fetch over the camera-AP-bound HTTP client and write into
  * `Pictures/GR3` via MediaStore. The [status] line makes success — and any failure — visible.
  */
 @Composable
 private fun SaveBar(
     picked: String?,
+    effectStrength: Float,
     saving: Boolean,
     status: String?,
     onSaveOriginal: () -> Unit,
@@ -281,7 +328,11 @@ private fun SaveBar(
         Spacer(Modifier.weight(1f))
         if (picked != null) {
             TextButton(onClick = onSaveEdited, enabled = !saving) {
-                Text("Save with ${FilmLookCatalog.displayNameFor(picked)}", color = GrTheme.colors.accent)
+                Text(
+                    "Save with ${FilmLookCatalog.displayNameFor(picked)} · " +
+                        "${(effectStrength * 100f).roundToInt()}%",
+                    color = GrTheme.colors.accent,
+                )
             }
         }
     }
@@ -300,6 +351,7 @@ private fun ViewerHeader(
     id: PhotoId,
     isEdited: Boolean,
     appliedLook: String?,
+    appliedIntensity: Float,
     onBack: () -> Unit,
 ) {
     Row(
@@ -319,7 +371,12 @@ private fun ViewerHeader(
                     )
                 }
             }
-            val tag = if (isEdited) FilmLookCatalog.displayNameFor(appliedLook) else "As shot"
+            val tag = if (isEdited) {
+                "${FilmLookCatalog.displayNameFor(appliedLook)} · " +
+                    "${(appliedIntensity * 100f).roundToInt()}%"
+            } else {
+                "As shot"
+            }
             Text(tag, style = MaterialTheme.typography.labelSmall, color = GrTheme.colors.inkSoft)
         }
         TextButton(onClick = onBack) { Text("Done", color = GrTheme.colors.accent) }
@@ -335,6 +392,7 @@ private fun PhotoStage(
     bitmap: ImageBitmap,
     look: String?,
     developed: Boolean,
+    effectStrength: Float,
     showingBefore: Boolean,
     onPressChange: (Boolean) -> Unit,
 ) {
@@ -363,12 +421,16 @@ private fun PhotoStage(
         // overlay. Skipped for Standard and while holding "before".
         if (!showingBefore && look != null && !developed) {
             val stops = LookSwatch.stopsFor(look)
+            val strength = effectStrength.coerceIn(0.5f, 1.5f)
             Box(
                 modifier = Modifier
                     .matchImageOverlay()
                     .background(
                         Brush.verticalGradient(
-                            listOf(stops.top.copy(alpha = 0.16f), stops.bottom.copy(alpha = 0.24f)),
+                            listOf(
+                                stops.top.copy(alpha = (0.16f * strength).coerceAtMost(0.36f)),
+                                stops.bottom.copy(alpha = (0.24f * strength).coerceAtMost(0.36f)),
+                            ),
                         ),
                     ),
             )
@@ -378,6 +440,9 @@ private fun PhotoStage(
 
 /** Overlay fills the stage; kept as a helper so the tint tracks the image box. */
 private fun Modifier.matchImageOverlay(): Modifier = this.fillMaxSize()
+
+/** Ricoh reports ISO as strings such as "500"; unknown/auto values intentionally stay null. */
+private fun parseIso(value: String?): Int? = value?.trim()?.toIntOrNull()?.takeIf { it > 0 }
 
 /** Film-edge metadata readout: frame id and, when known, the exposure triad. */
 @Composable
@@ -411,10 +476,56 @@ private fun formatExposure(info: PhotoInfo): String {
     return if (parts.isEmpty()) "· · ·" else parts.joinToString("  ·  ")
 }
 
+/** 50–150% stock intensity. 100% is calibrated; 5% ticks plus debounce bound preview churn. */
+@Composable
+private fun EffectStrengthControl(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "EFFECT",
+                style = MaterialTheme.typography.labelSmall,
+                color = GrTheme.colors.inkSoft,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "${(value * 100f).roundToInt()}%",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (abs(value - 1f) < 0.01f) GrTheme.colors.inkSoft else GrTheme.colors.accent,
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = { raw ->
+                onValueChange((raw * 20f).roundToInt() / 20f)
+            },
+            valueRange = 0.5f..1.5f,
+            steps = 19,
+            colors = SliderDefaults.colors(
+                thumbColor = GrTheme.colors.accent,
+                activeTrackColor = GrTheme.colors.accent,
+                inactiveTrackColor = GrTheme.colors.hair,
+                activeTickColor = GrTheme.colors.paper,
+                inactiveTickColor = GrTheme.colors.inkSoft,
+            ),
+            modifier = Modifier.fillMaxWidth().height(34.dp),
+        )
+    }
+}
+
 @Composable
 private fun ViewerActions(
     picked: String?,
     appliedLook: String?,
+    effectStrength: Float,
+    appliedIntensity: Float,
     onApply: () -> Unit,
     onReset: () -> Unit,
 ) {
@@ -431,9 +542,16 @@ private fun ViewerActions(
         }
         Spacer(Modifier.weight(1f))
         // Applying makes `picked` sticky, so the next frame opens pre-set to it.
-        TextButton(onClick = onApply, enabled = picked != appliedLook) {
+        val intensityChanged =
+            picked != null && abs(effectStrength - appliedIntensity.coerceIn(0.5f, 1.5f)) > 0.01f
+        TextButton(onClick = onApply, enabled = picked != appliedLook || intensityChanged) {
             Text(
-                text = if (picked == null) "Apply" else "Apply ${FilmLookCatalog.displayNameFor(picked)}",
+                text = if (picked == null) {
+                    "Apply"
+                } else {
+                    "Apply ${FilmLookCatalog.displayNameFor(picked)} · " +
+                        "${(effectStrength * 100f).roundToInt()}%"
+                },
                 color = GrTheme.colors.accent,
             )
         }

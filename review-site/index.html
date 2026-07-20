@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0b0a" />
+    <title>GR Film Lab — Review</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell" id="app" aria-busy="true">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="GR Film Lab home">
+          <span class="brand-mark">GR</span>
+          <span class="brand-copy">
+            <strong>Film Lab</strong>
+            <small>Adaptive look review</small>
+          </span>
+        </a>
+
+        <div class="render-summary" aria-label="Render information">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span id="renderSummary">Loading review masters…</span>
+        </div>
+
+        <div class="top-actions">
+          <button class="button subtle" id="keyboardHelp" type="button" aria-label="Show keyboard shortcuts">
+            Shortcuts
+          </button>
+          <button class="button primary" id="exportReview" type="button">
+            Export review
+          </button>
+        </div>
+      </header>
+
+      <div class="layout">
+        <aside class="panel scene-panel" aria-label="Camera scenes">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Source frames</p>
+              <h2>Scenes</h2>
+            </div>
+            <span class="count-pill" id="sceneCount">—</span>
+          </div>
+
+          <div class="segmented compact" id="sourceFilters" aria-label="Filter scenes by source type">
+            <button type="button" class="active" data-source="all">All</button>
+            <button type="button" data-source="JPEG">JPEG</button>
+            <button type="button" data-source="DNG">DNG</button>
+          </div>
+
+          <div class="scene-list" id="sceneList" role="list"></div>
+        </aside>
+
+        <main class="workspace">
+          <section class="workspace-heading">
+            <div class="scene-title">
+              <p class="eyebrow" id="scenePosition">Scene — of —</p>
+              <div class="title-row">
+                <h1 id="sceneName">Loading…</h1>
+                <span class="source-badge" id="sourceBadge">—</span>
+              </div>
+              <div class="scene-facts" id="sceneFacts"></div>
+            </div>
+
+            <div class="scene-nav" aria-label="Scene navigation">
+              <button class="icon-button" id="previousScene" type="button" aria-label="Previous scene">←</button>
+              <button class="icon-button" id="nextScene" type="button" aria-label="Next scene">→</button>
+            </div>
+          </section>
+
+          <section class="viewer-card">
+            <div class="viewer-toolbar">
+              <div class="segmented" id="viewModes" aria-label="Comparison mode">
+                <button type="button" data-mode="original">Original</button>
+                <button type="button" class="active" data-mode="compare">Compare</button>
+                <button type="button" data-mode="look">Look</button>
+              </div>
+
+              <div class="toolbar-cluster">
+                <span class="toolbar-label">Zoom</span>
+                <div class="segmented compact" id="zoomModes">
+                  <button type="button" class="active" data-zoom="fit">Fit</button>
+                  <button type="button" data-zoom="1">100%</button>
+                  <button type="button" data-zoom="2">200%</button>
+                </div>
+                <a class="button subtle open-image" id="openImage" href="#" target="_blank" rel="noreferrer">
+                  Open image ↗
+                </a>
+                <button class="icon-button" id="fullscreen" type="button" aria-label="View full screen">⛶</button>
+              </div>
+            </div>
+
+            <div class="viewport" id="viewport" tabindex="0" aria-label="High-resolution image comparison">
+              <div class="canvas" id="canvas">
+                <div class="image-stage" id="imageStage">
+                  <img id="originalImage" class="review-image original-image" alt="" draggable="false" />
+                  <img id="lookImage" class="review-image look-image" alt="" draggable="false" />
+                  <img id="strongLookImage" class="review-image strong-look-image" alt="" draggable="false" />
+                  <div class="compare-divider" id="compareDivider" aria-hidden="true">
+                    <span class="divider-handle">↔</span>
+                  </div>
+                  <span class="image-label label-original">Original</span>
+                  <span class="image-label label-look" id="lookLabel">Look</span>
+                  <div class="image-loading" id="imageLoading">
+                    <span class="spinner"></span>
+                    <span>Loading 3000 px render</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="viewer-footer">
+              <p>
+                Drag across the image to compare. Use <kbd>1</kbd> for pixel-level grain,
+                <kbd>F</kbd> for fullscreen, and hold <kbd>Space</kbd> while dragging to pan.
+              </p>
+              <p class="resolution" id="resolution">—</p>
+            </div>
+          </section>
+        </main>
+
+        <aside class="panel look-panel" aria-label="Film looks and review notes">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Developed result</p>
+              <h2>Film looks</h2>
+            </div>
+            <span class="count-pill" id="lookCount">—</span>
+          </div>
+
+          <section class="intensity-card" aria-labelledby="intensityTitle">
+            <div class="intensity-heading">
+              <div>
+                <p class="eyebrow">Stock character</p>
+                <h3 id="intensityTitle">Effect intensity</h3>
+              </div>
+              <strong id="intensityValue">100%</strong>
+            </div>
+            <input
+              id="intensitySlider"
+              type="range"
+              min="50"
+              max="150"
+              step="5"
+              value="100"
+              aria-label="Film effect intensity"
+            />
+            <div class="intensity-scale" aria-hidden="true">
+              <span>50</span>
+              <span>Calibrated</span>
+              <span>150</span>
+            </div>
+          </section>
+
+          <div class="look-list" id="lookList" role="list"></div>
+
+          <section class="adaptation-card" aria-labelledby="adaptationTitle">
+            <div class="adaptation-heading">
+              <p class="eyebrow">Scene-aware decisions</p>
+              <h3 id="adaptationTitle">Adaptive develop</h3>
+            </div>
+            <div class="metrics" id="adaptationMetrics"></div>
+          </section>
+
+          <section class="feedback-card" aria-labelledby="feedbackTitle">
+            <div class="feedback-heading">
+              <div>
+                <p class="eyebrow">Your call</p>
+                <h3 id="feedbackTitle">Review this result</h3>
+              </div>
+              <span class="save-state" id="saveState">Local</span>
+            </div>
+
+            <div class="verdicts" id="verdicts" aria-label="Review verdict">
+              <button type="button" data-verdict="keep">Keep</button>
+              <button type="button" data-verdict="tweak">Tweak</button>
+              <button type="button" data-verdict="reject">Reject</button>
+            </div>
+
+            <label class="notes-label" for="reviewNotes">What should change?</label>
+            <textarea
+              id="reviewNotes"
+              rows="3"
+              placeholder="e.g. skin too orange, highlights too clean, grain too coarse…"
+            ></textarea>
+          </section>
+        </aside>
+      </div>
+
+      <div class="dialog-backdrop" id="shortcutDialog" hidden>
+        <section class="shortcut-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcutTitle">
+          <div class="dialog-heading">
+            <div>
+              <p class="eyebrow">Fast review</p>
+              <h2 id="shortcutTitle">Keyboard shortcuts</h2>
+            </div>
+            <button class="icon-button" id="closeShortcuts" type="button" aria-label="Close shortcuts">×</button>
+          </div>
+          <dl>
+            <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Previous or next scene</dd></div>
+            <div><dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Previous or next film look</dd></div>
+            <div><dt><kbd>O</kbd></dt><dd>Toggle original and comparison</dd></div>
+            <div><dt><kbd>0</kbd> <kbd>1</kbd> <kbd>2</kbd></dt><dd>Fit, 100%, or 200% zoom</dd></div>
+            <div><dt><kbd>−</kbd> <kbd>+</kbd></dt><dd>Decrease or increase effect intensity</dd></div>
+            <div><dt><kbd>F</kbd></dt><dd>Toggle fullscreen</dd></div>
+            <div><dt><kbd>Space</kbd> + drag</dt><dd>Pan while zoomed</dd></div>
+          </dl>
+        </section>
+      </div>
+
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </div>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
