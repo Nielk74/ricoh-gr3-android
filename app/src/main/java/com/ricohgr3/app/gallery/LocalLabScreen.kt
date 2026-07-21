@@ -28,6 +28,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -99,6 +100,8 @@ fun LocalLabScreen(
         mutableStateOf(stickyIntensity.coerceIn(0.5f, 1.5f))
     }
     var renderingIntent by remember(pickedUri) { mutableStateOf(stickyRenderingIntent) }
+    // Clockwise rotation baked into both the preview and the edited save (0/90/180/270).
+    var rotation by remember(pickedUri) { mutableIntStateOf(0) }
     var showingBefore by remember { mutableStateOf(false) }
     var developedPreview by remember(pickedUri) { mutableStateOf<ImageBitmap?>(null) }
 
@@ -152,11 +155,26 @@ fun LocalLabScreen(
         loading = false
     }
 
+    // Rotate the decoded preview off the main thread; kept separate from the develop so tapping
+    // a rotate button doesn't re-run the film pipeline for the Standard (undeveloped) state.
+    var rotatedBitmap by remember(pickedUri) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(rawBitmap, rotation) {
+        val src = rawBitmap
+        rotatedBitmap = if (src == null || rotation % 360 == 0) {
+            null
+        } else {
+            withContext(Dispatchers.Default) {
+                runCatching { rotateBitmap(src, rotation) }.getOrNull()
+            }
+        }
+    }
+    val orientedBitmap = rotatedBitmap ?: rawBitmap
+
     // Re-develop the preview whenever the look/strength/intent changes — the same debounced,
     // never-crashing pattern as the camera viewer.
-    LaunchedEffect(picked, effectStrength, renderingIntent, rawBitmap) {
+    LaunchedEffect(picked, effectStrength, renderingIntent, orientedBitmap) {
         delay(90)
-        val src = rawBitmap
+        val src = orientedBitmap
         val stockId = picked
         developedPreview = if (src == null || stockId == null) {
             null // Standard, or nothing loaded → show the raw frame
@@ -185,6 +203,7 @@ fun LocalLabScreen(
     fun runSave(edited: Boolean) {
         if (saving) return
         val uri = pickedUri ?: return
+        if (edited && picked == null && rotation % 360 == 0) return
         saving = true
         saveStatus = if (edited) "Saving edited…" else "Saving original…"
         scope.launch {
@@ -199,12 +218,13 @@ fun LocalLabScreen(
                     saveEditedLocal(
                         bytes,
                         name,
-                        requireNotNull(picked),
+                        picked,
                         exporter,
                         filmLookLoader,
                         effectStrength = effectStrength,
                         renderingIntent = renderingIntent,
                         exportQuality = editedExportQuality,
+                        rotationDegrees = rotation,
                     )
                 } else {
                     val mime = withContext(Dispatchers.IO) {
@@ -244,12 +264,13 @@ fun LocalLabScreen(
             contentAlignment = Alignment.Center,
         ) {
             when {
-                rawBitmap != null -> {
+                orientedBitmap != null -> {
                     Image(
                         bitmap = if (!showingBefore) {
-                            developedPreview ?: rawBitmap!!.asImageBitmap()
+                            developedPreview ?: orientedBitmap.asImageBitmap()
                         } else {
-                            rawBitmap!!.asImageBitmap()
+                            // "Before" keeps the rotation but drops the developed look.
+                            orientedBitmap.asImageBitmap()
                         },
                         contentDescription = null,
                         contentScale = ContentScale.Fit,
@@ -332,9 +353,16 @@ fun LocalLabScreen(
             )
         }
 
+        RotationControl(
+            rotation = rotation,
+            enabled = orientedBitmap != null,
+            onRotate = { delta -> rotation = ((rotation + delta) % 360 + 360) % 360 },
+        )
+
         LocalLabSaveBar(
-            hasPhoto = rawBitmap != null,
+            hasPhoto = orientedBitmap != null,
             picked = picked,
+            rotation = rotation,
             effectStrength = effectStrength,
             renderingIntent = renderingIntent,
             saving = saving,
@@ -342,6 +370,38 @@ fun LocalLabScreen(
             onSaveOriginal = { runSave(edited = false) },
             onSaveEdited = { runSave(edited = true) },
         )
+    }
+}
+
+/** 90° steps in either direction plus a 180° flip; deltas accumulate modulo 360. */
+@Composable
+private fun RotationControl(
+    rotation: Int,
+    enabled: Boolean,
+    onRotate: (Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "ROTATE" + if (rotation % 360 != 0) "  ·  ${rotation % 360}°" else "",
+            style = MaterialTheme.typography.labelSmall,
+            color = GrTheme.colors.inkSoft,
+            modifier = Modifier.padding(start = 4.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        listOf("−90°" to -90, "180°" to 180, "+90°" to 90).forEach { (label, delta) ->
+            TextButton(onClick = { onRotate(delta) }, enabled = enabled) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = GrTheme.colors.inkSoft,
+                )
+            }
+        }
     }
 }
 
@@ -379,6 +439,7 @@ private fun LocalLabHeader(
 private fun LocalLabSaveBar(
     hasPhoto: Boolean,
     picked: String?,
+    rotation: Int,
     effectStrength: Float,
     renderingIntent: RenderingIntent,
     saving: Boolean,
@@ -404,6 +465,7 @@ private fun LocalLabSaveBar(
             Text("Save original", color = GrTheme.colors.ink)
         }
         Spacer(Modifier.weight(1f))
+        // The edited bake is offered whenever there's an edit to bake: a look and/or a rotation.
         if (picked != null) {
             TextButton(onClick = onSaveEdited, enabled = hasPhoto && !saving) {
                 Text(
@@ -412,6 +474,10 @@ private fun LocalLabSaveBar(
                         renderingIntent.displayName,
                     color = GrTheme.colors.accent,
                 )
+            }
+        } else if (rotation % 360 != 0) {
+            TextButton(onClick = onSaveEdited, enabled = hasPhoto && !saving) {
+                Text("Save rotated", color = GrTheme.colors.accent)
             }
         }
     }

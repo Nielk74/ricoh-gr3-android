@@ -47,7 +47,7 @@ android {
         versionCode = (buildParam("VERSION_CODE")?.toIntOrNull()) ?: 1
         // Keep the local fallback aligned with the newest published tag. Release
         // builds override it from the tag in .github/workflows/release.yml.
-        versionName = buildParam("VERSION_NAME") ?: "0.9.2"
+        versionName = buildParam("VERSION_NAME") ?: "0.9.3"
         buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
     }
 

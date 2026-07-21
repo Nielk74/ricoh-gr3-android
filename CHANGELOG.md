@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.9.3 — 2026-07-21
+
+- Added 90°/180°/−90° rotation to the hidden **Local lab**, baked into both the preview and the
+  edited save; a rotate-only save is offered when no film look is selected.
+
 ## v0.9.2 — 2026-07-21
 
 - Added a hidden **Local lab** (triple-tap the "GR" wordmark on the connect screen) that develops

@@ -140,27 +140,34 @@ suspend fun saveEdited(
  * involved) through the film stock and save the result as a new JPEG, exactly like an edited
  * camera frame. [baseFile] is only used for naming (`name.jpg` → `name_edit.jpg`) and the RAW
  * check; there is no camera metadata, so [iso] stays unknown (grain falls back to its default).
+ *
+ * [rotationDegrees] (0/90/180/270) is baked in before the develop. A `null` [filmLookId] skips
+ * the develop entirely, giving a rotate-only save; the caller must pass at least one edit.
  */
 suspend fun saveEditedLocal(
     bytes: ByteArray,
     baseFile: String,
-    filmLookId: String,
+    filmLookId: String?,
     exporter: PhotoExporter,
     loader: FilmLookLoader? = null,
     effectStrength: Float = 1f,
     renderingIntent: RenderingIntent = RenderingIntent.SMART,
     exportQuality: EditedExportQuality = EditedExportQuality.HIGH,
+    rotationDegrees: Int = 0,
 ): SaveOutcome {
+    require(filmLookId != null || rotationDegrees % 360 != 0) { "saveEditedLocal needs an edit" }
     val isRaw = baseFile.substringAfterLast('.', "").equals("DNG", true)
     val maxPixels = developmentPixelLimit(Runtime.getRuntime().maxMemory(), exportQuality)
     val decoded = withContext(Dispatchers.Default) { decodeBounded(bytes, maxPixels) }
         ?: throw java.io.IOException("Could not decode $baseFile for editing")
+    val oriented = rotateBitmap(decoded, rotationDegrees)
+    if (oriented !== decoded) decoded.recycle()
 
     val edited = withContext(Dispatchers.Default) {
-        val developed = loader?.resolve(filmLookId)
+        val developed = filmLookId?.let { loader?.resolve(it) }
             ?.let { (film, lut) ->
                 developForSave(
-                    decoded, film, lut,
+                    oriented, film, lut,
                     raw = isRaw,
                     iso = null,
                     effectStrength = effectStrength,
@@ -171,13 +178,28 @@ suspend fun saveEditedLocal(
                 )
             }
         if (developed != null) {
-            decoded.recycle()
+            oriented.recycle()
             developed
+        } else if (filmLookId != null) {
+            applyLookTint(oriented, filmLookId, effectStrength)
         } else {
-            applyLookTint(decoded, filmLookId, effectStrength)
+            // Rotate-only save: nothing to bake, keep the oriented decode.
+            oriented
         }
     }
     return exportDeveloped(edited, baseFile, exporter, exportQuality)
+}
+
+/**
+ * Rotate [src] by [degrees] (any multiple of 90; normalized to 0/90/180/270). Returns [src]
+ * itself when no rotation is needed; otherwise a new filtered bitmap — the caller owns both and
+ * must recycle whichever it drops.
+ */
+internal fun rotateBitmap(src: Bitmap, degrees: Int): Bitmap {
+    val normalized = ((degrees % 360) + 360) % 360
+    if (normalized == 0) return src
+    val matrix = android.graphics.Matrix().apply { postRotate(normalized.toFloat()) }
+    return Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
 }
 
 /**
