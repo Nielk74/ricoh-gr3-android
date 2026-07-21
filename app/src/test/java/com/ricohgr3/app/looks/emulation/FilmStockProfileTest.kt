@@ -143,19 +143,56 @@ class FilmStockProfileTest {
         }
     }
 
-    @Test fun catalogProfilesAreExplicitlyManufacturerAnchoredNotLabMeasured() {
+    @Test fun catalogProfilesDeclareTheirActualCalibrationBasisAndNeverClaimLabMeasurement() {
         for (entry in FilmLookCatalog.entries) {
             val profile = entry.model.profile
             assertEquals(entry.look.id, profile.stockId)
-            assertEquals(
-                "${entry.look.id} must not claim unperformed lab calibration",
-                CalibrationBasis.MANUFACTURER_ANCHORED,
-                profile.provenance.basis,
+            val expected = if (entry.look.id == "portra400" || entry.look.id == "portra800") {
+                CalibrationBasis.MANUFACTURER_DIGITIZED
+            } else {
+                CalibrationBasis.MANUFACTURER_ANCHORED
+            }
+            assertEquals("${entry.look.id} calibration basis", expected, profile.provenance.basis)
+            assertTrue(
+                "${entry.look.id} must not claim an unperformed lab calibration",
+                profile.provenance.basis != CalibrationBasis.LAB_MEASURED,
             )
             assertTrue(profile.process.isNotBlank())
             assertTrue(profile.printOrScan.isNotBlank())
             assertTrue(profile.negative.dyeCapacity.r > 0f)
         }
+    }
+
+    @Test fun manufacturerCharacteristicAnchorPreservesEndpointsReferenceGreyAndOrdering() {
+        val anchor = PortraSensitometry.PORTRA_400.redAnchor(influence = 1f)
+        val samples = (0..100).map { anchor.normalizedDensity(it / 100f) }
+
+        assertEquals(0f, samples.first(), 0f)
+        assertEquals(1f, samples.last(), 0f)
+        assertEquals(0.18f, anchor.normalizedDensity(0.18f), 0.0001f)
+        assertTrue(
+            "digitized characteristic response must remain monotonic",
+            samples.zipWithNext().all { (first, second) -> second >= first },
+        )
+    }
+
+    @Test fun portraProfilesCarryDistinctJanuary2025StatusMCurvesAndAbsoluteDensities() {
+        val p400 = PortraSensitometry.PORTRA_400
+        val p800 = PortraSensitometry.PORTRA_800
+
+        assertEquals(CalibrationBasis.MANUFACTURER_DIGITIZED, p400.provenance.basis)
+        assertEquals(CalibrationBasis.MANUFACTURER_DIGITIZED, p800.provenance.basis)
+        assertEquals("January 2025", p400.provenance.sourceRevision)
+        assertEquals("January 2025", p800.provenance.sourceRevision)
+        assertTrue(p400.provenance.sourceUrl!!.endsWith("e4050.pdf"))
+        assertTrue(p800.provenance.sourceUrl!!.endsWith("e4040.pdf"))
+        assertTrue("PORTRA 800 blue base/fog is higher in the published plot",
+            p800.negative.baseFog.b > p400.negative.baseFog.b)
+        assertTrue("the two graph shapes must not collapse to one response",
+            kotlin.math.abs(
+                p800.blueAnchor(1f).normalizedDensity(0.50f) -
+                    p400.blueAnchor(1f).normalizedDensity(0.50f),
+            ) > 0.004f)
     }
 
     @Test fun triXAndHp5UseDistinctPanchromaticCaptureResponses() {

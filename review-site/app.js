@@ -478,7 +478,9 @@ function setFilmExposure(value) {
   const target = clamp(Math.round(Number(value)), -1, 1);
   const result = currentScene()?.looks[currentLook()?.id];
   if (target !== 0 && !result?.exposureMasters?.[String(target)]) {
-    showToast("Exposure brackets are rendered for Portra 400, CineStill 800T, and Vision3 250D.");
+    showToast(
+      "Exposure brackets are rendered for Portra 400/800, CineStill 800T, and Vision3 250D.",
+    );
     return;
   }
   state.filmExposure = target;
@@ -496,7 +498,7 @@ function syncFilmExposureControl(result) {
   elements.filmExposureValue.textContent = filmExposureText(state.filmExposure);
   elements.filmExposureHint.textContent = hasBracket
     ? "Exposure is applied before dye formation; intensity remains an independent control."
-    : "Bracketed calibration is available on Portra 400, CineStill 800T, and Vision3 250D.";
+    : "Bracketed calibration is available on Portra 400/800, CineStill 800T, and Vision3 250D.";
 }
 
 function resultMasters(result) {

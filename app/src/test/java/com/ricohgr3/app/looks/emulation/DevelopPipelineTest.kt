@@ -451,6 +451,58 @@ class DevelopPipelineTest {
         assertTrue(portra400.size < portra800.size)
         assertTrue(ektar.amount < cinestill800.amount)
         assertTrue(ektar.size < cinestill800.size)
+        assertTrue(portra400.smoothAreaBoost > 0f)
+        assertTrue(portra800.smoothAreaBoost > 0f)
+        assertTrue(portra400.detailSuppression > 0f)
+        assertTrue(portra400.detailSuppression > portra400.smoothAreaBoost)
+        assertTrue(portra800.detailSuppression > portra800.smoothAreaBoost)
+        assertTrue(portra800.highlightPersistence > portra400.highlightPersistence)
+        assertTrue(FilmLookCatalog.entryFor("portra400")!!.look.whitePointRecovery.enabled)
+        assertTrue(FilmLookCatalog.entryFor("portra800")!!.look.whitePointRecovery.enabled)
+    }
+
+    @Test fun diffuseWhiteRecoveryReExpandsOnlyTheCompressedUpperRange() {
+        val count = 1_000
+        val r = FloatArray(count) { index ->
+            when {
+                index < 400 -> 0.45f
+                index < 700 -> 0.72f
+                index < 995 -> 0.90f
+                else -> 1f
+            }
+        }
+        val g = r.copyOf()
+        val b = r.copyOf()
+        val applied = DevelopPipeline.recoverDiffuseWhite(
+            r, g, b,
+            sourceP99Linear = ColorMath.srgbToLinear(0.98f),
+            params = WhitePointRecoveryParams(amount = 0.80f),
+        )
+
+        assertTrue("bright source scene should recover its white anchor", applied)
+        assertEquals("lower midtones stay authored", 0.45f, r[0], 1e-6f)
+        assertTrue("upper midtone ordering survives", r[400] in 0.72f..r[700])
+        assertTrue("compressed diffuse white is re-expanded", r[700] > 0.96f)
+        assertEquals("display white remains exact", 1f, r.last(), 1e-6f)
+        assertTrue("neutral upper tones remain neutral", r.indices.all {
+            kotlin.math.abs(r[it] - g[it]) < 1e-6f &&
+                kotlin.math.abs(g[it] - b[it]) < 1e-6f
+        })
+    }
+
+    @Test fun diffuseWhiteRecoveryDoesNotInventWhiteInLowKeyScenes() {
+        val r = FloatArray(128) { 0.78f }
+        val g = r.copyOf()
+        val b = r.copyOf()
+        val before = r.copyOf()
+        val applied = DevelopPipeline.recoverDiffuseWhite(
+            r, g, b,
+            sourceP99Linear = ColorMath.srgbToLinear(0.78f),
+            params = WhitePointRecoveryParams(amount = 1f),
+        )
+
+        assertTrue("low-key source has no credible white anchor", !applied)
+        assertTrue(r.contentEquals(before) && g.contentEquals(before) && b.contentEquals(before))
     }
 
     @Test fun halationBrightensNeighboursOfHighlight() {

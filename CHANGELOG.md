@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.4 — 2026-07-22
+
+- Recalibrated Portra 400 and Portra 800 around the accepted 35 mm grain footprint: smooth and
+  defocused tone carries clearer emulsion texture, focused detail is protected, and bright diffuse
+  tone keeps texture without contaminating paper white.
+- Added bounded Smart white-point recovery after the film shoulder so compressed highlights keep
+  their spacing while credible white objects return toward white.
+- Anchored the Portra channel shapes to conservatively digitized Kodak January 2025 Status-M
+  characteristic curves and expanded the high-resolution review tooling and regression coverage.
+
 ## v0.9.3 — 2026-07-21
 
 - Added 90°/180°/−90° rotation to the hidden **Local lab**, baked into both the preview and the

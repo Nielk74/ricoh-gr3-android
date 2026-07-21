@@ -30,6 +30,7 @@ sourceSets {
             "com/ricohgr3/app/looks/emulation/LutCube.kt",
             "com/ricohgr3/app/looks/emulation/FilmLook.kt",
             "com/ricohgr3/app/looks/emulation/FilmStockProfile.kt",
+            "com/ricohgr3/app/looks/emulation/PortraSensitometry.kt",
             "com/ricohgr3/app/looks/emulation/FilmFidelityMetrics.kt",
             "com/ricohgr3/app/looks/emulation/FilmOptics.kt",
             "com/ricohgr3/app/looks/emulation/FilmLutFactory.kt",
@@ -105,6 +106,8 @@ tasks.register<JavaExec>("renderReviewSite") {
         (project.findProperty("reviewInput") as String?) ?: "build/review-sources"
     val reviewOutput =
         (project.findProperty("reviewOutput") as String?) ?: "build/film-review"
+    val reviewBaseline = project.findProperty("reviewBaseline") as String?
+    val reviewLooks = project.findProperty("reviewLooks") as String?
     // A caller-supplied prepared input is useful for a fast, focused calibration loop. The full
     // task still prepares every JPEG/DNG reference automatically.
     if (!project.hasProperty("reviewInput")) dependsOn(prepareReviewSources)
@@ -117,6 +120,8 @@ tasks.register<JavaExec>("renderReviewSite") {
         "review-site",
         reviewOutput,
     )
+    reviewBaseline?.let { args("--baseline=$it") }
+    reviewLooks?.let { args("--looks=$it") }
 }
 
 /** Render high-resolution false-colour overlays for auditing selective skin isolation. */

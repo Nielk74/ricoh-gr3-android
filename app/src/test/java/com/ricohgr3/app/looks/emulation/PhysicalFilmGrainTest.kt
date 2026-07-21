@@ -128,6 +128,83 @@ class PhysicalFilmGrainTest {
         assertTrue("highlight response must roll off ($white < $mid)", white < mid * 0.45)
     }
 
+    @Test fun highlightPersistenceRestoresBrightToneTextureWithoutTouchingPaperWhite() {
+        fun deviationAt(level: Float, persistence: Float): Double {
+            val result = renderNeutral(
+                256, 192, level,
+                grain.copy(chroma = 0f, highlightPersistence = persistence),
+                renderSeed = 82L,
+                plane = canonicalCrop(256),
+            )
+            return standardDeviation(FloatArray(result.size) { result[it] - level })
+        }
+
+        val rolledHighlight = deviationAt(0.92f, 0f)
+        val persistentHighlight = deviationAt(0.92f, 0.55f)
+        val rolledMid = deviationAt(0.45f, 0f)
+        val persistentMid = deviationAt(0.45f, 0.55f)
+        assertTrue(
+            "highlight persistence must reveal grain in bright diffuse tone " +
+                "($rolledHighlight -> $persistentHighlight)",
+            persistentHighlight > rolledHighlight * 1.25,
+        )
+        assertEquals("midtone response is unchanged", rolledMid, persistentMid, 1e-7)
+
+        val white = renderNeutral(
+            32, 24, 1f,
+            grain.copy(highlightPersistence = 1f),
+            renderSeed = 82L,
+            plane = canonicalCrop(32),
+        )
+        assertTrue("paper white remains an exact endpoint", white.all { it == 1f })
+    }
+
+    @Test fun smartLocalVisibilityFavoursSmoothToneOverFocusedTexture() {
+        val width = 320
+        val height = 192
+        val count = width * height
+        val original = FloatArray(count) { index ->
+            val x = index % width
+            val y = index / width
+            // Only five code-value percentage points around grey: the guard must recognize fine
+            // subject texture, not merely obvious black/white edges.
+            if (x < width / 2) 0.50f else if ((x + y) % 2 == 0) 0.475f else 0.525f
+        }
+        val r = original.copyOf()
+        val g = original.copyOf()
+        val b = original.copyOf()
+        PhysicalFilmGrain.apply(
+            r, g, b, width, height,
+            grain.copy(
+                chroma = 0f,
+                smoothAreaBoost = 0.25f,
+                detailSuppression = 0.25f,
+            ),
+            renderSeed = 711L,
+            filmPlane = canonicalCrop(width),
+        )
+
+        val smoothResidual = ArrayList<Float>()
+        val detailResidual = ArrayList<Float>()
+        for (y in 8 until height - 8) {
+            for (x in 8 until width / 2 - 8) {
+                val index = y * width + x
+                smoothResidual += r[index] - original[index]
+            }
+            for (x in width / 2 + 8 until width - 8) {
+                val index = y * width + x
+                detailResidual += r[index] - original[index]
+            }
+        }
+        val smoothStd = standardDeviation(smoothResidual.toFloatArray())
+        val detailStd = standardDeviation(detailResidual.toFloatArray())
+        assertTrue(
+            "smooth/defocused tone needs more visible grain than focused detail " +
+                "($smoothStd vs $detailStd)",
+            smoothStd > detailStd * 1.20,
+        )
+    }
+
     @Test fun rgbVariationIsDistinctButTightlyCorrelated() {
         val width = 256
         val height = 192

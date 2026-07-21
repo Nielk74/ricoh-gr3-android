@@ -13,7 +13,7 @@ difference for 90% of observers.
 | 35mm / 135 stock | 4×6 in | 8×10 in | 16×20 in |
 |---|---:|---:|---:|
 | [Portra 400, E-4050](https://www.kodakprofessional.com/sites/default/files/2025-07/e4050.pdf) | 37 | 59 | 89 |
-| [Portra 800, E-4040](https://imaging.kodakalaris.com/sites/default/files/files/products/e4040_portra_800.pdf) | 48 | 70 | 99 |
+| [Portra 800, E-4040](https://www.kodakprofessional.com/sites/default/files/2025-07/e4040.pdf) | 48 | 70 | 99 |
 
 The 11-point separation is about 2.75 perceptual steps at every listed enlargement. Therefore the
 app must make both 35mm stocks visibly textured at normal export size, with Portra 800
@@ -69,24 +69,33 @@ residuals into emulsion ground truth.
 
 ## 4. Model decision
 
-- Raise density amplitude from `0.028 → 0.058` for Portra 400 and `0.040 → 0.088` for
-  Portra 800.
-- Keep the catalog ordering and authored size/clumping anchors (`1.65`/`0.13` and
-  `1.95`/`0.22`), but interpret size on a 36 mm film plane rather than in output pixels. These
-  numbers are visual calibrations, not measured crystal diameters.
+- The 35 mm authored density amplitudes are `0.060` for Portra 400 and `0.092` for Portra 800;
+  Portra 800 retains its independent `0.92` stock-scale factor. The crystal-size/clumping anchors
+  are now `2.15`/`0.16` and `2.55`/`0.25`. Size is interpreted on a 36 mm film plane rather than
+  in output pixels; these are visual calibrations, not measured crystal diameters.
+- Smart rendering no longer lets one frame-global texture score suppress the complete grain
+  field. A bounded 480-pixel canonical detail map locally raises visibility in continuous tone
+  and defocus (`+0.35`/`+0.36`) while reducing it over focused edges and texture
+  (`-0.45`/`-0.44`). Thus a smooth background can carry more visible emulsion structure without
+  adding the same amount over eyelashes, pores, foliage, lettering, or architecture.
+- The app and review lab use the accepted 36×24 mm mapping. Alternative enlargement scales are
+  not part of the calibrated model.
 - Keep chroma restrained and tied to the same luminance crystal. Scanner references show more
   colour variation, but its magnitude is too scanner-dependent to copy safely.
 - Preserve the tone-dependent density model: useful shadows and midtones reveal grain; true
-  printed black and bright highlights mask it. The 6×7 bright-sky reference supports the
-  highlight roll-off, while the lifted 35mm shadow demonstrates why underexposure must increase
-  irregularity without adding a uniform grey noise overlay.
+  printed black and paper white remain exact endpoints. Stock-specific persistence (`0.35` for
+  Portra 400, `0.42` for Portra 800) retains part of the density texture in bright diffuse tone
+  instead of erasing it too early. The 6×7 bright-sky reference still bounds this response, while
+  the lifted 35mm shadow demonstrates why underexposure must increase irregularity without adding
+  a uniform grey noise overlay.
 - Continue applying grain after colour, physical-scale diffusion, semantic colour handling, and
   halation. Smooth/defocused regions reveal the same film-plane field because less scene detail
   competes with it.
 
 `DevelopPipelineTest.fasterColourStocksCarryLargerMoreVisibleGrain` guards the catalog ordering.
 `PhysicalFilmGrainTest` guards stable per-photo identity, different fields across photos, zero
-mean/endpoints, 720-vs-3000 footprint consistency, midtone response, tightly correlated colour,
-non-repetition, absence of low-frequency clouds, and crop anchoring. Absolute amplitude still
-requires the controlled acquisition and holdout process in
+mean/endpoints, 720-vs-3000 footprint consistency, retained bright-tone texture, smooth-versus-
+focused local ordering, tightly correlated colour, non-repetition, absence of low-frequency
+clouds, and crop anchoring. Absolute amplitude still requires the controlled acquisition and
+holdout process in
 [`FILM_FIDELITY_CALIBRATION.md`](FILM_FIDELITY_CALIBRATION.md).

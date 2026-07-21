@@ -35,6 +35,7 @@ object FilmLookCatalog {
         imageStructure: ImageStructureParams = imageStructure(id),
         halation: HalationParams = HalationParams.NONE,
         grain: GrainParams = GrainParams.NONE,
+        whitePointRecovery: WhitePointRecoveryParams = WhitePointRecoveryParams.NONE,
     ): Entry {
         val profile = stockProfile(id)
         return Entry(
@@ -50,6 +51,7 @@ object FilmLookCatalog {
                 imageStructure = imageStructure,
                 halation = halation,
                 grain = grain,
+                whitePointRecovery = whitePointRecovery,
                 swatchTop = top,
                 swatchBottom = bottom,
                 stock = stock,
@@ -87,6 +89,9 @@ object FilmLookCatalog {
         size: Float,
         clumping: Float,
         seed: Long,
+        smoothAreaBoost: Float = 0f,
+        detailSuppression: Float = 0f,
+        highlightPersistence: Float = 0f,
     ) = GrainParams(
         amount = amount,
         size = size,
@@ -94,6 +99,9 @@ object FilmLookCatalog {
         chroma = 0.06f,
         clumping = clumping,
         seed = seed,
+        smoothAreaBoost = smoothAreaBoost,
+        detailSuppression = detailSuppression,
+        highlightPersistence = highlightPersistence,
     )
 
     private fun skin(
@@ -162,15 +170,9 @@ object FilmLookCatalog {
             kind = FilmMaterialKind.COLOR_NEGATIVE,
             colorBalance = FilmColorBalance.DAYLIGHT,
             process = "C-41",
-            negative = colorNegative,
+            negative = PortraSensitometry.PORTRA_400.negative,
             printOrScan = "Generic restrained color-negative print/scan positive",
-            provenance = manufacturerAnchor(
-                title = "KODAK PROFESSIONAL PORTRA 400 Film Technical Data E-4050",
-                url = "https://www.kodakprofessional.com/sites/default/files/2025-07/" +
-                    "e4050.pdf",
-                note = "Characteristic, spectral-sensitivity, dye-density, MTF, and grain " +
-                    "publications are used as qualitative anchors.",
-            ),
+            provenance = PortraSensitometry.PORTRA_400.provenance,
         )
         "portra800" -> FilmStockProfile(
             stockId = id,
@@ -178,15 +180,9 @@ object FilmLookCatalog {
             kind = FilmMaterialKind.COLOR_NEGATIVE,
             colorBalance = FilmColorBalance.DAYLIGHT,
             process = "C-41",
-            negative = colorNegative,
+            negative = PortraSensitometry.PORTRA_800.negative,
             printOrScan = "Generic restrained color-negative print/scan positive",
-            provenance = manufacturerAnchor(
-                title = "KODAK PROFESSIONAL PORTRA 800 Film Technical Data E-4040",
-                url = "https://www.kodakprofessional.com/sites/default/files/wysiwyg/pro/" +
-                    "resources/e4040_portra_800.pdf",
-                revision = "February 2016",
-                note = "Published PORTRA 800 sensitometry and spectral plots are qualitative anchors.",
-            ),
+            provenance = PortraSensitometry.PORTRA_800.provenance,
         )
         "gold200" -> FilmStockProfile(
             stockId = id,
@@ -379,6 +375,7 @@ object FilmLookCatalog {
             adaptive = AdaptiveParams(
                 highlightProtection = 1f,
                 saturationGuard = 0.95f,
+                grainTextureGuard = 0f,
             ),
             skinTone = skin(protection = 0.38f, naturalness = 0.45f),
             splitTone = SplitTone(
@@ -394,11 +391,32 @@ object FilmLookCatalog {
                 cyanShift = 0.56f,
                 saturationBoost = 0.20f,
             ),
-            grain = grain(amount = 0.058f, size = 1.65f, clumping = 0.13f, seed = 400),
+            grain = grain(
+                // Keep the smooth-tone result from the first 35 mm pass, but obtain it through
+                // local visibility rather than a frame-wide amplitude lift: defocus/sky remains
+                // clear while focused detail drops below the former calibration.
+                amount = 0.060f,
+                size = 2.15f,
+                clumping = 0.16f,
+                seed = 400,
+                smoothAreaBoost = 0.35f,
+                detailSuppression = 0.45f,
+                highlightPersistence = 0.35f,
+            ),
+            whitePointRecovery = WhitePointRecoveryParams(amount = 0.78f),
             model = Model(
-                r = Channel(contrast = 0.23f, toe = 0.035f, shoulder = 0.82f, gain = 1.035f),
-                g = Channel(contrast = 0.24f, toe = 0.025f, shoulder = 0.78f, gain = 1.0f),
-                b = Channel(contrast = 0.27f, toe = 0.012f, shoulder = 0.70f, gain = 0.97f),
+                r = Channel(
+                    contrast = 0.23f, toe = 0.035f, shoulder = 0.82f, gain = 1.035f,
+                    manufacturerCurveAnchor = PortraSensitometry.PORTRA_400.redAnchor(0.30f),
+                ),
+                g = Channel(
+                    contrast = 0.24f, toe = 0.025f, shoulder = 0.78f, gain = 1.0f,
+                    manufacturerCurveAnchor = PortraSensitometry.PORTRA_400.greenAnchor(0.30f),
+                ),
+                b = Channel(
+                    contrast = 0.27f, toe = 0.012f, shoulder = 0.70f, gain = 0.97f,
+                    manufacturerCurveAnchor = PortraSensitometry.PORTRA_400.blueAnchor(0.30f),
+                ),
                 crossTalk = crossTalk(0.025f, warm = 0.008f),
                 print = print(
                     contrast = 0.92f,
@@ -418,6 +436,7 @@ object FilmLookCatalog {
             adaptive = AdaptiveParams(
                 highlightProtection = 1f,
                 saturationGuard = 0.95f,
+                grainTextureGuard = 0f,
             ),
             skinTone = skin(protection = 0.40f, naturalness = 0.48f),
             splitTone = SplitTone(
@@ -433,11 +452,29 @@ object FilmLookCatalog {
                 cyanShift = 0.62f,
                 saturationBoost = 0.24f,
             ),
-            grain = grain(amount = 0.088f, size = 1.95f, clumping = 0.22f, seed = 800),
+            grain = grain(
+                amount = 0.092f,
+                size = 2.55f,
+                clumping = 0.25f,
+                seed = 800,
+                smoothAreaBoost = 0.36f,
+                detailSuppression = 0.44f,
+                highlightPersistence = 0.42f,
+            ),
+            whitePointRecovery = WhitePointRecoveryParams(amount = 0.82f),
             model = Model(
-                r = Channel(contrast = 0.28f, toe = 0.025f, shoulder = 0.78f, gain = 1.045f),
-                g = Channel(contrast = 0.29f, toe = 0.018f, shoulder = 0.74f, gain = 1.0f),
-                b = Channel(contrast = 0.32f, toe = 0f, shoulder = 0.66f, gain = 0.955f),
+                r = Channel(
+                    contrast = 0.28f, toe = 0.025f, shoulder = 0.78f, gain = 1.045f,
+                    manufacturerCurveAnchor = PortraSensitometry.PORTRA_800.redAnchor(0.34f),
+                ),
+                g = Channel(
+                    contrast = 0.29f, toe = 0.018f, shoulder = 0.74f, gain = 1.0f,
+                    manufacturerCurveAnchor = PortraSensitometry.PORTRA_800.greenAnchor(0.34f),
+                ),
+                b = Channel(
+                    contrast = 0.32f, toe = 0f, shoulder = 0.66f, gain = 0.955f,
+                    manufacturerCurveAnchor = PortraSensitometry.PORTRA_800.blueAnchor(0.34f),
+                ),
                 crossTalk = crossTalk(0.028f, warm = 0.010f),
                 print = print(
                     contrast = 0.94f,

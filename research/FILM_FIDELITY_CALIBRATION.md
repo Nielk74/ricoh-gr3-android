@@ -4,11 +4,12 @@ This document separates what the software can compute from what must be measured
 aesthetic fit, a manufacturer graph, a scanner JPEG, and a traceable stock/process measurement
 from being described as equivalent evidence.
 
-The built-in looks are currently **manufacturer-anchored visual fits**. They use the published
-shape and ordering of characteristic, spectral-sensitivity, dye-density, MTF, and granularity
-data, but they have not been fitted to negatives exposed, processed, and measured for this app.
-Their `CalibrationBasis` must remain `MANUFACTURER_ANCHORED` until the acceptance gates below are
-met.
+The built-in looks are manufacturer-sourced visual fits, not local laboratory measurements.
+Most remain `MANUFACTURER_ANCHORED`. Portra 400 and Portra 800 are more specifically labelled
+`MANUFACTURER_DIGITIZED`: manually sampled points from Kodak's January 2025 Status-M daylight
+characteristic graphs influence their bounded display-input response. Neither label means that
+negatives were exposed, processed, or measured for this app. `LAB_MEASURED` remains reserved for
+the acceptance gates below.
 
 ## 1. Define the target before measuring
 
@@ -76,6 +77,13 @@ samples, non-monotonic density, and any import not explicitly marked `LAB_MEASUR
 `FilmLutFactory.withMeasuredCurves` also checks that every negative curve lies inside the
 profile's stated base/fog and dye-capacity range.
 
+`ManufacturerCharacteristicAnchor` is a deliberately separate, lower-confidence path for a
+published graph. It aligns the publication's Log-H reference to input grey, normalizes exact
+black/white endpoints, preserves 18% reference grey, and blends only a bounded fraction of the
+digitized shape with the display-safe fallback. The Portra samples record approximately ±0.05
+density-unit manual reading uncertainty and the exact source revision. They must not be imported
+through, or described as, the `LAB_MEASURED` CSV path.
+
 Spectral sensitivity, dye spectra, MTF, granularity, and halation profiles do not yet have an
 import format. Until those are implemented and measured, their built-in coefficients remain
 qualitative manufacturer anchors.
@@ -135,6 +143,7 @@ The current implementation provides the foundations needed for that calibration:
 - `FilmFidelityEvaluator` for matched mean/p95/max OKLab distance, signed component bias, and
   linear-luminance RMSE;
 - explicit optical density/transmittance/reflectance and validated sampled H-D curves;
+- bounded manufacturer-graph anchors with explicit digitization provenance for Portra 400/800;
 - distinct B&W capture responses and profile provenance;
 - explicit daylight/tungsten/monochrome/unspecified profile balance, with Smart-only pleasing
   warmth and gamut-edge fading kept separate from the Stock calibration surface;
@@ -154,7 +163,7 @@ that should be guessed in code.
 - [KODAK VISION3 500T 5219/7219 technical information](https://www.kodak.com/content/products-brochures/motion-picture/KODAK-VISION3-5219-7219-technical-information.pdf)
 - [KODAK VISION3 250D 5207/7207 technical information](https://www.kodak.com/content/products-brochures/motion-picture/KODAK-VISION3-250D-5207-7207-technical-information.pdf)
 - [KODAK PROFESSIONAL PORTRA 400 technical data E-4050](https://www.kodakprofessional.com/sites/default/files/2025-07/e4050.pdf)
-- [KODAK PROFESSIONAL PORTRA 800 technical data E-4040](https://www.kodakprofessional.com/sites/default/files/wysiwyg/pro/resources/e4040_portra_800.pdf)
+- [KODAK PROFESSIONAL PORTRA 800 technical data E-4040](https://www.kodakprofessional.com/sites/default/files/2025-07/e4040.pdf)
 - [KODAK PROFESSIONAL EKTAR 100 technical data E-4046](https://www.kodakprofessional.com/sites/default/files/wysiwyg/pro/resources/e4046_ektar_100.pdf)
 - [KODAK GOLD 200 technical data E-7022](https://www.kodakprofessional.com/sites/default/files/wysiwyg/pro/resources/E7022_Gold_200.pdf)
 - [FUJICOLOR SUPERIA X-TRA 400 data sheet AF3-0217E](https://asset.fujifilm.com/www/us/files/2025-06/8abba3dd9d004f44d1e9c7fdbdf5c520/films_superia-xtra400_datasheet_01.pdf)

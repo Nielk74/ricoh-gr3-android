@@ -203,7 +203,16 @@ object DevelopPipeline {
                     val l = colourLab[0].coerceIn(0f, 1f)
                     // Smoothly concentrate the tints near the ends; leave mid-grey mostly to the
                     // LUT.
-                    val hw = l * l * splitAmount
+                    val neutralWhiteFade = if (look.whitePointRecovery.enabled) {
+                        1f - smoothstep(
+                            look.whitePointRecovery.neutralWhiteFadeStart,
+                            1f,
+                            l,
+                        )
+                    } else {
+                        1f
+                    }
+                    val hw = l * l * splitAmount * neutralWhiteFade
                     val inv = 1f - l
                     val sw = inv * inv * splitAmount
                     renderedR = (renderedR +
@@ -281,7 +290,22 @@ object DevelopPipeline {
             )
         }
 
-        // 6. Image structure: a weak physical-scale diffusion/MTF response belongs underneath
+        // 6. Re-anchor credible scene whites after the negative/positive shoulder and selective
+        // colour. This expands only the upper luminance range; it neither raises a low-key scene's
+        // maximum nor undoes the compressed highlight spacing below the pivot.
+        val whitePoint = look.whitePointRecovery
+        if (smart && whitePoint.enabled && sceneProfile != null) {
+            recoverDiffuseWhite(
+                r = r,
+                g = g,
+                b = b,
+                sourceP99Linear = sceneProfile.p99,
+                params = whitePoint,
+                effectStrength = effect,
+            )
+        }
+
+        // 7. Image structure: a weak physical-scale diffusion/MTF response belongs underneath
         // halation and grain. It is stock-authored in both rendering intents.
         val imageStructure = look.imageStructure
         if (imageStructure.enabled) {
@@ -298,7 +322,7 @@ object DevelopPipeline {
             )
         }
 
-        // 7. Halation: scale radius with output dimensions so the small on-screen preview matches
+        // 8. Halation: scale radius with output dimensions so the small on-screen preview matches
         // the exported image, and scale strength with scene brightness/highlight availability.
         val h = look.halation
         if (h.enabled) {
@@ -310,13 +334,19 @@ object DevelopPipeline {
             applyHalation(r, g, b, width, height, scaled)
         }
 
-        // 8. Film-plane grain (last). The field lives in physical film coordinates and each
+        // 9. Film-plane grain (last). The field lives in physical film coordinates and each
         // output pixel analytically integrates its footprint, so preview/export resolution no
         // longer changes the apparent crystal size. Smart rendering may reduce the authored
         // amount for noisy/high-ISO scenes; Stock preserves the authored stock amount.
         val gr = look.grain
         if (gr.enabled) {
-            val scaled = gr.copy(amount = gr.amount * adjustment.grainScale * layerMix)
+            val scaled = gr.copy(
+                amount = gr.amount * adjustment.grainScale * layerMix,
+                // Stock remains the scene-invariant physical field. Smart may compensate for the
+                // sharpening/texture already baked into a display-referred JPEG or DNG rendition.
+                smoothAreaBoost = if (smart) gr.smoothAreaBoost else 0f,
+                detailSuppression = if (smart) gr.detailSuppression else 0f,
+            )
             PhysicalFilmGrain.apply(
                 r = r,
                 g = g,
@@ -333,6 +363,95 @@ object DevelopPipeline {
                 ),
             )
         }
+    }
+
+    /**
+     * Preserve a film-like shoulder while returning credible diffuse whites toward the scene's
+     * original white anchor. The mapping is monotonic, hue-preserving, and exactly fixes black,
+     * the authored pivot, and display white. Returns true only when a correction was applied.
+     */
+    internal fun recoverDiffuseWhite(
+        r: FloatArray,
+        g: FloatArray,
+        b: FloatArray,
+        sourceP99Linear: Float,
+        params: WhitePointRecoveryParams,
+        effectStrength: Float = 1f,
+    ): Boolean {
+        require(r.size == g.size && r.size == b.size)
+        if (r.isEmpty() || !params.enabled || effectStrength <= 0f) return false
+
+        val sourceWhite = linearToSrgb(sourceP99Linear.coerceIn(0f, 1f))
+        val eligibility = smoothstep(
+            params.sourceWhiteThreshold,
+            params.fullRecoveryAt,
+            sourceWhite,
+        )
+        if (eligibility <= 0f) return false
+
+        val renderedP99Linear = luminancePercentile(r, g, b, 0.99f)
+        val renderedWhite = linearToSrgb(renderedP99Linear)
+        val recovery = params.amount * effectStrength.coerceIn(0f, 1f) * eligibility
+        val sourceAnchor = sourceWhite.coerceAtMost(0.997f)
+        val desiredWhite = (
+            sourceAnchor +
+                (params.targetWhite - sourceAnchor).coerceAtLeast(0f) * recovery
+            ).coerceIn(sourceAnchor, 0.997f)
+        if (desiredWhite <= renderedWhite + 0.002f) return false
+
+        val pivotLinear = srgbToLinear(params.pivot)
+            .coerceAtMost(renderedP99Linear - 0.0001f)
+        if (renderedP99Linear <= pivotLinear + 0.0001f) return false
+        val desiredWhiteLinear = srgbToLinear(desiredWhite)
+        val delta = desiredWhiteLinear - renderedP99Linear
+        if (delta <= 0f) return false
+
+        val colour = FloatArray(3)
+        for (i in r.indices) {
+            val oldY = linearLuma(r[i], g[i], b[i]).coerceIn(0f, 1f)
+            if (oldY <= pivotLinear) continue
+            val targetY = if (oldY <= renderedP99Linear) {
+                val t = ((oldY - pivotLinear) / (renderedP99Linear - pivotLinear))
+                    .coerceIn(0f, 1f)
+                oldY + delta * t * t * (3f - 2f * t)
+            } else {
+                val t = ((oldY - renderedP99Linear) / (1f - renderedP99Linear))
+                    .coerceIn(0f, 1f)
+                desiredWhiteLinear + (1f - desiredWhiteLinear) * t
+            }
+            ColorMath.putAtLinearLuminance(r[i], g[i], b[i], targetY, colour)
+            r[i] = colour[0]
+            g[i] = colour[1]
+            b[i] = colour[2]
+        }
+        return true
+    }
+
+    /** Deterministic bounded-cost percentile of physical linear luminance. */
+    private fun luminancePercentile(
+        r: FloatArray,
+        g: FloatArray,
+        b: FloatArray,
+        percentile: Float,
+    ): Float {
+        val bins = IntArray(1024)
+        val maxSamples = 65_536
+        val stride = (r.size / maxSamples).coerceAtLeast(1)
+        var samples = 0
+        var index = 0
+        while (index < r.size) {
+            val y = linearLuma(r[index], g[index], b[index]).coerceIn(0f, 1f)
+            bins[(y * (bins.size - 1)).roundToInt()]++
+            samples++
+            index += stride
+        }
+        val wanted = (samples * percentile.coerceIn(0f, 1f)).roundToInt().coerceAtLeast(1)
+        var cumulative = 0
+        for (bin in bins.indices) {
+            cumulative += bins[bin]
+            if (cumulative >= wanted) return bin.toFloat() / (bins.size - 1)
+        }
+        return 1f
     }
 
     /** Fade the optional warm style when credible neutral samples already show a strong cast. */

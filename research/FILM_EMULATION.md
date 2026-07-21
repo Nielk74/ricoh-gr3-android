@@ -35,10 +35,12 @@ display-referred photographs:
    density/reflectance stage, and display encoding. Validated monotonic sampled D-logE curves can
    replace the fallback fits through the documented
    `stage,channel,log_exposure,density` interchange.
-4. Every catalog entry carries its material, process, print/scan assumption, sources, and
-   `MANUFACTURER_ANCHORED` provenance. These are restrained visual fits informed by published
-   characteristic, spectral, MTF, and granularity plots—not measurements of this
-   camera/stock/process/scan chain. `LAB_MEASURED` is reserved for traceable imported data.
+4. Every catalog entry carries its material, process, print/scan assumption, sources, and explicit
+   calibration basis. Most are `MANUFACTURER_ANCHORED`. Portra 400/800 are
+   `MANUFACTURER_DIGITIZED`: bounded channel-curve anchors come from manually sampled January
+   2025 Kodak Status-M graphs with stated ±0.05 density-unit uncertainty. Neither basis is a
+   measurement of this camera/stock/process/scan chain; `LAB_MEASURED` is reserved for traceable
+   imported data.
 5. Tri-X and HP5 no longer share Rec.709 display luma. Each forms one monochrome exposure through
    its own conservative panchromatic RGB response before the H-D curve. The three-band weights
    approximate published spectral graphs and remain explicitly labelled as such.
@@ -54,11 +56,15 @@ display-referred photographs:
    a broad red base-reflection lobe plus a tighter emulsion-scatter lobe; both masks are derived
    from immutable pre-halation highlights and subtract the source core, preventing red fog over
    flat highlights and recursive halo growth.
-9. `PhysicalFilmGrain` defines one deterministic, infinite crystal field in 35 mm coordinates.
+9. `PhysicalFilmGrain` defines one deterministic, infinite crystal field in physical film
+   coordinates on the calibrated 35 mm frame. A local Smart visibility map raises the same field
+   in defocus and continuous tone while restraining it over focused source detail; it replaces
+   Portra's former frame-global texture suppression. Bright diffuse tones retain a bounded
+   stock-specific part of the density response while exact black and paper white remain fixed.
    Each output pixel analytically integrates its film-plane footprint, so a preview and a
    downsampled export see the same field, crystal scale, and variance. Grain is zero-mean,
    midtone-peaked density variation with restrained correlated colour and stock-specific
-   clumping; Smart may reduce it for an already noisy/high-ISO source.
+   clumping; Smart may still reduce it for a known high-ISO source.
 10. Android DNG input is platform-rendered, bounded, and converted to sRGB before this
     display-referred pipeline. It is **not** a scene-linear RAW develop and can vary by device;
     the UI labels that preview/export limitation rather than claiming JPEG/DNG parity.
@@ -136,8 +142,8 @@ darktable film simulations, Fuji's in-camera Film Simulation) is some subset of:
 7. **Optional: vignette, soft bloom, slight desaturation of extremes, black/white point.**
 
 **Order matters:** input/render contract → tone protection → negative/positive colour LUT →
-split-tone → selective complexion/foliage/sky colour → physical-scale diffusion → two-lobe
-halation → film-plane grain → output encoding.
+split-tone → selective complexion/foliage/sky colour → credible-white re-anchoring →
+physical-scale diffusion → two-lobe halation → film-plane grain → output encoding.
 
 ### The 3D LUT is the workhorse
 A **3D LUT** partitions RGB space into a grid (typically 17³, 33³, or 64³); each vertex
@@ -168,8 +174,14 @@ output pixel rather than redrawing output-resolution noise.
   footprint integration. It produces occasional denser crystals without a separate low-frequency
   cloud layer or a mean-density shift.
 - **Tone response:** `densityResponse` peaks in useful low-mid/mid tones and rolls off at black and
-  white. The scalar field perturbs luminance in bounded linear-light log-odds space, preserving
-  endpoints and avoiding a grey veil.
+  white. Portra retains a bounded fraction through bright diffuse tone so compression does not
+  make highlights unnaturally texture-free. The scalar field perturbs luminance in bounded
+  linear-light log-odds space, preserving exact endpoints and avoiding a grey veil.
+- **Local visibility:** Smart Portra rendering derives a small immutable-source detail map before
+  applying grain. Smooth/defocused tone gains visibility while focused edges and texture suppress
+  it locally; one sharp subject can no longer reduce grain across the whole frame.
+- **Format scale:** the default 36×24 mm mapping is the calibrated 35 mm result used by the app
+  and review lab.
 - **Colour structure:** a small secondary field creates tightly correlated, luminance-neutral RGB
   differences. It is deliberately weak because scanner noise and sharpening are not emulsion.
 - **Identity:** a stable photo identifier is mixed with the stock seed. The same frame is stable
@@ -177,12 +189,14 @@ output pixel rather than redrawing output-resolution noise.
 - **Order/performance:** grain is the final image-forming layer before JPEG encoding and runs off
   the main thread. The implementation allocates axis kernels rather than a full-frame grain plate.
 
-Per-stock density amount ranges from 0.018 (Ektar 100, finest) to 0.088 (Portra 800, the most
+Per-stock density amount ranges from 0.018 (Ektar 100, finest) to 0.092 (Portra 800, the most
 pronounced colour stock in the authored set). The edited JPEG selector makes the final encode
 explicit: Compact uses quality 92, High uses 97, and Maximum uses 100 to retain the most fine
 structure the Android encoder allows. The cross-scanner evidence,
 matched-output measurements, and Portra 400/800 decision are recorded in
 [`PORTRA_GRAIN_CALIBRATION.md`](PORTRA_GRAIN_CALIBRATION.md).
+The January 2025 graph samples, display-input alignment, uncertainty, and white-recovery boundary
+are recorded separately in [`PORTRA_SENSITOMETRY.md`](PORTRA_SENSITOMETRY.md).
 
 ---
 
@@ -282,6 +296,10 @@ restrained two-stage photographic system for already-rendered camera files:
 
 - **Negative dye formation:** sRGB is decoded to linear exposure. Each layer has independent
   speed, straight-line slope, toe, and shoulder in bounded log-exposure space.
+- **Published Portra shape:** manually digitized red/green/blue Status-M curves are normalized to
+  the display-input domain, aligned to preserve 18% grey, and blended conservatively with the
+  fallback channel response. The graph points and uncertainty remain explicit manufacturer
+  evidence, not claimed local sensitometry.
 - **Density-layer coupling:** a 3×3 `Model.crossTalk` matrix operates on the formed dye densities.
 - **Positive print/scan:** `PrintStage` supplies a second contrast/toe/shoulder characteristic,
   print-light exposure and channel balance, black point, and paper white.

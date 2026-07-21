@@ -42,8 +42,9 @@ object FilmLutFactory {
      *
      * [measuredCurve], when present, replaces these fallback controls with absolute optical
      * density sampled against log10 exposure; [measuredLogExposureOffset] aligns relative camera
-     * exposure with that curve's calibration axis. Defaults are neutral so `Model()` is an exact
-     * round-trip.
+     * exposure with that curve's calibration axis. [manufacturerCurveAnchor] instead contributes
+     * only a bounded graph-digitized shape suitable for already-rendered RGB. Defaults are neutral
+     * so `Model()` is an exact round-trip.
      */
     data class Channel(
         val contrast: Float = 0f,
@@ -52,6 +53,7 @@ object FilmLutFactory {
         val gain: Float = 1f,
         val measuredCurve: SampledDensityCurve? = null,
         val measuredLogExposureOffset: Float = 0f,
+        val manufacturerCurveAnchor: ManufacturerCharacteristicAnchor? = null,
     )
 
     /**
@@ -148,7 +150,11 @@ object FilmLutFactory {
                     channel.measuredLogExposureOffset
             return curve.densityAt(logExposure)
         }
-        val normalized = normalizedFallbackDensity(exposure, channel)
+        var normalized = normalizedFallbackDensity(exposure, channel)
+        channel.manufacturerCurveAnchor?.let { anchor ->
+            val digitized = anchor.normalizedDensity(exposure)
+            normalized += (digitized - normalized) * anchor.influence
+        }
         return OpticalDensity.of(baseFog + normalized * dyeCapacity)
     }
 

@@ -60,7 +60,7 @@ For pixel-level comparison of the JPEG and DNG camera examples, build the local 
 
 ```bash
 ./gradlew :tools:renderReviewSite
-python3 -m http.server 8765 --directory build/film-review
+python3 -m http.server 8765 --bind 0.0.0.0 --directory build/film-review
 ```
 
 Open `http://localhost:8765`. The site keeps every scene at a 3000 px long edge, offers
@@ -73,10 +73,25 @@ spill onto clothing, décor, hair, glasses, and beard can be audited at full res
 master. The Android preview/export path evaluates the same strength through the same colour core.
 Equivalent prepared pixels, face regions, dimensions, intent, and seed match, but platform decode,
 face detection, and preview/export resolution can legitimately change a device rendition. For
-Portra 400, CineStill 800T, and Vision3 250D, the
+Portra 400, Portra 800, CineStill 800T, and Vision3 250D, the
 **Film exposure** buttons load real −1/0/+1-stop renders made before negative dye formation; they
 are not post-render brightness changes. **Inspect grain** jumps directly to the developed image at
 150% effect and 200% zoom; the same control remains visible in the mobile layout.
+
+A focused calibration run may select prepared sources, looks, an output folder, and an archived
+review root without changing the renderer:
+
+```bash
+./gradlew :tools:renderReviewSite \
+  -PreviewInput=/tmp/ricoh-film-focus-input \
+  -PreviewOutput=/tmp/ricoh-film-focus-review \
+  -PreviewBaseline=/tmp/ricoh-film-before \
+  -PreviewLooks=portra400,portra800
+```
+
+With Portra selected, the resulting look list includes the archived and current 35 mm masters. The
+baseline directory must contain the matching `assets/scenes/<scene-id>/<look-id>.jpg` and
+`-150.jpg` files.
 
 ## Licensing / attribution
 
@@ -85,6 +100,7 @@ are not post-render brightness changes. **Inspect grain** jumps directly to the 
   concern (e.g. a public release), swap `docs/preview-src/griii-sample.jpg` for an image you own
   or a CC0 photo and re-run the renderer — nothing else changes.
 - **Stock transforms and spatial layers** — hand-authored/analytic code in this repository.
-  Stock names are descriptive aesthetic targets. Built-ins are explicitly
-  `MANUFACTURER_ANCHORED`, not claims of a measured camera/film/process/scan match; see the
+  Stock names are descriptive aesthetic targets. Built-ins are manufacturer-sourced visual fits;
+  Portra's `MANUFACTURER_DIGITIZED` graph anchors are still not claims of a measured
+  camera/film/process/scan match. See the
   [calibration contract](../research/FILM_FIDELITY_CALIBRATION.md).

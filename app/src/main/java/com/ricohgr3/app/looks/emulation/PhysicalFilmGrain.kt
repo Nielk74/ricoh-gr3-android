@@ -1,8 +1,10 @@
 package com.ricohgr3.app.looks.emulation
 
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.exp
 import kotlin.math.floor
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
@@ -99,6 +101,10 @@ object PhysicalFilmGrain {
 
         val xKernels = buildAxisKernels(width, originX, pixelFootprint, pitch)
         val yKernels = buildAxisKernels(height, originY, pixelFootprint, pitch)
+        // Build this before mutating any RGB sample. The small canonical map reads scene detail,
+        // not grain applied earlier in row-major order, and costs far less than another full-size
+        // float plane on memory-constrained Android devices.
+        val visibilityMap = DetailVisibilityMap.build(r, g, b, width, height, params)
         val seed = mix64(params.seed xor java.lang.Long.rotateLeft(renderSeed, 23))
         val clumping = params.clumping.coerceIn(0f, 0.5f)
         val scratch = FloatArray(2)
@@ -115,6 +121,7 @@ object PhysicalFilmGrain {
                     index = index,
                     grain = scratch[0],
                     secondary = scratch[1],
+                    visibility = visibilityMap?.at(x, y, width, height) ?: 1f,
                     params = params,
                 )
                 index++
@@ -126,7 +133,11 @@ object PhysicalFilmGrain {
      * Midtone-peaked visible-density response. It rolls off at both endpoints and lets a stock's
      * [shadowBias] move the peak toward the low mids without creating a separate cloudy octave.
      */
-    fun densityResponse(encodedLuminance: Float, shadowBias: Float): Float {
+    fun densityResponse(
+        encodedLuminance: Float,
+        shadowBias: Float,
+        highlightPersistence: Float = 0f,
+    ): Float {
         val l = encodedLuminance.coerceIn(0f, 1f)
         val bias = shadowBias.coerceIn(0f, 1f)
         val peak = 0.5f - 0.2f * bias
@@ -136,13 +147,117 @@ object PhysicalFilmGrain {
         val highlight =
             (1f - (l - 0.75f).coerceAtLeast(0f) / 0.25f).coerceIn(0.15f, 1f)
         val shadow = (0.45f + l / 0.06f).coerceIn(0.45f, 1f)
-        return (hump * highlight * shadow).coerceIn(0f, 1f)
+        val rolled = hump * highlight * shadow
+        val persistent = hump * shadow
+        return (rolled + (persistent - rolled) * highlightPersistence.coerceIn(0f, 1f))
+            .coerceIn(0f, 1f)
     }
 
     private data class AxisKernel(
         val firstSite: Int,
         val weights: FloatArray,
     )
+
+    /** Coarse local visibility field: smooth tone is lifted; strong source detail is restrained. */
+    private data class DetailVisibilityMap(
+        val width: Int,
+        val height: Int,
+        val values: FloatArray,
+    ) {
+        fun at(x: Int, y: Int, imageWidth: Int, imageHeight: Int): Float {
+            val mapX = (((x + 0.5f) * width / imageWidth) - 0.5f)
+                .coerceIn(0f, (width - 1).toFloat())
+            val mapY = (((y + 0.5f) * height / imageHeight) - 0.5f)
+                .coerceIn(0f, (height - 1).toFloat())
+            val x0 = floor(mapX.toDouble()).toInt()
+            val y0 = floor(mapY.toDouble()).toInt()
+            val x1 = (x0 + 1).coerceAtMost(width - 1)
+            val y1 = (y0 + 1).coerceAtMost(height - 1)
+            val tx = mapX - x0
+            val ty = mapY - y0
+            val top = values[y0 * width + x0] * (1f - tx) + values[y0 * width + x1] * tx
+            val bottom = values[y1 * width + x0] * (1f - tx) + values[y1 * width + x1] * tx
+            return top * (1f - ty) + bottom * ty
+        }
+
+        companion object {
+            fun build(
+                r: FloatArray,
+                g: FloatArray,
+                b: FloatArray,
+                imageWidth: Int,
+                imageHeight: Int,
+                params: GrainParams,
+            ): DetailVisibilityMap? {
+                if (params.smoothAreaBoost <= 0f && params.detailSuppression <= 0f) return null
+                val longEdge = maxOf(imageWidth, imageHeight)
+                val mapLongEdge = minOf(longEdge, DETAIL_MAP_LONG_EDGE)
+                val scale = mapLongEdge.toFloat() / longEdge.coerceAtLeast(1)
+                val mapWidth = (imageWidth * scale).roundToInt().coerceAtLeast(3)
+                val mapHeight = (imageHeight * scale).roundToInt().coerceAtLeast(3)
+                val luma = FloatArray(mapWidth * mapHeight)
+                for (my in 0 until mapHeight) {
+                    val sy = (((my + 0.5f) * imageHeight / mapHeight).toInt())
+                        .coerceIn(0, imageHeight - 1)
+                    for (mx in 0 until mapWidth) {
+                        val sx = (((mx + 0.5f) * imageWidth / mapWidth).toInt())
+                            .coerceIn(0, imageWidth - 1)
+                        val source = sy * imageWidth + sx
+                        luma[my * mapWidth + mx] =
+                            KR * r[source] + KG * g[source] + KB * b[source]
+                    }
+                }
+
+                val detail = FloatArray(luma.size)
+                for (my in 0 until mapHeight) {
+                    val up = (my - 1).coerceAtLeast(0) * mapWidth
+                    val row = my * mapWidth
+                    val down = (my + 1).coerceAtMost(mapHeight - 1) * mapWidth
+                    for (mx in 0 until mapWidth) {
+                        val leftX = (mx - 1).coerceAtLeast(0)
+                        val rightX = (mx + 1).coerceAtMost(mapWidth - 1)
+                        val center = luma[row + mx]
+                        val left = luma[row + leftX]
+                        val right = luma[row + rightX]
+                        val above = luma[up + mx]
+                        val below = luma[down + mx]
+                        val gradient = 0.5f * (abs(right - left) + abs(below - above))
+                        val laplacian = abs(4f * center - left - right - above - below)
+                        detail[row + mx] = smoothstep(
+                            DETAIL_LOW,
+                            DETAIL_HIGH,
+                            gradient + 0.22f * laplacian,
+                        )
+                    }
+                }
+
+                // A one-cell maximum expands protection gently around an edge and prevents a
+                // coarse visibility-map boundary from bisecting the same focused feature.
+                val values = FloatArray(detail.size)
+                for (my in 0 until mapHeight) {
+                    for (mx in 0 until mapWidth) {
+                        var localDetail = 0f
+                        for (ny in (my - 1).coerceAtLeast(0)..(my + 1).coerceAtMost(mapHeight - 1)) {
+                            val row = ny * mapWidth
+                            for (nx in (mx - 1).coerceAtLeast(0)..(mx + 1).coerceAtMost(mapWidth - 1)) {
+                                localDetail = maxOf(localDetail, detail[row + nx])
+                            }
+                        }
+                        values[my * mapWidth + mx] = (
+                            1f + params.smoothAreaBoost * (1f - localDetail) -
+                                params.detailSuppression * localDetail
+                            ).coerceIn(0.45f, 1.6f)
+                    }
+                }
+                return DetailVisibilityMap(mapWidth, mapHeight, values)
+            }
+
+            private fun smoothstep(edge0: Float, edge1: Float, value: Float): Float {
+                val t = ((value - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+                return t * t * (3f - 2f * t)
+            }
+        }
+    }
 
     /**
      * Exact integral of the tent basis over one output pixel. The weights form a partition of
@@ -243,6 +358,7 @@ object PhysicalFilmGrain {
         index: Int,
         grain: Float,
         secondary: Float,
+        visibility: Float,
         params: GrainParams,
     ) {
         var linearR = ColorMath.srgbToLinear(r[index])
@@ -252,10 +368,14 @@ object PhysicalFilmGrain {
         if (oldY <= 1e-7f || oldY >= 1f - 1e-7f) return
 
         val encodedY = ColorMath.linearToSrgb(oldY)
-        val density = densityResponse(encodedY, params.shadowBias)
+        val density = densityResponse(
+            encodedY,
+            params.shadowBias,
+            params.highlightPersistence,
+        )
         val boundedY = oldY.coerceIn(0.00001f, 0.99999f)
         val oldLogOdds = kotlin.math.ln(boundedY / (1f - boundedY))
-        val densityShift = grain * params.amount * density * DENSITY_GAIN
+        val densityShift = grain * params.amount * density * visibility * DENSITY_GAIN
         val newY = (1f / (1f + exp(-(oldLogOdds + densityShift)))).coerceIn(0f, 1f)
         val luminanceScale = newY / oldY.coerceAtLeast(1e-8f)
         linearR *= luminanceScale
@@ -263,7 +383,7 @@ object PhysicalFilmGrain {
         linearB *= luminanceScale
 
         val chromaAmount =
-            params.amount * density * params.chroma.coerceIn(0f, 1f) * CHROMA_GAIN
+            params.amount * density * visibility * params.chroma.coerceIn(0f, 1f) * CHROMA_GAIN
         if (chromaAmount > 0f) {
             // Both chroma fields remain strongly tied to the luma crystal. The small secondary
             // component merely prevents every grain from carrying the same fixed colour.
@@ -328,4 +448,10 @@ object PhysicalFilmGrain {
     private const val CHROMA_GAIN = 0.20f
     private const val MIN_CRYSTAL_PITCH = 0.5f
     private const val MAX_CRYSTAL_PITCH = 8f
+    private const val DETAIL_MAP_LONG_EDGE = 480
+    // Encoded-luma contrast at the canonical map scale. The low threshold deliberately treats
+    // pores, fine hair, foliage, and lettering as source detail instead of "smooth" tone; a sky
+    // or defocused wall still remains near zero across most cells.
+    private const val DETAIL_LOW = 0.010f
+    private const val DETAIL_HIGH = 0.060f
 }

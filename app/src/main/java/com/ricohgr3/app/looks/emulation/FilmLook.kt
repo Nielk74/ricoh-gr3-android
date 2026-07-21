@@ -21,6 +21,8 @@ package com.ricohgr3.app.looks.emulation
  * @property imageStructure physical-scale emulsion/scanner diffusion; disabled by default.
  * @property halation stock-coloured highlight bloom; [HalationParams.NONE] to disable.
  * @property grain film grain; [GrainParams.NONE] to disable.
+ * @property whitePointRecovery Smart-only post-shoulder white re-anchoring. Its neutral-white tint
+ *   fade also protects Stock's paper-white endpoint from split-tone colour.
  * @property swatchTop/[swatchBottom] a representative 2-stop gradient (ARGB `0xFFrrggbb`) for
  *   the picker chip — an at-a-glance hint of the stock's colour. Plain `Long`s (not Android
  *   `Color`) so this stays JVM-testable and Android-free.
@@ -44,12 +46,45 @@ data class FilmLook(
     val imageStructure: ImageStructureParams = ImageStructureParams.NONE,
     val halation: HalationParams = HalationParams.NONE,
     val grain: GrainParams = GrainParams.NONE,
+    val whitePointRecovery: WhitePointRecoveryParams = WhitePointRecoveryParams.NONE,
     val swatchTop: Long = 0xFFECEAE6,
     val swatchBottom: Long = 0xFFCFCCC6,
     val lutInputGamma: Float = 1f,
     val stock: StockRenderParams = StockRenderParams(),
     val adaptive: AdaptiveParams = AdaptiveParams.NONE,
 )
+
+/**
+ * Re-anchor a scene's bright neutral range after highlight compression without stretching its
+ * shadows or midtones. Author-facing levels are encoded sRGB; implementation happens on physical
+ * linear luminance. This is intentionally content-aware and therefore applied only in Smart mode.
+ *
+ * [neutralWhiteFadeStart] is also used by the scene-invariant split-tone stage: highlight tint
+ * gently returns to neutral above this OKLab lightness so paper white cannot become cream.
+ */
+data class WhitePointRecoveryParams(
+    val amount: Float,
+    val sourceWhiteThreshold: Float = 0.84f,
+    val fullRecoveryAt: Float = 0.95f,
+    val targetWhite: Float = 0.985f,
+    val pivot: Float = 0.70f,
+    val neutralWhiteFadeStart: Float = 0.88f,
+) {
+    init {
+        require(amount.isFinite() && amount in 0f..1f)
+        require(sourceWhiteThreshold in 0f..1f)
+        require(fullRecoveryAt in sourceWhiteThreshold..1f)
+        require(targetWhite in fullRecoveryAt..1f)
+        require(pivot in 0f..<sourceWhiteThreshold)
+        require(neutralWhiteFadeStart in pivot..<1f)
+    }
+
+    val enabled: Boolean get() = amount > 0f
+
+    companion object {
+        val NONE = WhitePointRecoveryParams(amount = 0f)
+    }
+}
 
 /**
  * Restrained image-structure response ahead of halation and film-plane grain.
@@ -198,6 +233,10 @@ data class HalationParams(
  *   `0.2` give a fast stock more occasional dense crystals). This never introduces a blurred or
  *   low-frequency grain layer.
  * @property seed fixes the field for deterministic (testable, non-flickering) output.
+ * @property smoothAreaBoost local Smart-only visibility lift in defocus and continuous tone.
+ * @property detailSuppression local Smart-only guard against stacking grain over sharpened source
+ *   edges and texture. Both controls modulate the same physical field; they never add blurred noise.
+ * @property highlightPersistence retains some density texture in bright-but-not-paper-white tone.
  */
 data class GrainParams(
     val amount: Float,
@@ -206,7 +245,16 @@ data class GrainParams(
     val chroma: Float = 0.1f,
     val clumping: Float = 0.12f,
     val seed: Long = 0L,
+    val smoothAreaBoost: Float = 0f,
+    val detailSuppression: Float = 0f,
+    val highlightPersistence: Float = 0f,
 ) {
+    init {
+        require(smoothAreaBoost.isFinite() && smoothAreaBoost in 0f..0.6f)
+        require(detailSuppression.isFinite() && detailSuppression in 0f..0.6f)
+        require(highlightPersistence.isFinite() && highlightPersistence in 0f..1f)
+    }
+
     val enabled: Boolean get() = amount > 0f
     companion object {
         val NONE = GrainParams(amount = 0f, size = 1f, shadowBias = 0f)

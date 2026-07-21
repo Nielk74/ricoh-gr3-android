@@ -12,7 +12,7 @@ import java.util.Locale
 import javax.imageio.ImageIO
 
 private val EXPOSURE_BRACKET_LOOKS =
-    setOf("portra400", "cinestill800t", "vision3_250d")
+    setOf("portra400", "portra800", "cinestill800t", "vision3_250d")
 
 /**
  * Generates the high-resolution assets and manifest consumed by `review-site/`.
@@ -21,17 +21,32 @@ private val EXPOSURE_BRACKET_LOOKS =
  * writes every look separately. The website can therefore compare identical pixels, zoom to
  * 100/200%, and open any developed image directly without upscaling a thumbnail.
  *
- * Args: `<repoRoot> <preparedSources> <siteTemplate> <outputDir>`.
+ * Args: `<repoRoot> <preparedSources> <siteTemplate> <outputDir>` followed by optional
+ * `--baseline=<review-root>` and `--looks=<comma-separated-stock-ids>` arguments.
  */
 fun reviewSiteMain(args: Array<String>) {
-    require(args.size == 4) {
-        "usage: <repoRoot> <preparedSources> <siteTemplate> <outputDir>"
+    require(args.size >= 4) {
+        "usage: <repoRoot> <preparedSources> <siteTemplate> <outputDir> " +
+            "[--baseline=<review-root>] [--looks=<ids>]"
     }
     val repo = File(args[0])
     val inputRoot = resolve(repo, args[1])
     val templateRoot = resolve(repo, args[2])
     val outputRoot = resolve(repo, args[3]).apply { mkdirs() }
     val assetsRoot = File(outputRoot, "assets/scenes").apply { mkdirs() }
+    val baselineRoot = args.drop(4)
+        .firstOrNull { it.startsWith("--baseline=") }
+        ?.substringAfter('=')
+        ?.let { resolve(repo, it) }
+        ?.also { require(it.isDirectory) { "baseline review not found: $it" } }
+    val selectedLookIds = args.drop(4)
+        .firstOrNull { it.startsWith("--looks=") }
+        ?.substringAfter('=')
+        ?.split(',')
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        ?.toSet()
+    val reviewLooks = reviewLooks(selectedLookIds, baselineRoot != null)
 
     require(templateRoot.isDirectory) { "review site template not found: $templateRoot" }
     copyTemplate(templateRoot, outputRoot)
@@ -91,42 +106,55 @@ fun reviewSiteMain(args: Array<String>) {
             renderSeed = stableRenderSeed("${source.kind}:${source.file.name}"),
         )
 
-        val perLook = ArrayList<String>(FilmLookCatalog.entries.size)
-        FilmLookCatalog.entries.forEach { entry ->
+        val perLook = ArrayList<String>(reviewLooks.size)
+        reviewLooks.forEach { reviewLook ->
+            val entry = reviewLook.entry
             val look = entry.look
             val adjustment = SceneAnalyzer.adjustment(profile, look.adaptive, stock = look.stock)
-            val lut = loadLut(look, lutDir)
-            val output = develop(
-                work,
-                look,
-                lut,
-                effectStrength = 1f,
-                faceRegions = faceRegions,
-                options = developOptions,
-            )
-            val filename = "${look.id}.jpg"
-            writeJpg(output, File(sceneDir, filename), quality = 0.97f)
-            output.flush()
-            val strongOutput = develop(
-                work,
-                look,
-                lut,
-                effectStrength = 1.5f,
-                faceRegions = faceRegions,
-                options = developOptions,
-            )
-            val strongFilename = "${look.id}-150.jpg"
-            writeJpg(strongOutput, File(sceneDir, strongFilename), quality = 0.97f)
-            strongOutput.flush()
+            val filename = "${reviewLook.id}.jpg"
+            val strongFilename = "${reviewLook.id}-150.jpg"
+            val lut = if (reviewLook.baselineLookId == null) loadLut(look, lutDir) else null
+            if (reviewLook.baselineLookId != null) {
+                val baselineScene = File(checkNotNull(baselineRoot), "assets/scenes/$sceneId")
+                copyBaseline(
+                    source = File(baselineScene, "${reviewLook.baselineLookId}.jpg"),
+                    destination = File(sceneDir, filename),
+                )
+                copyBaseline(
+                    source = File(baselineScene, "${reviewLook.baselineLookId}-150.jpg"),
+                    destination = File(sceneDir, strongFilename),
+                )
+            } else {
+                val output = develop(
+                    work,
+                    look,
+                    checkNotNull(lut),
+                    effectStrength = 1f,
+                    faceRegions = faceRegions,
+                    options = developOptions,
+                )
+                writeJpg(output, File(sceneDir, filename), quality = 0.97f)
+                output.flush()
+                val strongOutput = develop(
+                    work,
+                    look,
+                    checkNotNull(lut),
+                    effectStrength = 1.5f,
+                    faceRegions = faceRegions,
+                    options = developOptions,
+                )
+                writeJpg(strongOutput, File(sceneDir, strongFilename), quality = 0.97f)
+                strongOutput.flush()
+            }
 
-            val exposureMasters = if (look.id in EXPOSURE_BRACKET_LOOKS) {
+            val exposureMasters = if (reviewLook.id in EXPOSURE_BRACKET_LOOKS) {
                 fun bracket(ev: Int, suffix: String, strength: Float): String {
                     val strengthSuffix = if (strength > 1f) "-150" else ""
-                    val bracketFilename = "${look.id}-$suffix$strengthSuffix.jpg"
+                    val bracketFilename = "${reviewLook.id}-$suffix$strengthSuffix.jpg"
                     val bracketOutput = develop(
                         work,
                         look,
-                        lut,
+                        checkNotNull(lut),
                         effectStrength = strength,
                         filmExposureEv = ev.toFloat(),
                         faceRegions = faceRegions,
@@ -154,7 +182,7 @@ fun reviewSiteMain(args: Array<String>) {
                 "null"
             }
             perLook += """
-                "${look.id}":{
+                "${reviewLook.id}":{
                   "src":"assets/scenes/$sceneId/$filename",
                   "strongSrc":"assets/scenes/$sceneId/$strongFilename",
                   "exposureMasters":$exposureMasters,
@@ -176,8 +204,8 @@ fun reviewSiteMain(args: Array<String>) {
                 }
             """.trimIndent().replace("\n", "")
             println(
-                "    ${look.displayName} · 100/150%" +
-                    if (look.id in EXPOSURE_BRACKET_LOOKS) " · -1/0/+1 EV" else "",
+                "    ${reviewLook.name} · 100/150%" +
+                    if (reviewLook.id in EXPOSURE_BRACKET_LOOKS) " · -1/0/+1 EV" else "",
             )
         }
 
@@ -217,13 +245,13 @@ fun reviewSiteMain(args: Array<String>) {
         if (work !== decoded) work.flush()
     }
 
-    val looksJson = FilmLookCatalog.entries.joinToString(",") { entry ->
-        val look = entry.look
+    val looksJson = reviewLooks.joinToString(",") { reviewLook ->
+        val look = reviewLook.entry.look
         """
             {
-              "id":"${look.id}",
-              "name":"${look.displayName.jsonEscape()}",
-              "description":"${descriptionFor(look.id).jsonEscape()}",
+              "id":"${reviewLook.id}",
+              "name":"${reviewLook.name.jsonEscape()}",
+              "description":"${reviewLook.description.jsonEscape()}",
               "swatchTop":"${look.swatchTop.cssHex()}",
               "swatchBottom":"${look.swatchBottom.cssHex()}"
             }
@@ -251,6 +279,55 @@ fun reviewSiteMain(args: Array<String>) {
 fun main(args: Array<String>) = reviewSiteMain(args)
 
 private data class Source(val kind: String, val file: File)
+
+private data class ReviewLook(
+    val id: String,
+    val name: String,
+    val description: String,
+    val entry: FilmLookCatalog.Entry,
+    val baselineLookId: String? = null,
+)
+
+private fun reviewLooks(selectedIds: Set<String>?, includeBaseline: Boolean): List<ReviewLook> {
+    val entries = FilmLookCatalog.entries.filter { selectedIds == null || it.look.id in selectedIds }
+    if (selectedIds != null) {
+        val missing = selectedIds - entries.mapTo(mutableSetOf()) { it.look.id }
+        require(missing.isEmpty()) { "unknown review look ids: ${missing.sorted().joinToString()}" }
+    }
+    return entries.flatMap { entry ->
+        val look = entry.look
+        buildList {
+            if (includeBaseline && look.id in setOf("portra400", "portra800")) {
+                add(
+                    ReviewLook(
+                        id = "${look.id}_before",
+                        name = "${look.displayName} · Before",
+                        description = "Archived pre-calibration render · 35mm grain",
+                        entry = entry,
+                        baselineLookId = look.id,
+                    ),
+                )
+            }
+            add(
+                ReviewLook(
+                    id = look.id,
+                    name = if (look.id in setOf("portra400", "portra800")) {
+                        "${look.displayName} · 35mm"
+                    } else {
+                        look.displayName
+                    },
+                    description = descriptionFor(look.id),
+                    entry = entry,
+                ),
+            )
+        }
+    }
+}
+
+private fun copyBaseline(source: File, destination: File) {
+    require(source.isFile) { "baseline master not found: $source" }
+    source.copyTo(destination, overwrite = true)
+}
 
 private fun resolve(repo: File, path: String): File =
     File(path).let { if (it.isAbsolute) it else File(repo, path) }

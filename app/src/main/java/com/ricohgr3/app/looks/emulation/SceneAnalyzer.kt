@@ -47,7 +47,16 @@ data class AdaptiveParams(
     val shadowProtection: Float = 0.8f,
     val highlightProtection: Float = 0.9f,
     val saturationGuard: Float = 0.8f,
+    /**
+     * Strength of Smart's frame-global high-frequency grain guard. Stocks with a local perceptual
+     * visibility mask set this to zero so a sharp subject cannot erase grain from its defocus.
+     */
+    val grainTextureGuard: Float = 1f,
 ) {
+    init {
+        require(grainTextureGuard.isFinite() && grainTextureGuard in 0f..1f)
+    }
+
     companion object {
         /** Useful for identity/unit-test looks and any deliberately literal transform. */
         val NONE = AdaptiveParams(
@@ -56,6 +65,7 @@ data class AdaptiveParams(
             shadowProtection = 0f,
             highlightProtection = 0f,
             saturationGuard = 0f,
+            grainTextureGuard = 0f,
         )
     }
 }
@@ -383,7 +393,8 @@ object SceneAnalyzer {
         // Recalibrated in linear-light units against the real GR III scene set. Smooth frames stay
         // at one; only visibly busy/noisy canonical texture progressively suppresses added grain.
         val textureScale =
-            (1f - 0.28f * ((profile.microContrast - 0.010f) / 0.055f).coerceIn(0f, 1f))
+            (1f - 0.28f * params.grainTextureGuard *
+                ((profile.microContrast - 0.010f) / 0.055f).coerceIn(0f, 1f))
         // Do not globally suppress a low-key frame. Local density in DevelopPipeline already
         // makes its shadows rougher while preserving true black; reducing the whole frame here
         // erased exactly the underexposed-film behaviour the model is meant to retain.

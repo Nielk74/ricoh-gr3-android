@@ -11,7 +11,7 @@ captures.
 The app is independent and unofficial. It uses the camera's community-documented BLE GATT and
 local HTTP interfaces; it does not require Ricoh's Image Sync app or a cloud account.
 
-> **Current release: v0.9.1.** The app, protocol clients, colour-science core, update path, and
+> **Current release: v0.9.4.** The app, protocol clients, colour-science core, update path, and
 > automated tests are implemented. Real-camera radio behaviour still needs validation across GR
 > III/IIIx firmware and Android vendors; see [Current limitations](#current-limitations).
 
@@ -107,9 +107,10 @@ Important details:
   unspecified-balance Eterna are unchanged. This is a product rendering preference, not a claim
   of matching an Apple camera pipeline.
 - **Density and provenance:** negative and print stages use explicit optical
-  density/transmittance/reflectance. Every built-in names its material/process/source and remains
-  labelled `MANUFACTURER_ANCHORED`; no built-in pretends to be a measurement from this app's
-  camera, film batch, chemistry, or scanner.
+  density/transmittance/reflectance. Every built-in names its material/process/source. Most remain
+  `MANUFACTURER_ANCHORED`; Portra 400/800 use bounded `MANUFACTURER_DIGITIZED` channel-shape
+  anchors from Kodak's January 2025 Status-M graphs. No built-in pretends to be a measurement from
+  this app's camera, film batch, chemistry, or scanner.
 - **Natural portraits:** an on-device face detector gates a chromaticity mask. Complexions are
   protected without globally desaturating red fabric, wood, hair, glasses, beard detail, or warm
   light.
@@ -117,14 +118,18 @@ Important details:
   saturation lift. Vegetation-range yellow-greens receive a more pronounced, bounded rotation
   toward cyan-green plus their own saturation lift; skin, neutrals, deep shadows, pale highlights,
   and existing cyan are excluded. Both transforms preserve luminance and compress chroma into the
-  available gamut rather than clipping channels.
+  available gamut rather than clipping channels. Smart rendering then re-anchors only a credible
+  compressed upper range toward the source white point, without lifting low-key scenes or the
+  authored midtones.
 - **Image structure and halation:** a weak radius in film micrometres approximates published
   stock/process MTF families. Halation then derives broad red and tight orange lobes from the same
   untouched highlight source, so a first halo cannot recursively create the second.
 - **Grain:** one infinite crystal field lives in physical film coordinates. Each preview/export
   pixel integrates its footprint analytically, preserving the same field and apparent crystal
   scale across resolution. Density variation peaks through low-mid/mid tones, rolls off near
-  black/white, and uses larger, more irregular crystals for faster stocks. Edited JPEGs offer
+  black/white, retains bounded texture in bright Portra tone, and uses larger, more irregular
+  crystals for faster stocks. Portra Smart rendering locally strengthens continuous tone and
+  defocus while protecting focused texture on the calibrated 35 mm footprint. Edited JPEGs offer
   Compact (JPEG 92), High (JPEG 97), and Maximum (JPEG 100) output so file size and retained
   texture are an explicit choice.
 - **DNG boundary:** Android, not this app, renders the DNG into display RGB. It is not a
@@ -334,8 +339,9 @@ behaviour on every physical camera and phone.
   Edited DNG save is disabled on API 26–27; if a newer device cannot render a particular DNG, the
   app reports that failure and directs the user to **Save original** instead of silently labelling
   untouched sensor data as an edited result.
-- Built-in stock values are manufacturer-anchored visual fits. Traceable stock/process/scan
-  measurements and held-out validation are still required for lab-measured fidelity claims.
+- Built-in stock values are manufacturer-sourced visual fits; the digitized Portra graph anchors
+  are not local measurements. Traceable stock/process/scan measurements and held-out validation
+  are still required for lab-measured fidelity claims.
 - The Settings route, onboarding polish, and instrumented on-device end-to-end suite are not yet
   complete.
 
@@ -350,6 +356,7 @@ behaviour on every physical camera and phone.
 | [`docs/PHASE7-LOOKS.md`](docs/PHASE7-LOOKS.md) | Film Lab product and processing design |
 | [`research/FILM_EMULATION.md`](research/FILM_EMULATION.md) | Colour-science model and implementation |
 | [`research/FILM_FIDELITY_CALIBRATION.md`](research/FILM_FIDELITY_CALIBRATION.md) | Measurement, provenance, fitting, and validation contract |
+| [`research/PORTRA_SENSITOMETRY.md`](research/PORTRA_SENSITOMETRY.md) | January 2025 graph digitization and bounded white-point recovery |
 | [`research/PORTRA_GRAIN_CALIBRATION.md`](research/PORTRA_GRAIN_CALIBRATION.md) | Portra 400/800 grain evidence and targets |
 | [`docs/FILM_PREVIEWS.md`](docs/FILM_PREVIEWS.md) | Reproducible preview and review-lab workflow |
 | [`RELEASING.md`](RELEASING.md) | Signing, versioning, checksums, tags, and in-app updates |

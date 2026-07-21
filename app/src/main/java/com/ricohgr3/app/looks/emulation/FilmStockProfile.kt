@@ -1,6 +1,7 @@
 package com.ricohgr3.app.looks.emulation
 
 import kotlin.math.log10
+import kotlin.math.ln
 import kotlin.math.pow
 
 /**
@@ -9,11 +10,15 @@ import kotlin.math.pow
  * [MANUFACTURER_ANCHORED] means the material/process choice and plausible density limits are
  * informed by a manufacturer's technical publication, but the actual rendering coefficients
  * have not been fitted to this application's own sensitometry. It must not be presented as a
- * measured match. [LAB_MEASURED] is reserved for a profile backed by traceable local measurements.
+ * measured match. [MANUFACTURER_DIGITIZED] additionally means graph samples from the cited
+ * publication influence the render, with stated digitization uncertainty, but still are not local
+ * laboratory measurements. [LAB_MEASURED] is reserved for a profile backed by traceable local
+ * measurements.
  */
 enum class CalibrationBasis {
     NEUTRAL_REFERENCE,
     MANUFACTURER_ANCHORED,
+    MANUFACTURER_DIGITIZED,
     LAB_MEASURED,
 }
 
@@ -226,6 +231,53 @@ data class SampledDensityCurve(
         val b = points[upper]
         val t = (logExposure - a.logExposure) / (b.logExposure - a.logExposure)
         return OpticalDensity.of(a.density + (b.density - a.density) * t)
+    }
+}
+
+/**
+ * A restrained display-input use of a manufacturer D-logE graph.
+ *
+ * The app does not receive untouched scene-linear exposure, so an absolute sensitometric curve
+ * cannot be applied literally. Instead, [referenceLogExposure] aligns the publication's reference
+ * point to [inputReferenceExposure], the sampled response is normalised to exact black/white
+ * endpoints, and a power alignment keeps reference grey unchanged. [influence] then blends this
+ * traceable curve shape with the conservative JPEG-safe fallback in [FilmLutFactory].
+ */
+data class ManufacturerCharacteristicAnchor(
+    val curve: SampledDensityCurve,
+    val referenceLogExposure: Float,
+    val inputReferenceExposure: Float = 0.18f,
+    val influence: Float,
+) {
+    init {
+        require(curve.provenance.basis == CalibrationBasis.MANUFACTURER_DIGITIZED)
+        require(referenceLogExposure.isFinite())
+        require(inputReferenceExposure.isFinite() && inputReferenceExposure in 0.01f..0.5f)
+        require(influence.isFinite() && influence in 0f..1f)
+        require(referenceLogExposure in curve.points.first().logExposure..curve.points.last().logExposure)
+    }
+
+    fun normalizedDensity(exposure: Float): Float {
+        if (exposure <= 0f) return 0f
+        if (exposure >= 1f) return 1f
+        val minimumLogExposure = curve.points.first().logExposure
+        val maximumLogExposure = (
+            referenceLogExposure + log10(1f / inputReferenceExposure)
+            ).coerceAtMost(curve.points.last().logExposure)
+        val minimumDensity = curve.densityAt(minimumLogExposure).value
+        val maximumDensity = curve.densityAt(maximumLogExposure).value
+        val densityRange = (maximumDensity - minimumDensity).coerceAtLeast(0.0001f)
+
+        fun normalisedAt(logExposure: Float): Float = (
+            (curve.densityAt(logExposure.coerceIn(minimumLogExposure, maximumLogExposure)).value -
+                minimumDensity) / densityRange
+            ).coerceIn(0f, 1f)
+
+        val referenceNormalised = normalisedAt(referenceLogExposure).coerceIn(0.0001f, 0.9999f)
+        val alignmentPower = ln(inputReferenceExposure) / ln(referenceNormalised)
+        val mappedLogExposure = referenceLogExposure +
+            log10(exposure.coerceAtLeast(0.000001f) / inputReferenceExposure)
+        return normalisedAt(mappedLogExposure).pow(alignmentPower).coerceIn(0f, 1f)
     }
 }
 
