@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9.2 — 2026-07-21
+
+- Added a hidden **Local lab** (triple-tap the "GR" wordmark on the connect screen) that develops
+  any photo picked from the device with the same film looks, rendering intent, intensity, and
+  edited-quality controls as the camera viewer, and saves the result to `Pictures/GR3`.
+
 ## v0.9.1 — 2026-07-21
 
 - Kept GitHub update checks and other internet requests on Android's normal network while a camera

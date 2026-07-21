@@ -132,8 +132,66 @@ suspend fun saveEdited(
         }
     }
 
-    // DNG develops are finished renditions → always JPEG (see kdoc). JPEG originals keep .jpg.
-    val name = editedName(id.file)
+    return exportDeveloped(edited, id.file, exporter, exportQuality)
+}
+
+/**
+ * Local-lab variant of [saveEdited]: develop image [bytes] picked from the device (no camera
+ * involved) through the film stock and save the result as a new JPEG, exactly like an edited
+ * camera frame. [baseFile] is only used for naming (`name.jpg` → `name_edit.jpg`) and the RAW
+ * check; there is no camera metadata, so [iso] stays unknown (grain falls back to its default).
+ */
+suspend fun saveEditedLocal(
+    bytes: ByteArray,
+    baseFile: String,
+    filmLookId: String,
+    exporter: PhotoExporter,
+    loader: FilmLookLoader? = null,
+    effectStrength: Float = 1f,
+    renderingIntent: RenderingIntent = RenderingIntent.SMART,
+    exportQuality: EditedExportQuality = EditedExportQuality.HIGH,
+): SaveOutcome {
+    val isRaw = baseFile.substringAfterLast('.', "").equals("DNG", true)
+    val maxPixels = developmentPixelLimit(Runtime.getRuntime().maxMemory(), exportQuality)
+    val decoded = withContext(Dispatchers.Default) { decodeBounded(bytes, maxPixels) }
+        ?: throw java.io.IOException("Could not decode $baseFile for editing")
+
+    val edited = withContext(Dispatchers.Default) {
+        val developed = loader?.resolve(filmLookId)
+            ?.let { (film, lut) ->
+                developForSave(
+                    decoded, film, lut,
+                    raw = isRaw,
+                    iso = null,
+                    effectStrength = effectStrength,
+                    options = DevelopOptions(
+                        intent = renderingIntent,
+                        renderSeed = stableRenderSeed("local:$baseFile"),
+                    ),
+                )
+            }
+        if (developed != null) {
+            decoded.recycle()
+            developed
+        } else {
+            applyLookTint(decoded, filmLookId, effectStrength)
+        }
+    }
+    return exportDeveloped(edited, baseFile, exporter, exportQuality)
+}
+
+/**
+ * Compress a developed rendition to JPEG, write it under the `_edit` name derived from
+ * [baseFile], recycle it, and report the outcome. Shared tail of [saveEdited]/[saveEditedLocal].
+ */
+private suspend fun exportDeveloped(
+    edited: Bitmap,
+    baseFile: String,
+    exporter: PhotoExporter,
+    exportQuality: EditedExportQuality,
+): SaveOutcome {
+    // DNG develops are finished renditions → always JPEG (see saveEdited kdoc). JPEG keeps .jpg.
+    val name = editedName(baseFile)
     val width = edited.width
     val height = edited.height
     try {
@@ -236,8 +294,7 @@ internal fun developmentPixelLimit(
  * DNG path (API 28+). On API 26-27, or if the platform can't decode the DNG, this returns null
  * and the caller reports that edited DNG export is unavailable.
  */
-private fun decodeBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
-    val probe = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+internal fun decodeBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {    val probe = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, probe)
     if (probe.outWidth <= 0 || probe.outHeight <= 0) {
         return decodeRawBounded(bytes, maxPixels)

@@ -33,6 +33,9 @@ sealed class Screen(val route: String) {
     /** Manual application update check, reachable directly from the home screen. */
     data object AppUpdate : Screen("app-update")
 
+    /** Hidden local-photo develop lab (triple-tap the "GR" wordmark on the connect screen). */
+    data object LocalLab : Screen("local-lab")
+
     /** Camera settings. Placeholder route. */
     data object Settings : Screen("settings")
 

@@ -24,6 +24,7 @@ import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.gallery.AutoImportScreen
 import com.ricohgr3.app.gallery.GalleryScreen
 import com.ricohgr3.app.gallery.GalleryViewModel
+import com.ricohgr3.app.gallery.LocalLabScreen
 import com.ricohgr3.app.gallery.TransferViewModel
 import com.ricohgr3.app.gallery.ViewerScreen
 import com.ricohgr3.app.liveview.LiveViewScreen
@@ -106,6 +107,7 @@ fun AppNavHost(
                 onOpenAutoImport = { navController.navigate(Screen.AutoImport.route) },
                 onOpenLiveView = { navController.navigate(Screen.LiveView.route) },
                 onOpenAppUpdate = { navController.navigate(Screen.AppUpdate.route) },
+                onOpenLocalLab = { navController.navigate(Screen.LocalLab.route) },
                 onFireShutter = viewModel::fireShutter,
             )
         }
@@ -238,6 +240,21 @@ fun AppNavHost(
         }
         composable(Screen.Settings.route) {
             SimplePlaceholder(title = "Settings", onBack = { navController.popBackStack() })
+        }
+
+        // Easter egg: develop any on-device photo with the film looks, no camera needed.
+        composable(Screen.LocalLab.route) {
+            val state by galleryViewModel.state.collectAsStateWithLifecycle()
+            LocalLabScreen(
+                exporter = photoExporter,
+                filmLookLoader = filmLookLoader,
+                stickyLook = state.stickyLook,
+                stickyIntensity = state.stickyIntensity,
+                stickyRenderingIntent = state.stickyRenderingIntent,
+                editedExportQuality = state.editedExportQuality,
+                onEditedExportQualityChange = galleryViewModel::setEditedExportQuality,
+                onBack = { navController.popBackStack() },
+            )
         }
     }
 }
