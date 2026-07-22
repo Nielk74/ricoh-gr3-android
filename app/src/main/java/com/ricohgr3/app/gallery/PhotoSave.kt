@@ -42,6 +42,24 @@ data class SaveOutcome(
 )
 
 /**
+ * Move-only owner for one full-resolution camera response. Clearing the producer's reference as
+ * soon as decode/write begins lets the adaptive downloader reuse that memory while film rendering
+ * continues, rather than retaining two references to the same large byte array.
+ */
+internal class FullPhotoPayload(bytes: ByteArray) {
+    private var value: ByteArray? = bytes
+
+    @Synchronized
+    fun take(): ByteArray = value?.also { value = null }
+        ?: error("Full-resolution photo payload was already consumed")
+
+    @Synchronized
+    fun discard() {
+        value = null
+    }
+}
+
+/**
  * Download the full-resolution original from the camera and write it, untouched, to the gallery.
  */
 suspend fun saveOriginal(
@@ -105,34 +123,119 @@ suspend fun saveEdited(
             throw java.io.IOException("Could not decode ${id.file} for editing")
         }
 
-    // Do all pixel work off the main thread.
-    val edited = withContext(Dispatchers.Default) {
-        // Develop the selected film stock directly. `developForSave` leaves `decoded` untouched,
-        // so recycle it after; `applyLookTint` consumes and recycles its source, so we must not
-        // recycle again in that path.
-        val developed = loader?.resolve(filmLookId)
-            ?.let { (film, lut) ->
-                developForSave(
-                    decoded, film, lut,
-                    raw = isRaw,
-                    iso = iso,
-                    effectStrength = effectStrength,
-                    options = DevelopOptions(
-                        intent = renderingIntent,
-                        renderSeed = stableRenderSeed(id.toString()),
-                    ),
-                )
-            }
-        if (developed != null) {
-            decoded.recycle()
-            developed
-        } else {
-            // No loader (JVM path) or unknown stock → honest indicative gradient tint.
-            applyLookTint(decoded, filmLookId, effectStrength)
-        }
-    }
+    val edited = renderDownloadedEdit(
+        decoded = decoded,
+        id = id,
+        filmLookId = filmLookId,
+        loader = loader,
+        iso = iso,
+        effectStrength = effectStrength,
+        renderingIntent = renderingIntent,
+        isRaw = isRaw,
+    )
 
     return exportDeveloped(edited, id.file, exporter, exportQuality)
+}
+
+/**
+ * Save a payload already fetched by the transfer pipeline. Camera downloads are always FULL;
+ * output dimensions continue to follow the selected edited-export quality and heap safety limit.
+ * [onPayloadConsumed] fires at the earliest safe point so a waiting full-resolution prefetch may
+ * begin while CPU development continues.
+ */
+internal suspend fun saveDownloadedPhoto(
+    id: PhotoId,
+    payload: FullPhotoPayload,
+    preset: TransferPreset,
+    exporter: PhotoExporter,
+    loader: FilmLookLoader,
+    iso: Int?,
+    onPayloadConsumed: () -> Unit,
+    onStage: (TransferWorkStage) -> Unit,
+): SaveOutcome {
+    if (preset.look == null) {
+        onStage(TransferWorkStage.SAVING)
+        val bytes = payload.take()
+        try {
+            exporter.saveBytes(bytes, id.file, mimeTypeFor(id.file))
+        } finally {
+            onPayloadConsumed()
+        }
+        return SaveOutcome(displayName = id.file, edited = false)
+    }
+
+    val isRaw = id.file.substringAfterLast('.', "").equals("DNG", true)
+    val maxPixels = developmentPixelLimit(Runtime.getRuntime().maxMemory(), preset.quality)
+    onStage(TransferWorkStage.DEVELOPING)
+    val decoded = decodeAndReleasePayload(payload, maxPixels, onPayloadConsumed)
+        ?: if (isRaw) {
+            throw java.io.IOException(
+                "This device could not render ${id.file} for editing; use Save original instead.",
+            )
+        } else {
+            throw java.io.IOException("Could not decode ${id.file} for editing")
+        }
+    val edited = renderDownloadedEdit(
+        decoded = decoded,
+        id = id,
+        filmLookId = preset.look,
+        loader = loader,
+        iso = iso,
+        effectStrength = preset.intensity,
+        renderingIntent = preset.renderingIntent,
+        isRaw = isRaw,
+    )
+    onStage(TransferWorkStage.SAVING)
+    return exportDeveloped(edited, id.file, exporter, preset.quality)
+}
+
+/** Decode in its own frame, then drop the compressed full-size payload before render allocation. */
+private suspend fun decodeAndReleasePayload(
+    payload: FullPhotoPayload,
+    maxPixels: Int,
+    onPayloadConsumed: () -> Unit,
+): Bitmap? {
+    val bytes = payload.take()
+    return try {
+        withContext(Dispatchers.Default) { decodeBounded(bytes, maxPixels) }
+    } finally {
+        onPayloadConsumed()
+    }
+}
+
+private suspend fun renderDownloadedEdit(
+    decoded: Bitmap,
+    id: PhotoId,
+    filmLookId: String,
+    loader: FilmLookLoader?,
+    iso: Int?,
+    effectStrength: Float,
+    renderingIntent: RenderingIntent,
+    isRaw: Boolean,
+): Bitmap = withContext(Dispatchers.Default) {
+    // Develop the selected film stock directly. `developForSave` leaves `decoded` untouched,
+    // so recycle it after; `applyLookTint` consumes and recycles its source, so we must not
+    // recycle again in that path.
+    val developed = loader?.resolve(filmLookId)
+        ?.let { (film, lut) ->
+            developForSave(
+                decoded, film, lut,
+                raw = isRaw,
+                iso = iso,
+                effectStrength = effectStrength,
+                options = DevelopOptions(
+                    intent = renderingIntent,
+                    renderSeed = stableRenderSeed(id.toString()),
+                ),
+            )
+        }
+    if (developed != null) {
+        decoded.recycle()
+        developed
+    } else {
+        // No loader (JVM path) or unknown stock → honest indicative gradient tint.
+        applyLookTint(decoded, filmLookId, effectStrength)
+    }
 }
 
 /**
@@ -284,7 +387,7 @@ internal const val MIN_EDIT_PIXELS = 720 * 480
  * diffusion, halation masks, and blur scratch. The exact peak varies by stock, so this includes a
  * margin above the currently measured arrays.
  */
-private const val PEAK_DEVELOP_BYTES_PER_PIXEL = 34L
+internal const val PEAK_DEVELOP_BYTES_PER_PIXEL = 34L
 
 /**
  * Choose a development ceiling from the app process's actual maximum heap.

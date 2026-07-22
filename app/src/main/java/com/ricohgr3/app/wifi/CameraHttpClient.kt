@@ -14,6 +14,9 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody
+import java.io.ByteArrayOutputStream
+import java.io.EOFException
 import java.io.IOException
 import java.net.Proxy
 import java.util.concurrent.TimeUnit
@@ -79,6 +82,14 @@ class CameraHttpClient(
         file: String,
         size: ImageSize,
         storage: String?,
+    ): ByteArray = downloadPhotoWithProgress(folder, file, size, storage) { _, _ -> }
+
+    override suspend fun downloadPhotoWithProgress(
+        folder: String,
+        file: String,
+        size: ImageSize,
+        storage: String?,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
     ): ByteArray = withContext(Dispatchers.IO) {
         val url = urlBuilder()
             .addPathSegment("photos")
@@ -91,9 +102,7 @@ class CameraHttpClient(
             .build()
         okHttpClient.newCall(Request.Builder().url(url).get().build()).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("downloadPhoto ${resp.code} for $folder/$file")
-            // TODO(scaffold): buffers the whole file in memory. For real downloads, stream
-            // resp.body!!.source() to a File/OutputStream instead.
-            resp.body?.bytes() ?: ByteArray(0)
+            resp.body?.readBytesWithProgress(onProgress) ?: ByteArray(0)
         }
     }
 
@@ -195,3 +204,44 @@ class CameraHttpClient(
         ): CameraHttpClient = CameraHttpClient(baseUrl = baseUrl, okHttpClient = clientForNetwork(network))
     }
 }
+
+/**
+ * Read a response body with useful byte progress. When Content-Length is known, fill one exactly
+ * sized array directly instead of growing a second buffer and copying a full-resolution file at
+ * the end. This keeps the optimized prefetch path's transient heap use predictable.
+ */
+private fun ResponseBody.readBytesWithProgress(
+    onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
+): ByteArray {
+    val declaredLength = contentLength().takeIf { it in 0..Int.MAX_VALUE.toLong() }
+    val input = byteStream()
+    onProgress(0L, declaredLength)
+
+    if (declaredLength != null) {
+        val result = ByteArray(declaredLength.toInt())
+        var offset = 0
+        while (offset < result.size) {
+            val read = input.read(result, offset, minOf(DOWNLOAD_PROGRESS_CHUNK_BYTES, result.size - offset))
+            if (read < 0) {
+                throw EOFException("Expected $declaredLength response bytes, received $offset")
+            }
+            offset += read
+            onProgress(offset.toLong(), declaredLength)
+        }
+        return result
+    }
+
+    val output = ByteArrayOutputStream()
+    val chunk = ByteArray(DOWNLOAD_PROGRESS_CHUNK_BYTES)
+    var total = 0L
+    while (true) {
+        val read = input.read(chunk)
+        if (read < 0) break
+        output.write(chunk, 0, read)
+        total += read
+        onProgress(total, null)
+    }
+    return output.toByteArray()
+}
+
+private const val DOWNLOAD_PROGRESS_CHUNK_BYTES = 512 * 1024

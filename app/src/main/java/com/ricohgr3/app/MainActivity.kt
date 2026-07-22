@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.gallery.GalleryViewModel
+import com.ricohgr3.app.gallery.TransferMemoryMonitor
 import com.ricohgr3.app.gallery.TransferViewModel
 import com.ricohgr3.app.looks.StickyLookStore
 import com.ricohgr3.app.nav.AppNavHost
@@ -64,6 +65,7 @@ class MainActivity : ComponentActivity() {
                     val photoExporter = remember(appContext) { com.ricohgr3.app.data.PhotoExporter(appContext) }
                     val filmLookLoader = remember(appContext) { com.ricohgr3.app.looks.emulation.FilmLookLoader(appContext) }
                     val stickyLookStore = remember { StickyLookStore(appContext) }
+                    val transferMemoryMonitor = remember(appContext) { TransferMemoryMonitor(appContext) }
                     val galleryViewModel: GalleryViewModel = viewModel(
                         factory = GalleryViewModel.Factory(photoRepository, stickyLookStore),
                     )
@@ -72,6 +74,7 @@ class MainActivity : ComponentActivity() {
                             photoRepository,
                             photoExporter,
                             filmLookLoader,
+                            transferMemoryMonitor,
                         ),
                     )
 

@@ -145,8 +145,29 @@ class CameraHttpClientTest {
 
         val result = client.downloadPhoto("100RICOH", "R0000001.JPG", size = ImageSize.FULL)
 
-        assertEquals(bytes.toList(), result.toList())
+        assertTrue(bytes.contentEquals(result))
         // FULL must not append a ?size= param.
+        assertEquals("/v1/photos/100RICOH/R0000001.JPG", server.takeRequest().path)
+    }
+
+    @Test
+    fun downloadPhotoProgressStreamsKnownLengthAndKeepsFullResolutionUrl() = runBlocking {
+        val bytes = ByteArray(1_200_000) { (it % 251).toByte() }
+        val updates = mutableListOf<Pair<Long, Long?>>()
+        server.enqueue(MockResponse().setBody(okio.Buffer().write(bytes)))
+
+        val result = client.downloadPhotoWithProgress(
+            folder = "100RICOH",
+            file = "R0000001.JPG",
+            size = ImageSize.FULL,
+            onProgress = { read, total -> updates += read to total },
+        )
+
+        assertTrue(bytes.contentEquals(result))
+        assertTrue(updates.size >= 3)
+        assertEquals(0L to bytes.size.toLong(), updates.first())
+        assertEquals(bytes.size.toLong() to bytes.size.toLong(), updates.last())
+        assertTrue(updates.zipWithNext().all { (left, right) -> right.first >= left.first })
         assertEquals("/v1/photos/100RICOH/R0000001.JPG", server.takeRequest().path)
     }
 

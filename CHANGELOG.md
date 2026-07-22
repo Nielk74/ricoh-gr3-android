@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.9.6 — 2026-07-22
+
+- Kept auto-import and batch-save camera fetches at full resolution while adding adaptive
+  double buffering: the next full file downloads during the current save/develop only when both
+  process-heap headroom and Android's low-memory state say it is safe.
+- Added incremental response-byte reporting, separate camera-read and completion progress bars, live
+  download/develop/save filenames, and an explicit full-size-source pipeline indicator.
+
 ## v0.9.5 — 2026-07-22
 
 - Removed Portra's focus/detail grain mask. The physical 35 mm grain field is now applied without

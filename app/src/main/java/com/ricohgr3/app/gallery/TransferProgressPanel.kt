@@ -93,27 +93,72 @@ internal fun TransferProgressPanel(
                 color = GrTheme.colors.accent,
                 trackColor = GrTheme.colors.paperEdge,
             )
-        } else {
+        } else if (state.total > 0) {
             val progressColor =
                 if (state.phase == TransferPhase.COMPLETED && state.failures.isEmpty()) {
                     GrTheme.colors.good
                 } else {
                     GrTheme.colors.accent
                 }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(GrTheme.colors.paperEdge),
-            ) {
-                if (state.progress > 0f) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(state.progress)
-                            .background(progressColor),
+            TransferProgressTrack(
+                label = "CAMERA",
+                value = state.downloadProgress,
+                count = "${state.downloadCompleted} / ${state.total}",
+                color = progressColor,
+            )
+            Spacer(Modifier.height(9.dp))
+            TransferProgressTrack(
+                label = "FINISHED",
+                value = state.saveProgress,
+                count = "${state.completed} / ${state.total}",
+                color = progressColor,
+            )
+            Spacer(Modifier.height(9.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    if (state.pipelineDepth > 1) {
+                        "FULL-SIZE · PIPELINED"
+                    } else {
+                        "FULL-SIZE · MEMORY-SAFE"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = GrTheme.colors.inkSoft,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                state.heapHeadroomMb?.let { headroom ->
+                    Text(
+                        "HEAP $headroom MB",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = GrTheme.colors.inkSoft,
+                        maxLines = 1,
                     )
+                }
+            }
+
+            if (state.phase == TransferPhase.TRANSFERRING) {
+                val download = state.downloading
+                val processing = state.processing
+                if (download != null || processing != null) {
+                    Spacer(Modifier.height(11.dp))
+                    download?.let {
+                        TransferActivityLine(
+                            label = "DOWNLOADING",
+                            file = it.file,
+                            suffix = downloadAmount(state),
+                        )
+                    }
+                    processing?.let {
+                        TransferActivityLine(
+                            label = when (state.workStage) {
+                                TransferWorkStage.DEVELOPING -> "DEVELOPING"
+                                TransferWorkStage.SAVING -> "SAVING"
+                                null -> "PREPARING"
+                            },
+                            file = it.file,
+                        )
+                    }
                 }
             }
         }
@@ -212,6 +257,80 @@ internal fun TransferProgressPanel(
 }
 
 @Composable
+private fun TransferProgressTrack(
+    label: String,
+    value: Float,
+    count: String,
+    color: androidx.compose.ui.graphics.Color,
+) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = GrTheme.colors.inkSoft,
+            modifier = Modifier.weight(1f),
+        )
+        Text(count, style = MaterialTheme.typography.labelSmall, color = GrTheme.colors.ink)
+    }
+    Spacer(Modifier.height(4.dp))
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(GrTheme.colors.paperEdge),
+    ) {
+        if (value > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(value.coerceIn(0f, 1f))
+                    .background(color),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TransferActivityLine(label: String, file: String, suffix: String? = null) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = GrTheme.colors.accent,
+            modifier = Modifier.padding(end = 8.dp),
+        )
+        Text(
+            file,
+            style = MaterialTheme.typography.labelSmall,
+            color = GrTheme.colors.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        suffix?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = GrTheme.colors.inkSoft)
+        }
+    }
+}
+
+private fun downloadAmount(state: TransferUiState): String? {
+    val total = state.downloadTotalBytes?.takeIf { it > 0L }
+    if (total != null) {
+        return "${((state.downloadBytes * 100L) / total).coerceIn(0L, 100L)}%"
+    }
+    if (state.downloadBytes <= 0L) return null
+    val wholeMib = state.downloadBytes / BYTES_PER_MIB
+    val tenth = ((state.downloadBytes % BYTES_PER_MIB) * 10L) / BYTES_PER_MIB
+    return "$wholeMib.$tenth MB"
+}
+
+private const val BYTES_PER_MIB = 1024L * 1024L
+
+@Composable
 private fun ProgressStat(label: String, value: Int, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
@@ -253,12 +372,25 @@ private fun transferProgressCopy(state: TransferUiState): TransferProgressCopy =
             if (state.stopRequested) {
                 "Pausing safely"
             } else {
-                "Frame ${state.currentNumber} of ${state.total}"
+                when {
+                    state.processing != null && state.workStage == TransferWorkStage.DEVELOPING ->
+                        "Developing frame ${state.processingNumber} of ${state.total}"
+                    state.processing != null ->
+                        "Saving frame ${state.processingNumber} of ${state.total}"
+                    state.downloading != null ->
+                        "Downloading frame ${state.downloadingNumber} of ${state.total}"
+                    else -> "Preparing the next frame"
+                }
             },
             if (state.stopRequested) {
-                "Finishing the current frame before pausing."
+                "Finishing the active frame and releasing any prefetched file."
             } else {
-                state.current?.file ?: "Preparing the next frame…"
+                when {
+                    state.processing != null && state.downloading != null ->
+                        "${state.processing.file} · fetching ${state.downloading.file} in parallel"
+                    state.current != null -> state.current?.file.orEmpty()
+                    else -> "Preparing the next frame…"
+                }
             },
         )
         TransferPhase.COMPLETED -> {

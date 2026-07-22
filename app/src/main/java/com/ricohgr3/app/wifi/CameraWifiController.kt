@@ -40,9 +40,8 @@ interface CameraWifiController {
      * determined by the file extension). Optionally request a downscaled rendition via [size]
      * (ignored by the camera for DNG originals). Returns the raw response body bytes.
      *
-     * WARNING: full-resolution files are large (~36 MiB JPEG, ~40+ MiB DNG); prefer streaming
-     * to disk for real downloads. This returns a `ByteArray` for simplicity at the scaffold
-     * stage — see TODO in [CameraHttpClient.downloadPhoto].
+     * WARNING: full-resolution files are large (~36 MiB JPEG, ~40+ MiB DNG). This returns a
+     * `ByteArray`; batch callers must bound how many responses can be resident at once.
      */
     suspend fun downloadPhoto(
         folder: String,
@@ -50,6 +49,23 @@ interface CameraWifiController {
         size: ImageSize = ImageSize.FULL,
         storage: String? = null,
     ): ByteArray
+
+    /**
+     * Download a photo while reporting response-body progress. Implementations that can stream the
+     * body should report incremental updates; the default keeps test doubles and alternative
+     * controllers source-compatible and reports one final update.
+     *
+     * [totalBytes] is null when the server did not provide a usable Content-Length.
+     */
+    suspend fun downloadPhotoWithProgress(
+        folder: String,
+        file: String,
+        size: ImageSize = ImageSize.FULL,
+        storage: String? = null,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
+    ): ByteArray = downloadPhoto(folder, file, size, storage).also { bytes ->
+        onProgress(bytes.size.toLong(), bytes.size.toLong())
+    }
 
     /**
      * `PUT /v1/params/camera` — set capture parameters (ISO / shutter / aperture / effect …).

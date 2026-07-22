@@ -11,7 +11,7 @@ captures.
 The app is independent and unofficial. It uses the camera's community-documented BLE GATT and
 local HTTP interfaces; it does not require Ricoh's Image Sync app or a cloud account.
 
-> **Current release: v0.9.5.** The app, protocol clients, colour-science core, update path, and
+> **Current release: v0.9.6.** The app, protocol clients, colour-science core, update path, and
 > automated tests are implemented. Real-camera radio behaviour still needs validation across GR
 > III/IIIx firmware and Android vendors; see [Current limitations](#current-limitations).
 
@@ -22,7 +22,7 @@ local HTTP interfaces; it does not require Ricoh's Image Sync app or a cloud acc
 | Bluetooth | Scan, connect, read camera identity and WLAN credentials, cache credentials in private app storage, fire the shutter, and expose basic camera state. |
 | Wi-Fi | Join the camera AP on Android 10+, route only camera traffic to it while normal internet access stays available, show MJPEG live view, fire the Wi-Fi shutter with retry, and read camera properties. |
 | Library | Browse a three-column camera contact sheet, inspect metadata, distinguish RAW files, select batches, apply one finish, save the selection, and mark edited frames. |
-| Auto import | Choose an original or film-look preset once, import the connected camera roll sequentially, and follow current-file plus saved/failed/remaining progress. |
+| Auto import | Choose an original or film-look preset once, fetch every frame at full camera resolution, and follow separate camera-read and completion progress. A RAM-aware double buffer overlaps the next download with the current save/develop when safe. |
 | Viewer | Render the real developed preview, press and hold for before/after, choose a sticky look, adjust effect from 50–150%, select edited-export quality, reset, and save original or edited copies to `Pictures/GR3`. |
 | Film Lab | Eleven provenance-labelled film/cinema looks with literal Stock and scene-protected Smart rendering, negative-to-print density, natural skin isolation, physical-scale diffusion, two-lobe halation, and film-plane grain. |
 | Updates | Check GitHub Releases automatically at most once every 24 hours or manually on demand, verify the published APK SHA-256, and hand installation to Android. |
@@ -197,7 +197,9 @@ that permission to track or upload location.
 2. Choose **Wi-Fi** in the app.
 3. Join with the remembered credentials, or use the currently connected camera network.
 4. Open **Auto import** to choose the filter, intensity, rendering, and output quality once, then
-   save the whole camera roll with live per-frame progress.
+   save the whole camera roll from full-resolution sources with live byte, develop, and save
+   progress. Available process heap and Android's low-memory signal select an optimized two-file
+   pipeline or the conservative sequential path automatically.
 5. Or open **Library**, long-press frames to select a batch, choose one finish, then use **Apply
    only** or **Save N photos**. A failed frame does not stop the rest and can be retried alone.
 6. Open a frame, choose a film look, hold the image to compare with the original, set 50–150%

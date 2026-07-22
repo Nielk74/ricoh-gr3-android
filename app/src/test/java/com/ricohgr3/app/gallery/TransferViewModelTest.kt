@@ -227,6 +227,166 @@ class TransferViewModelTest {
     }
 
     @Test
+    fun `two-slot plan downloads the next full payload while the first frame processes`() = runTest {
+        val firstSaveGate = CompletableDeferred<Unit>()
+        val downloaded = mutableListOf<PhotoId>()
+        val saved = mutableListOf<PhotoId>()
+        val vm = TransferViewModel(
+            photoLister = { PhotoResult.Success(emptyList()) },
+            photoDownloader = { id, _, onProgress ->
+                downloaded += id
+                onProgress(4L, 8L)
+                onProgress(8L, 8L)
+                DownloadedTransfer(id, iso = 400, payload = FullPhotoPayload(ByteArray(8)))
+            },
+            downloadedSaver = { transfer, _, onPayloadConsumed, onStage ->
+                onStage(TransferWorkStage.DEVELOPING)
+                if (transfer.id == first) firstSaveGate.await()
+                transfer.payload.take()
+                onPayloadConsumed()
+                onStage(TransferWorkStage.SAVING)
+                saved += transfer.id
+                SaveOutcome(transfer.id.file, edited = true)
+            },
+            pipelinePlanner = {
+                TransferPipelinePlan(maxResidentDownloads = 2, heapHeadroomBytes = 512L * 1024L * 1024L)
+            },
+        )
+
+        vm.startSelection(listOf(first, second), TransferPreset("portra400"))
+        dispatcher.scheduler.runCurrent()
+
+        assertEquals(listOf(first, second), downloaded)
+        assertEquals(first, vm.state.value.processing)
+        assertEquals(2, vm.state.value.downloadCompleted)
+        assertEquals(0, vm.state.value.completed)
+        assertEquals(2, vm.state.value.pipelineDepth)
+
+        firstSaveGate.complete(Unit)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(listOf(first, second), saved)
+        assertEquals(TransferPhase.COMPLETED, vm.state.value.phase)
+    }
+
+    @Test
+    fun `one-slot memory plan does not download a second payload during processing`() = runTest {
+        val firstSaveGate = CompletableDeferred<Unit>()
+        val downloaded = mutableListOf<PhotoId>()
+        val vm = TransferViewModel(
+            photoLister = { PhotoResult.Success(emptyList()) },
+            photoDownloader = { id, _, onProgress ->
+                downloaded += id
+                onProgress(8L, 8L)
+                DownloadedTransfer(id, iso = null, payload = FullPhotoPayload(ByteArray(8)))
+            },
+            downloadedSaver = { transfer, _, onPayloadConsumed, onStage ->
+                onStage(TransferWorkStage.SAVING)
+                transfer.payload.take()
+                onPayloadConsumed()
+                // The one-slot coordinator must ignore the early "compressed bytes consumed"
+                // signal and wait for the whole save before admitting another full payload.
+                if (transfer.id == first) firstSaveGate.await()
+                SaveOutcome(transfer.id.file, edited = false)
+            },
+            pipelinePlanner = {
+                TransferPipelinePlan(maxResidentDownloads = 1, heapHeadroomBytes = 32L * 1024L * 1024L)
+            },
+        )
+
+        vm.startSelection(listOf(first, second), TransferPreset(look = null))
+        dispatcher.scheduler.runCurrent()
+
+        assertEquals(listOf(first), downloaded)
+        assertEquals(1, vm.state.value.pipelineDepth)
+
+        firstSaveGate.complete(Unit)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(listOf(first, second), downloaded)
+        assertEquals(2, vm.state.value.saved)
+    }
+
+    @Test
+    fun `pause discards a prefetched payload and continue never duplicates a save`() = runTest {
+        val firstSaveGate = CompletableDeferred<Unit>()
+        val downloaded = mutableListOf<PhotoId>()
+        val saved = mutableListOf<PhotoId>()
+        val vm = TransferViewModel(
+            photoLister = { PhotoResult.Success(emptyList()) },
+            photoDownloader = { id, _, onProgress ->
+                downloaded += id
+                onProgress(8L, 8L)
+                DownloadedTransfer(id, iso = null, payload = FullPhotoPayload(ByteArray(8)))
+            },
+            downloadedSaver = { transfer, _, onPayloadConsumed, onStage ->
+                onStage(TransferWorkStage.SAVING)
+                if (transfer.id == first) firstSaveGate.await()
+                transfer.payload.take()
+                onPayloadConsumed()
+                saved += transfer.id
+                SaveOutcome(transfer.id.file, edited = false)
+            },
+            pipelinePlanner = { TransferPipelinePlan(2, 512L * 1024L * 1024L) },
+        )
+
+        vm.startSelection(listOf(first, second, third), TransferPreset(look = null))
+        dispatcher.scheduler.runCurrent()
+        assertEquals(listOf(first, second), downloaded)
+
+        vm.cancel()
+        firstSaveGate.complete(Unit)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(TransferPhase.CANCELLED, vm.state.value.phase)
+        assertEquals(listOf(first), saved)
+
+        vm.retry()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(listOf(first, second, third), saved)
+        assertEquals(TransferPhase.COMPLETED, vm.state.value.phase)
+        assertEquals(2, downloaded.count { it == second })
+    }
+
+    @Test
+    fun `byte progress advances the camera bar before a frame finishes downloading`() = runTest {
+        val downloadGate = CompletableDeferred<Unit>()
+        val vm = TransferViewModel(
+            photoLister = { PhotoResult.Success(emptyList()) },
+            photoDownloader = { id, _, onProgress ->
+                onProgress(512L, 1024L)
+                downloadGate.await()
+                onProgress(1024L, 1024L)
+                DownloadedTransfer(id, iso = null, payload = FullPhotoPayload(ByteArray(8)))
+            },
+            downloadedSaver = { transfer, _, onPayloadConsumed, onStage ->
+                onStage(TransferWorkStage.SAVING)
+                transfer.payload.take()
+                onPayloadConsumed()
+                SaveOutcome(transfer.id.file, edited = false)
+            },
+            pipelinePlanner = { TransferPipelinePlan(1, 64L * 1024L * 1024L) },
+        )
+
+        vm.startSelection(listOf(first), TransferPreset(look = null))
+        dispatcher.scheduler.runCurrent()
+
+        val inFlight = vm.state.value
+        assertEquals(first, inFlight.downloading)
+        assertEquals(512L, inFlight.downloadBytes)
+        assertEquals(1024L, inFlight.downloadTotalBytes)
+        assertEquals(0.5f, inFlight.downloadProgress)
+        assertEquals(0.25f, inFlight.progress)
+
+        downloadGate.complete(Unit)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1f, vm.state.value.progress)
+        assertEquals(TransferPhase.COMPLETED, vm.state.value.phase)
+    }
+
+    @Test
     fun `ISO parser accepts positive numeric camera metadata only`() {
         assertEquals(1600, parseTransferIso(" 1600 "))
         assertNull(parseTransferIso("auto"))

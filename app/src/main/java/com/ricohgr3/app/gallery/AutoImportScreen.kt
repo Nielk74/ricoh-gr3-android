@@ -115,8 +115,8 @@ fun AutoImportScreen(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "The camera roll is scanned when you start. Every listed frame is saved to " +
-                        "Pictures/GR3, one at a time; starting again creates another copy.",
+                    "Every frame is fetched at full camera resolution. When memory allows, the next " +
+                        "download overlaps the current save; starting again creates another copy.",
                     style = MaterialTheme.typography.labelSmall,
                     color = GrTheme.colors.inkSoft,
                     modifier = Modifier.padding(horizontal = 4.dp),
@@ -195,7 +195,7 @@ private fun AutoImportIntro() {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FlowStep("01", "SCAN", Modifier.weight(1f))
+        FlowStep("01", "FETCH", Modifier.weight(1f))
         Text("→", color = GrTheme.colors.grey)
         FlowStep("02", "DEVELOP", Modifier.weight(1f))
         Text("→", color = GrTheme.colors.grey)

@@ -11,12 +11,17 @@ import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.data.PhotoResult
 import com.ricohgr3.app.looks.emulation.FilmLookLoader
 import com.ricohgr3.app.looks.emulation.RenderingIntent
+import com.ricohgr3.app.wifi.ImageSize
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
 
 /** The settings frozen at the start of an auto-import or selection save. */
 data class TransferPreset(
@@ -43,6 +48,11 @@ enum class TransferPhase {
     FAILED,
 }
 
+enum class TransferWorkStage {
+    DEVELOPING,
+    SAVING,
+}
+
 data class TransferFailure(
     val id: PhotoId,
     val reason: String,
@@ -50,8 +60,8 @@ data class TransferFailure(
 
 /**
  * One observable transfer snapshot shared by the auto-import page and the gallery batch panel.
- * Progress is deliberately item-based: the camera API does not expose response byte counts, but
- * every finished frame advances a stable, useful total and the current filename remains visible.
+ * It exposes transport byte progress for the active camera response plus durable item progress for
+ * completed saves, so a long full-resolution download never looks stalled.
  */
 data class TransferUiState(
     val phase: TransferPhase = TransferPhase.IDLE,
@@ -60,7 +70,16 @@ data class TransferUiState(
     val total: Int = 0,
     val completed: Int = 0,
     val saved: Int = 0,
-    val current: PhotoId? = null,
+    val downloadCompleted: Int = 0,
+    val downloading: PhotoId? = null,
+    val downloadingNumber: Int = 0,
+    val downloadBytes: Long = 0L,
+    val downloadTotalBytes: Long? = null,
+    val processing: PhotoId? = null,
+    val processingNumber: Int = 0,
+    val workStage: TransferWorkStage? = null,
+    val pipelineDepth: Int = 1,
+    val heapHeadroomMb: Int? = null,
     val failures: List<TransferFailure> = emptyList(),
     val message: String? = null,
     val stopRequested: Boolean = false,
@@ -76,30 +95,111 @@ data class TransferUiState(
         get() = when {
             phase == TransferPhase.COMPLETED -> 1f
             total <= 0 -> 0f
-            else -> (completed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+            else -> ((downloadProgress + saveProgress) / 2f).coerceIn(0f, 1f)
         }
 
-    val currentNumber: Int
-        get() = if (total == 0) 0 else (completed + 1).coerceAtMost(total)
+    val downloadProgress: Float
+        get() {
+            if (total <= 0) return 0f
+            val currentFraction = if (
+                downloading != null && downloadTotalBytes != null && downloadTotalBytes > 0L
+            ) {
+                (downloadBytes.toDouble() / downloadTotalBytes.toDouble()).coerceIn(0.0, 1.0)
+            } else {
+                0.0
+            }
+            return ((downloadCompleted.toDouble() + currentFraction) / total.toDouble())
+                .coerceIn(0.0, 1.0)
+                .toFloat()
+        }
+
+    val saveProgress: Float
+        get() = if (total <= 0) 0f else
+            (completed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+
+    val current: PhotoId?
+        get() = processing ?: downloading
 }
 
+internal data class DownloadedTransfer(
+    val id: PhotoId,
+    val iso: Int?,
+    val payload: FullPhotoPayload,
+)
+
+private sealed interface DownloadAttempt {
+    val number: Int
+    val id: PhotoId
+
+    data class Success(
+        override val number: Int,
+        val transfer: DownloadedTransfer,
+    ) : DownloadAttempt {
+        override val id: PhotoId get() = transfer.id
+    }
+
+    data class Failure(
+        override val number: Int,
+        override val id: PhotoId,
+        val reason: String,
+    ) : DownloadAttempt
+}
+
+private typealias TransferDownloader = suspend (
+    id: PhotoId,
+    preset: TransferPreset,
+    onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
+) -> DownloadedTransfer
+
+private typealias DownloadedSaver = suspend (
+    transfer: DownloadedTransfer,
+    preset: TransferPreset,
+    onPayloadConsumed: () -> Unit,
+    onStage: (TransferWorkStage) -> Unit,
+) -> SaveOutcome
+
 /**
- * Runs full-resolution saves strictly one at a time. Sequential work is important here: a single
- * film develop can use a sizeable, heap-bounded working set, so parallel exports would trade a
- * small speed gain for a much greater out-of-memory risk.
+ * Runs one full-resolution develop/save at a time, with an adaptive camera-download double buffer
+ * when current heap and system RAM make that safe. This overlaps the camera link with CPU work
+ * without ever running multiple memory-heavy film develops concurrently.
  */
 class TransferViewModel internal constructor(
     private val photoLister: suspend () -> PhotoResult<List<PhotoItem>>,
-    private val photoSaver: suspend (PhotoId, TransferPreset) -> SaveOutcome,
+    private val photoDownloader: TransferDownloader,
+    private val downloadedSaver: DownloadedSaver,
+    private val pipelinePlanner: (TransferPreset) -> TransferPipelinePlan,
 ) : ViewModel() {
 
-    constructor(
+    /** Compact constructor retained for coordination tests and non-Android callers. */
+    internal constructor(
+        photoLister: suspend () -> PhotoResult<List<PhotoItem>>,
+        photoSaver: suspend (PhotoId, TransferPreset) -> SaveOutcome,
+    ) : this(
+        photoLister = photoLister,
+        photoDownloader = { id, _, onProgress ->
+            onProgress(0L, 0L)
+            DownloadedTransfer(id, iso = null, payload = FullPhotoPayload(ByteArray(0)))
+        },
+        downloadedSaver = { transfer, preset, onPayloadConsumed, onStage ->
+            onStage(if (preset.look == null) TransferWorkStage.SAVING else TransferWorkStage.DEVELOPING)
+            try {
+                photoSaver(transfer.id, preset)
+            } finally {
+                transfer.payload.discard()
+                onPayloadConsumed()
+            }
+        },
+        pipelinePlanner = { TransferPipelinePlan(maxResidentDownloads = 1, heapHeadroomBytes = 0L) },
+    )
+
+    internal constructor(
         repository: PhotoRepository,
         exporter: PhotoExporter,
         filmLookLoader: FilmLookLoader,
+        memoryMonitor: TransferMemoryMonitor,
     ) : this(
         photoLister = { repository.loadPhotos() },
-        photoSaver = { id, preset ->
+        photoDownloader = { id, preset, onProgress ->
             // ISO is best-effort metadata. A missing info response must not prevent the image from
             // importing; it only means the grain model uses its neutral fallback.
             val iso = if (preset.look == null) {
@@ -110,17 +210,34 @@ class TransferViewModel internal constructor(
                     is PhotoResult.Error -> null
                 }
             }
-            saveEdited(
-                id = id,
-                filmLookId = preset.look,
-                repository = repository,
+            val bytes = when (
+                val result = repository.downloadPhotoWithProgress(
+                    id = id,
+                    size = ImageSize.FULL,
+                    onProgress = onProgress,
+                )
+            ) {
+                is PhotoResult.Success -> result.value
+                is PhotoResult.Error -> throw (
+                    result.cause ?: java.io.IOException(result.message)
+                )
+            }
+            DownloadedTransfer(id = id, iso = iso, payload = FullPhotoPayload(bytes))
+        },
+        downloadedSaver = { transfer, preset, onPayloadConsumed, onStage ->
+            saveDownloadedPhoto(
+                id = transfer.id,
+                payload = transfer.payload,
+                preset = preset,
                 exporter = exporter,
                 loader = filmLookLoader,
-                iso = iso,
-                effectStrength = preset.intensity,
-                renderingIntent = preset.renderingIntent,
-                exportQuality = preset.quality,
+                iso = transfer.iso,
+                onPayloadConsumed = onPayloadConsumed,
+                onStage = onStage,
             )
+        },
+        pipelinePlanner = { preset ->
+            chooseTransferPipeline(memoryMonitor.snapshot(), preset)
         },
     )
 
@@ -151,7 +268,9 @@ class TransferViewModel internal constructor(
                     is PhotoResult.Error -> _state.update {
                         it.copy(
                             phase = TransferPhase.FAILED,
-                            current = null,
+                            downloading = null,
+                            processing = null,
+                            workStage = null,
                             message = result.message,
                         )
                     }
@@ -234,7 +353,9 @@ class TransferViewModel internal constructor(
             _state.update {
                 it.copy(
                     phase = TransferPhase.CANCELLED,
-                    current = null,
+                    downloading = null,
+                    processing = null,
+                    workStage = null,
                     stopRequested = false,
                     message = "Stopped after ${it.completed} of ${it.total} frames",
                 )
@@ -244,7 +365,9 @@ class TransferViewModel internal constructor(
             _state.update {
                 it.copy(
                     phase = TransferPhase.FAILED,
-                    current = null,
+                    downloading = null,
+                    processing = null,
+                    workStage = null,
                     stopRequested = false,
                     message = transferFailureReason(failure),
                 )
@@ -275,7 +398,9 @@ class TransferViewModel internal constructor(
                 it.copy(
                     phase = TransferPhase.CANCELLED,
                     total = ids.size,
-                    current = null,
+                    downloading = null,
+                    processing = null,
+                    workStage = null,
                     stopRequested = false,
                     message = "Paused before the first frame",
                 )
@@ -283,51 +408,219 @@ class TransferViewModel internal constructor(
             return
         }
 
+        val plan = pipelinePlanner(preset)
+        resumableIds = ids
+        _state.value = TransferUiState(
+            phase = TransferPhase.TRANSFERRING,
+            source = source,
+            preset = preset,
+            total = ids.size,
+            pipelineDepth = plan.maxResidentDownloads,
+            heapHeadroomMb = (plan.heapHeadroomBytes / BYTES_PER_MIB)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt(),
+        )
+
         var saved = 0
         val failures = mutableListOf<TransferFailure>()
-        ids.forEachIndexed { index, id ->
-            resumableIds = ids.drop(index)
-            _state.value = TransferUiState(
-                phase = TransferPhase.TRANSFERRING,
-                source = source,
-                preset = preset,
-                total = ids.size,
-                completed = index,
-                saved = saved,
-                current = id,
-                failures = failures.toList(),
-            )
+        var paused = false
+
+        coroutineScope {
+            val residentSlots = Semaphore(plan.maxResidentDownloads)
+            // Rendezvous keeps the optimized mode to a true double buffer: the consumer's current
+            // payload plus at most one producer-held next payload, never an unbounded ready queue.
+            val attempts = Channel<DownloadAttempt>(capacity = Channel.RENDEZVOUS)
+            val producer = launch {
+                try {
+                    for (index in ids.indices) {
+                        if (_state.value.stopRequested) break
+                        residentSlots.acquire()
+                        if (_state.value.stopRequested) {
+                            residentSlots.release()
+                            break
+                        }
+
+                        val id = ids[index]
+                        val number = index + 1
+                        var downloadedTransfer: DownloadedTransfer? = null
+                        var handedOff = false
+                        try {
+                            _state.update {
+                                it.copy(
+                                    downloading = id,
+                                    downloadingNumber = number,
+                                    downloadBytes = 0L,
+                                    downloadTotalBytes = null,
+                                )
+                            }
+                            val transfer = photoDownloader(id, preset) { bytesRead, totalBytes ->
+                                _state.update { current ->
+                                    if (current.downloading != id) {
+                                        current
+                                    } else {
+                                        current.copy(
+                                            downloadBytes = bytesRead.coerceAtLeast(0L),
+                                            downloadTotalBytes = totalBytes?.takeIf { it > 0L },
+                                        )
+                                    }
+                                }
+                            }
+                            downloadedTransfer = transfer
+                            _state.update {
+                                it.copy(
+                                    downloadCompleted = it.downloadCompleted + 1,
+                                    downloading = null,
+                                    downloadingNumber = 0,
+                                    downloadBytes = 0L,
+                                    downloadTotalBytes = null,
+                                )
+                            }
+                            attempts.send(DownloadAttempt.Success(number, transfer))
+                            handedOff = true
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Throwable) {
+                            _state.update {
+                                it.copy(
+                                    downloadCompleted = it.downloadCompleted + 1,
+                                    downloading = null,
+                                    downloadingNumber = 0,
+                                    downloadBytes = 0L,
+                                    downloadTotalBytes = null,
+                                )
+                            }
+                            attempts.send(
+                                DownloadAttempt.Failure(
+                                    number = number,
+                                    id = id,
+                                    reason = transferFailureReason(failure),
+                                ),
+                            )
+                        } finally {
+                            _state.update { current ->
+                                if (current.downloading == id) {
+                                    current.copy(
+                                        downloading = null,
+                                        downloadingNumber = 0,
+                                        downloadBytes = 0L,
+                                        downloadTotalBytes = null,
+                                    )
+                                } else {
+                                    current
+                                }
+                            }
+                            if (!handedOff) {
+                                downloadedTransfer?.payload?.discard()
+                                residentSlots.release()
+                            }
+                        }
+                    }
+                } finally {
+                    attempts.close()
+                }
+            }
 
             try {
-                photoSaver(id, preset)
-                saved++
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Throwable) {
-                failures += TransferFailure(id, transferFailureReason(failure))
-            }
+                for (attempt in attempts) {
+                    resumableIds = ids.drop(attempt.number - 1)
+                    when (attempt) {
+                        is DownloadAttempt.Failure -> {
+                            failures += TransferFailure(attempt.id, attempt.reason)
+                        }
 
+                        is DownloadAttempt.Success -> {
+                            var payloadReleased = false
+                            val releasePayload = {
+                                if (!payloadReleased) {
+                                    payloadReleased = true
+                                    attempt.transfer.payload.discard()
+                                    residentSlots.release()
+                                }
+                            }
+                            _state.update {
+                                it.copy(
+                                    processing = attempt.id,
+                                    processingNumber = attempt.number,
+                                    workStage = if (preset.look == null) {
+                                        TransferWorkStage.SAVING
+                                    } else {
+                                        TransferWorkStage.DEVELOPING
+                                    },
+                                )
+                            }
+                            try {
+                                val earlyPayloadRelease: () -> Unit =
+                                    if (plan.isPipelined) releasePayload else NO_OP
+                                downloadedSaver(
+                                    attempt.transfer,
+                                    preset,
+                                    earlyPayloadRelease,
+                                ) { stage ->
+                                    _state.update { current ->
+                                        if (current.processing == attempt.id) {
+                                            current.copy(workStage = stage)
+                                        } else {
+                                            current
+                                        }
+                                    }
+                                }
+                                saved++
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (failure: Throwable) {
+                                failures += TransferFailure(
+                                    attempt.id,
+                                    transferFailureReason(failure),
+                                )
+                            } finally {
+                                releasePayload()
+                            }
+                        }
+                    }
+
+                    resumableIds = ids.drop(attempt.number)
+                    _state.update {
+                        it.copy(
+                            completed = attempt.number,
+                            saved = saved,
+                            processing = null,
+                            processingNumber = 0,
+                            workStage = null,
+                            failures = failures.toList(),
+                        )
+                    }
+
+                    if (_state.value.stopRequested && resumableIds.isNotEmpty()) {
+                        paused = true
+                        break
+                    }
+                }
+            } finally {
+                if (!producer.isCompleted) producer.cancelAndJoin()
+                while (true) {
+                    val queued = attempts.tryReceive().getOrNull() ?: break
+                    if (queued is DownloadAttempt.Success) {
+                        queued.transfer.payload.discard()
+                        residentSlots.release()
+                    }
+                }
+            }
+        }
+
+        if (_state.value.stopRequested && resumableIds.isNotEmpty()) paused = true
+
+        if (paused) {
             _state.update {
                 it.copy(
-                    completed = index + 1,
-                    saved = saved,
-                    current = null,
-                    failures = failures.toList(),
+                    phase = TransferPhase.CANCELLED,
+                    downloading = null,
+                    processing = null,
+                    workStage = null,
+                    stopRequested = false,
+                    message = "Paused after ${it.completed} of ${it.total} frames",
                 )
             }
-
-            resumableIds = ids.drop(index + 1)
-            if (_state.value.stopRequested && resumableIds.isNotEmpty()) {
-                _state.update {
-                    it.copy(
-                        phase = TransferPhase.CANCELLED,
-                        current = null,
-                        stopRequested = false,
-                        message = "Paused after ${it.completed} of ${it.total} frames",
-                    )
-                }
-                return
-            }
+            return
         }
 
         resumableIds = emptyList()
@@ -336,24 +629,27 @@ class TransferViewModel internal constructor(
                 phase = TransferPhase.COMPLETED,
                 completed = ids.size,
                 saved = saved,
-                current = null,
+                downloading = null,
+                processing = null,
+                workStage = null,
                 failures = failures.toList(),
                 stopRequested = false,
             )
         }
     }
 
-    class Factory(
+    internal class Factory(
         private val repository: PhotoRepository,
         private val exporter: PhotoExporter,
         private val filmLookLoader: FilmLookLoader,
+        private val memoryMonitor: TransferMemoryMonitor,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             require(modelClass.isAssignableFrom(TransferViewModel::class.java)) {
                 "Unknown ViewModel class: ${modelClass.name}"
             }
-            return TransferViewModel(repository, exporter, filmLookLoader) as T
+            return TransferViewModel(repository, exporter, filmLookLoader, memoryMonitor) as T
         }
     }
 }
@@ -368,3 +664,6 @@ private fun transferFailureReason(failure: Throwable): String =
     } else {
         failure.message?.takeIf { it.isNotBlank() } ?: failure::class.simpleName ?: "Unknown error"
     }
+
+private const val BYTES_PER_MIB = 1024L * 1024L
+private val NO_OP: () -> Unit = {}

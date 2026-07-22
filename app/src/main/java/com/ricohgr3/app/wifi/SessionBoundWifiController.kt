@@ -53,6 +53,14 @@ class SessionBoundWifiController(
         storage: String?,
     ): ByteArray = require().downloadPhoto(folder, file, size, storage)
 
+    override suspend fun downloadPhotoWithProgress(
+        folder: String,
+        file: String,
+        size: ImageSize,
+        storage: String?,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
+    ): ByteArray = require().downloadPhotoWithProgress(folder, file, size, storage, onProgress)
+
     override suspend fun setCameraParams(params: CaptureParams): CameraProps =
         require().setCameraParams(params)
 

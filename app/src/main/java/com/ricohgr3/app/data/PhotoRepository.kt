@@ -159,4 +159,21 @@ class PhotoRepository(
         PhotoResult.runCatchingResult {
             controller.downloadPhoto(folder = id.folder, file = id.file, size = size, storage = storage)
         }
+
+    /** Full download with transport-level byte progress for long-running saves/imports. */
+    suspend fun downloadPhotoWithProgress(
+        id: PhotoId,
+        size: ImageSize = ImageSize.FULL,
+        storage: String? = null,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
+    ): PhotoResult<ByteArray> =
+        PhotoResult.runCatchingResult {
+            controller.downloadPhotoWithProgress(
+                folder = id.folder,
+                file = id.file,
+                size = size,
+                storage = storage,
+                onProgress = onProgress,
+            )
+        }
 }

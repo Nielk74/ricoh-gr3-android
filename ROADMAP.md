@@ -118,8 +118,9 @@ Concept artifacts approved; full-minimal Concept-A for single-photo viewer.
 - [x] Shared **edit core** in `GalleryViewModel`: per-frame `EditState` + sticky look (DataStore),
       one VM shared gallery↔viewer so a look applied in either shows instantly in the other
 - [ ] Remaining Concept-A screens: connect polish, live view + shutter, settings
-- [x] Transfer progress UX: auto-import and selected-photo saves share current-file, determinate
-      item progress, saved/failed/remaining counts, pause/continue, and failed-frame retry
+- [x] Transfer progress UX: auto-import and selected-photo saves share full-resolution byte/completion
+      progress, live download/develop/save stages, RAM-aware double buffering, saved/failed/remaining
+      counts, pause/continue, and failed-frame retry
 - [ ] On-device thumbnail/photo load against a real GR III
 - [ ] Live-view viewfinder UX (tap-to-focus, exposure controls, minimal chrome)
 - [ ] Onboarding / camera-pairing flow (explain BLE→Wi-Fi handoff simply)
