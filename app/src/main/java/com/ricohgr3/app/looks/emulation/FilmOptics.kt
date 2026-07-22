@@ -18,14 +18,16 @@ object FilmOptics {
         height: Int,
         params: ImageStructureParams,
         filmFormat: FilmFormat,
+        longEdgePixels: Int = maxOf(width, height),
     ) {
         require(width >= 0 && height >= 0)
+        require(longEdgePixels >= maxOf(width, height))
         require(r.size == width * height && g.size == r.size && b.size == r.size)
         if (!params.enabled || r.isEmpty()) return
 
         val sigmaPixels = sigmaPixels(
             diffusionMicrometres = params.diffusionMicrometres,
-            longEdgePixels = maxOf(width, height),
+            longEdgePixels = longEdgePixels,
             filmFormat = filmFormat,
         )
         val sideWeight = kernelSideWeight(sigmaPixels)

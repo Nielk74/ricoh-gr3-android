@@ -63,7 +63,7 @@ internal fun TransferProgressPanel(
                 },
                 modifier = Modifier.weight(1f),
             )
-            if (state.phase == TransferPhase.TRANSFERRING && state.total > 0) {
+            if (state.isActive && state.total > 0) {
                 Text(
                     "${state.completed} / ${state.total}",
                     style = MaterialTheme.typography.labelSmall,
@@ -101,9 +101,10 @@ internal fun TransferProgressPanel(
                     GrTheme.colors.accent
                 }
             TransferProgressTrack(
-                label = "CAMERA",
+                label = if (state.diskBacked) "DOWNLOADS" else "CAMERA",
                 value = state.downloadProgress,
-                count = "${state.downloadCompleted} / ${state.total}",
+                count = "${state.downloadCompleted} / " +
+                    "${state.downloadTotal.takeIf { it > 0 } ?: state.total}",
                 color = progressColor,
             )
             Spacer(Modifier.height(9.dp))
@@ -116,7 +117,9 @@ internal fun TransferProgressPanel(
             Spacer(Modifier.height(9.dp))
             Row(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    if (state.pipelineDepth > 1) {
+                    if (state.diskBacked) {
+                        "FULL-SIZE · DISK QUEUE"
+                    } else if (state.pipelineDepth > 1) {
                         "FULL-SIZE · PIPELINED"
                     } else {
                         "FULL-SIZE · MEMORY-SAFE"
@@ -129,7 +132,7 @@ internal fun TransferProgressPanel(
                 )
                 state.heapHeadroomMb?.let { headroom ->
                     Text(
-                        "HEAP $headroom MB",
+                        "MEMORY BUDGET $headroom MB",
                         style = MaterialTheme.typography.labelSmall,
                         color = GrTheme.colors.inkSoft,
                         maxLines = 1,
@@ -137,7 +140,7 @@ internal fun TransferProgressPanel(
                 }
             }
 
-            if (state.phase == TransferPhase.TRANSFERRING) {
+            if (state.isActive) {
                 val download = state.downloading
                 val processing = state.processing
                 if (download != null || processing != null) {
@@ -152,11 +155,17 @@ internal fun TransferProgressPanel(
                     processing?.let {
                         TransferActivityLine(
                             label = when (state.workStage) {
+                                TransferWorkStage.PREPARING -> "PREPARING"
                                 TransferWorkStage.DEVELOPING -> "DEVELOPING"
                                 TransferWorkStage.SAVING -> "SAVING"
                                 null -> "PREPARING"
                             },
                             file = it.file,
+                            suffix = if (state.processingParts > 0) {
+                                "${state.processingPart}/${state.processingParts}"
+                            } else {
+                                null
+                            },
                         )
                     }
                 }
@@ -359,16 +368,42 @@ private fun transferProgressCopy(state: TransferUiState): TransferProgressCopy =
     when (state.phase) {
         TransferPhase.IDLE -> TransferProgressCopy("READY", "Ready", "Choose your settings")
         TransferPhase.SCANNING -> TransferProgressCopy(
-            "STEP 1 OF 2 · READING CAMERA",
+            "PREPARING BULK IMPORT",
             "Finding your frames",
-            "Reading the camera roll before the first save begins.",
+            state.message ?: "Pairing JPEG/DNG exposures and checking storage before download.",
+        )
+        TransferPhase.DOWNLOADING -> TransferProgressCopy(
+            "STEP 1 OF 2 · BULK DOWNLOAD",
+            if (state.stopRequested) {
+                "Pausing safely"
+            } else {
+                "Downloading file ${state.downloadingNumber.coerceAtLeast(1)} of ${state.downloadTotal}"
+            },
+            if (state.stopRequested) {
+                "Finishing the active camera file; completed downloads stay safely on disk."
+            } else {
+                state.downloading?.file ?: "Preparing the next camera file…"
+            },
+        )
+        TransferPhase.PROCESSING -> TransferProgressCopy(
+            "STEP 2 OF 2 · LOCAL PROCESSING",
+            if (state.stopRequested) {
+                "Pausing safely"
+            } else if (state.workStage == TransferWorkStage.DEVELOPING) {
+                "Developing output ${state.processingNumber} of ${state.total}"
+            } else {
+                "Saving output ${state.processingNumber} of ${state.total}"
+            },
+            when {
+                state.stopRequested -> "Finishing the current safe region before pausing."
+                state.processingParts > 0 ->
+                    "${state.processing?.file.orEmpty()} · region ${state.processingPart} of ${state.processingParts}"
+                state.processing != null -> state.processing.file
+                else -> "The camera phase is complete; working from the disk queue."
+            },
         )
         TransferPhase.TRANSFERRING -> TransferProgressCopy(
-            if (state.source == TransferSource.AUTO_IMPORT) {
-                "STEP 2 OF 2 · AUTO IMPORT"
-            } else {
-                "SAVING SELECTION"
-            },
+            "SAVING SELECTION",
             if (state.stopRequested) {
                 "Pausing safely"
             } else {

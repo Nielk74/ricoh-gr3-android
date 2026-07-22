@@ -114,8 +114,13 @@ Research + design: **`research/FILM_EMULATION.md`**.
       sticky-next-frame, batch-apply, preview, and edited export all carry the same strength.
 - [x] **Edited-export quality** — a persisted Compact / High / Maximum selector controls both
       the development resolution cap and JPEG encoding quality. High preserves the original
-      6 MP / JPEG 97 behaviour; Maximum removes that fixed cap while retaining a device-heap
-      safety ceiling, and every successful save reports its actual dimensions and JPEG setting.
+      6 MP / JPEG 97 behaviour. Maximum auto-import preserves platform-decoded source dimensions
+      through adaptive overlap-padded regions sized from current process and system memory;
+      viewer/local-lab saves retain a device-safe ceiling. Every successful save reports its actual
+      dimensions and JPEG setting.
+- [x] **Optional grain** — a persisted on/off control is part of the frozen render preset and
+      applies consistently to viewer/local previews, selected saves, and resumable auto-imports.
+      Off skips only the final physical-grain layer.
 - [x] **High-resolution review lab** — `:tools:renderReviewSite` generates 3000 px original,
       100%, and 150% masters for every local JPEG/DNG example; the browser UI provides split
       compare, 100/200% inspection, a false-colour skin-isolation audit, intensity interpolation,

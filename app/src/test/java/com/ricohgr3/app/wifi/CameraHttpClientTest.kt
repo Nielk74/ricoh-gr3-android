@@ -1,5 +1,6 @@
 package com.ricohgr3.app.wifi
 
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.mockwebserver.MockResponse
@@ -169,6 +170,27 @@ class CameraHttpClientTest {
         assertEquals(bytes.size.toLong() to bytes.size.toLong(), updates.last())
         assertTrue(updates.zipWithNext().all { (left, right) -> right.first >= left.first })
         assertEquals("/v1/photos/100RICOH/R0000001.JPG", server.takeRequest().path)
+    }
+
+    @Test
+    fun downloadPhotoToStreamsIntoCallerSinkWithoutChangingFullResolutionUrl() = runBlocking {
+        val bytes = ByteArray(1_400_000) { (it % 239).toByte() }
+        val output = ByteArrayOutputStream()
+        val updates = mutableListOf<Pair<Long, Long?>>()
+        server.enqueue(MockResponse().setBody(okio.Buffer().write(bytes)))
+
+        val written = client.downloadPhotoTo(
+            folder = "100RICOH",
+            file = "R0000009.DNG",
+            destination = output,
+            onProgress = { read, total -> updates += read to total },
+        )
+
+        assertEquals(bytes.size.toLong(), written)
+        assertTrue(bytes.contentEquals(output.toByteArray()))
+        assertEquals(0L to bytes.size.toLong(), updates.first())
+        assertEquals(bytes.size.toLong() to bytes.size.toLong(), updates.last())
+        assertEquals("/v1/photos/100RICOH/R0000009.DNG", server.takeRequest().path)
     }
 
     @Test

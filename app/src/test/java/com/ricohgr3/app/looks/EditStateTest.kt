@@ -35,11 +35,25 @@ class EditStateTest {
         )
         assertEquals(1.5f, strong.intensityFor("a"))
         assertEquals(RenderingIntent.STOCK, strong.renderingIntentFor("a"))
+        assertTrue(strong.grainEnabledFor("a"))
         val reset = strong.reset("a")
         assertEquals(1f, reset.intensityFor("a"))
         assertEquals(RenderingIntent.SMART, reset.renderingIntentFor("a"))
+        assertTrue(reset.grainEnabledFor("a"))
         assertTrue(reset.intensities.isEmpty())
         assertTrue(reset.renderingIntents.isEmpty())
+        assertTrue(reset.grainEnabled.isEmpty())
+    }
+
+    @Test
+    fun grainChoiceIsStoredAndClearedWithTheLook() {
+        val withoutGrain = EditState().apply(
+            "a",
+            "portra400",
+            includeGrain = false,
+        )
+        assertFalse(withoutGrain.grainEnabledFor("a"))
+        assertTrue(withoutGrain.reset("a").grainEnabledFor("a"))
     }
 
     @Test

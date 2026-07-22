@@ -81,7 +81,9 @@ fun LocalLabScreen(
     stickyLook: String?,
     stickyIntensity: Float,
     stickyRenderingIntent: RenderingIntent,
+    stickyGrainEnabled: Boolean,
     editedExportQuality: EditedExportQuality,
+    onGrainEnabledChange: (Boolean) -> Unit,
     onEditedExportQualityChange: (EditedExportQuality) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -100,6 +102,7 @@ fun LocalLabScreen(
         mutableStateOf(stickyIntensity.coerceIn(0.5f, 1.5f))
     }
     var renderingIntent by remember(pickedUri) { mutableStateOf(stickyRenderingIntent) }
+    var grainEnabled by remember(pickedUri) { mutableStateOf(stickyGrainEnabled) }
     // Clockwise rotation baked into both the preview and the edited save (0/90/180/270).
     var rotation by remember(pickedUri) { mutableIntStateOf(0) }
     var showingBefore by remember { mutableStateOf(false) }
@@ -172,7 +175,7 @@ fun LocalLabScreen(
 
     // Re-develop the preview whenever the look/strength/intent changes — the same debounced,
     // never-crashing pattern as the camera viewer.
-    LaunchedEffect(picked, effectStrength, renderingIntent, orientedBitmap) {
+    LaunchedEffect(picked, effectStrength, renderingIntent, grainEnabled, orientedBitmap) {
         delay(90)
         val src = orientedBitmap
         val stockId = picked
@@ -192,6 +195,7 @@ fun LocalLabScreen(
                                 renderSeed = stableRenderSeed(
                                     "local:${baseName ?: pickedUri.toString()}",
                                 ),
+                                grainEnabled = grainEnabled,
                             ),
                         ).asImageBitmap()
                     }
@@ -223,6 +227,7 @@ fun LocalLabScreen(
                         filmLookLoader,
                         effectStrength = effectStrength,
                         renderingIntent = renderingIntent,
+                        grainEnabled = grainEnabled,
                         exportQuality = editedExportQuality,
                         rotationDegrees = rotation,
                     )
@@ -347,6 +352,13 @@ fun LocalLabScreen(
                 value = effectStrength,
                 onValueChange = { effectStrength = it },
             )
+            GrainControl(
+                value = grainEnabled,
+                onValueChange = {
+                    grainEnabled = it
+                    onGrainEnabledChange(it)
+                },
+            )
             EditedExportQualityControl(
                 value = editedExportQuality,
                 onValueChange = onEditedExportQualityChange,
@@ -365,6 +377,7 @@ fun LocalLabScreen(
             rotation = rotation,
             effectStrength = effectStrength,
             renderingIntent = renderingIntent,
+            grainEnabled = grainEnabled,
             saving = saving,
             status = saveStatus,
             onSaveOriginal = { runSave(edited = false) },
@@ -442,6 +455,7 @@ private fun LocalLabSaveBar(
     rotation: Int,
     effectStrength: Float,
     renderingIntent: RenderingIntent,
+    grainEnabled: Boolean,
     saving: Boolean,
     status: String?,
     onSaveOriginal: () -> Unit,
@@ -471,7 +485,8 @@ private fun LocalLabSaveBar(
                 Text(
                     "Save with ${FilmLookCatalog.displayNameFor(picked)} · " +
                         "${(effectStrength * 100f).roundToInt()}% · " +
-                        renderingIntent.displayName,
+                        renderingIntent.displayName +
+                        if (grainEnabled) "" else " · no grain",
                     color = GrTheme.colors.accent,
                 )
             }

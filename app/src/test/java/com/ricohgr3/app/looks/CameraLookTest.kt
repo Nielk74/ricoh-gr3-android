@@ -116,13 +116,13 @@ class CameraLookTest {
                 ),
             )
         }
-        // Missing and future values retain the exact pre-selector behaviour.
+        // Missing and future values now choose the full-size tiled auto-import path.
         assertEquals(
-            EditedExportQuality.HIGH,
+            EditedExportQuality.MAXIMUM,
             LookPreferenceCodec.decodeEditedExportQuality(null),
         )
         assertEquals(
-            EditedExportQuality.HIGH,
+            EditedExportQuality.MAXIMUM,
             LookPreferenceCodec.decodeEditedExportQuality("future"),
         )
     }

@@ -29,6 +29,19 @@ object DevelopPipeline {
      */
     data class PreGrade(val contrast: Float, val saturation: Float)
 
+    /** Calculate the same post-pre-grade profile reused by all regions of a tiled render. */
+    internal fun analyzeScene(
+        r: FloatArray,
+        g: FloatArray,
+        b: FloatArray,
+        width: Int,
+        height: Int,
+        preGrade: PreGrade? = null,
+    ): SceneProfile {
+        if (preGrade != null) applyPreGrade(r, g, b, preGrade)
+        return SceneAnalyzer.analyze(r, g, b, width, height)
+    }
+
     /** `x^e` guarded for the `[0,1]` develop domain (negatives → 0). */
     private fun pow(x: Float, e: Float): Float = if (x <= 0f) 0f else x.toDouble().pow(e.toDouble()).toFloat()
 
@@ -134,21 +147,28 @@ object DevelopPipeline {
         // 2. Detect coherent complexion regions from the scene-normalised source. The proxy mask
         // is intentionally computed before the stock colour transform, then reused during the
         // full-resolution LUT pass. This avoids globally keying every red/orange object.
+        val skinMapping = options.skinMaskMapping
         val skinMask = if (smart && look.skinTone.enabled && effect > 0f) {
-            SkinTone.detect(
+            (skinMapping?.mask ?: SkinTone.detect(
                 r,
                 g,
                 b,
                 width,
                 height,
                 faceRegions,
-            ).takeIf { it.hasSkin }
+            )).takeIf { it.hasSkin }
         } else {
             null
         }
+        options.onSkinMaskReady?.invoke(skinMask)
         val skinXMap = skinMask?.let { mask ->
             IntArray(width) { x ->
-                (x.toLong() * mask.width / width).toInt().coerceIn(0, mask.width - 1)
+                if (skinMapping == null) {
+                    (x.toLong() * mask.width / width).toInt()
+                } else {
+                    ((x + skinMapping.originX).toLong() * mask.width /
+                        skinMapping.fullWidth).toInt()
+                }.coerceIn(0, mask.width - 1)
             }
         }
 
@@ -163,7 +183,13 @@ object DevelopPipeline {
         for (y in 0 until height) {
             val row = y * width
             val skinRow = skinMask?.let { mask ->
-                (y.toLong() * mask.height / height).toInt()
+                val mappedY = if (skinMapping == null) {
+                    y.toLong() * mask.height / height
+                } else {
+                    (y + skinMapping.originY).toLong() * mask.height /
+                        skinMapping.fullHeight
+                }
+                mappedY.toInt()
                     .coerceIn(0, mask.height - 1) * mask.width
             } ?: 0
             for (x in 0 until width) {
@@ -319,6 +345,7 @@ object DevelopPipeline {
                     strength = (imageStructure.strength * layerMix).coerceIn(0f, 1f),
                 ),
                 options.filmFormat,
+                options.spatialLongEdgePixels ?: maxOf(width, height),
             )
         }
 
@@ -326,7 +353,8 @@ object DevelopPipeline {
         // the exported image, and scale strength with scene brightness/highlight availability.
         val h = look.halation
         if (h.enabled) {
-            val dimensionScale = maxOf(width, height) / 1600f
+            val dimensionScale =
+                (options.spatialLongEdgePixels ?: maxOf(width, height)) / 1600f
             val scaled = h.copy(
                 radius = (h.radius * dimensionScale).roundToInt().coerceIn(1, 32),
                 strength = h.strength * adjustment.halationScale * layerMix,
@@ -339,7 +367,7 @@ object DevelopPipeline {
         // longer changes the apparent crystal size. Smart rendering may reduce the authored
         // amount for noisy/high-ISO scenes; Stock preserves the authored stock amount.
         val gr = look.grain
-        if (gr.enabled) {
+        if (gr.enabled && options.grainEnabled) {
             val scaled = gr.copy(
                 amount = gr.amount * adjustment.grainScale * layerMix,
             )
@@ -351,7 +379,7 @@ object DevelopPipeline {
                 height = height,
                 params = scaled,
                 renderSeed = options.renderSeed,
-                filmPlane = PhysicalFilmGrain.FilmPlane(
+                filmPlane = options.filmPlane ?: PhysicalFilmGrain.FilmPlane(
                     longEdgeMillimeters = maxOf(
                         options.filmFormat.widthMillimetres,
                         options.filmFormat.heightMillimetres,

@@ -11,7 +11,7 @@ captures.
 The app is independent and unofficial. It uses the camera's community-documented BLE GATT and
 local HTTP interfaces; it does not require Ricoh's Image Sync app or a cloud account.
 
-> **Current release: v0.9.6.** The app, protocol clients, colour-science core, update path, and
+> **Current release: v0.9.7.** The app, protocol clients, colour-science core, update path, and
 > automated tests are implemented. Real-camera radio behaviour still needs validation across GR
 > III/IIIx firmware and Android vendors; see [Current limitations](#current-limitations).
 
@@ -22,8 +22,8 @@ local HTTP interfaces; it does not require Ricoh's Image Sync app or a cloud acc
 | Bluetooth | Scan, connect, read camera identity and WLAN credentials, cache credentials in private app storage, fire the shutter, and expose basic camera state. |
 | Wi-Fi | Join the camera AP on Android 10+, route only camera traffic to it while normal internet access stays available, show MJPEG live view, fire the Wi-Fi shutter with retry, and read camera properties. |
 | Library | Browse a three-column camera contact sheet, inspect metadata, distinguish RAW files, select batches, apply one finish, save the selection, and mark edited frames. |
-| Auto import | Choose an original or film-look preset once, fetch every frame at full camera resolution, and follow separate camera-read and completion progress. A RAM-aware double buffer overlaps the next download with the current save/develop when safe. |
-| Viewer | Render the real developed preview, press and hold for before/after, choose a sticky look, adjust effect from 50–150%, select edited-export quality, reset, and save original or edited copies to `Pictures/GR3`. |
+| Auto import | Choose edited output or original + edited once, drain the complete full-size camera batch to a durable disk queue, then save/develop it locally. JPEG+DNG pairs preserve both originals but develop only the DNG. A foreground notification keeps progress and pause controls visible in the background. |
+| Viewer | Render the real developed preview, press and hold for before/after, choose a sticky look, adjust effect from 50–150%, optionally disable film grain, select edited-export quality, reset, and save original or edited copies to `Pictures/GR3`. |
 | Film Lab | Eleven provenance-labelled film/cinema looks with literal Stock and scene-protected Smart rendering, negative-to-print density, natural skin isolation, physical-scale diffusion, two-lobe halation, and film-plane grain. |
 | Updates | Check GitHub Releases automatically at most once every 24 hours or manually on demand, verify the published APK SHA-256, and hand installation to Android. |
 
@@ -196,10 +196,13 @@ that permission to track or upload location.
 1. Enable Wi-Fi from the camera menu.
 2. Choose **Wi-Fi** in the app.
 3. Join with the remembered credentials, or use the currently connected camera network.
-4. Open **Auto import** to choose the filter, intensity, rendering, and output quality once, then
-   save the whole camera roll from full-resolution sources with live byte, develop, and save
-   progress. Available process heap and Android's low-memory signal select an optimized two-file
-   pipeline or the conservative sequential path automatically.
+4. Open **Auto import** to choose the filter, intensity, rendering, grain, and output quality once, then
+   choose **Edited** or **Original + edited**. The app streams every required full-size file to its
+   private disk queue first; only after the camera batch is complete does it save originals and
+   develop edited JPEGs. For a JPEG+DNG exposure, both originals are retained when requested but
+   only the DNG is developed. Separate download/output tracks, byte progress, current filename,
+   region count, and safe memory budget remain visible in the app and foreground notification.
+   You can leave the app or lock the phone after starting the import.
 5. Or open **Library**, long-press frames to select a batch, choose one finish, then use **Apply
    only** or **Save N photos**. A failed frame does not stop the rest and can be retried alone.
 6. Open a frame, choose a film look, hold the image to compare with the original, set 50–150%
@@ -207,7 +210,12 @@ that permission to track or upload location.
    the untouched original or a developed copy.
 
 Original JPEG/DNG downloads are preserved byte-for-byte. Developed output is a new JPEG and never
-overwrites the camera original.
+overwrites the camera original. Maximum auto-import keeps the platform-decoded source dimensions
+and processes one overlap-padded vertical region at a time; region size adapts to both current app
+heap and Android's device-wide low-memory threshold. The batch therefore needs enough free device
+storage for its complete private spool until its requested outputs have been saved.
+The Grain control is independent of the stock strength: Off omits only physical film grain while
+keeping the look's tone, colour, diffusion, halation, and optional Smart protections.
 
 ## Build and verify
 
@@ -330,11 +338,15 @@ behaviour on every physical camera and phone.
 - Live view does not yet provide tap-to-focus or the complete exposure-control surface.
 - CPU film development is the portable baseline and can take time on older phones. A future AGSL
   path can accelerate preview.
-- Edited development is selectable: Compact caps work at 1.5 MP / JPEG 92; High retains the former
-  6 MP / JPEG 97 behaviour; Maximum uses JPEG 100 and removes the fixed resolution cap. Every mode
-  still obeys a heap-aware safety ceiling (roughly 1.6 MP on a 128 MiB heap, 3.1 MP on 256 MiB,
-  6.3 MP on 512 MiB, and 12.6 MP on 1 GiB). The original 24 MP JPEG/DNG remains available and can
-  always be saved untouched.
+- Edited development is selectable: Compact caps work at 1.5 MP / JPEG 92 and High at 6 MP /
+  JPEG 97. Maximum auto-import uses JPEG 100 at the platform-decoded source dimensions, processing
+  adaptive overlap-padded regions sequentially; direct viewer/local-lab Maximum saves retain their
+  device-safe heap ceiling. The original JPEG/DNG remains available and can always be saved
+  untouched.
+- A user-started auto-import uses an Android foreground service plus CPU/Wi-Fi locks and is designed
+  to continue with the app backgrounded or the screen off. Android or vendor battery policy can
+  still kill any process; the disk manifest preserves completed downloads/outputs for a safe retry,
+  but unfinished camera downloads may require reconnecting to the camera AP.
 - The working bitmap and edited export remain 8-bit sRGB/ARGB_8888 and JPEG. A high-bit-depth,
   scene-linear, wide-gamut path is still required before this is a reference RAW developer.
 - DNG rendering uses Android's platform `ImageDecoder` on API 28+ and therefore varies by device.

@@ -81,8 +81,11 @@ internal fun chooseTransferPipeline(
         FULL_PAYLOAD_RESERVE_BYTES + developBytes
     }
     val requiredHeapHeadroom = processReserve + max(decodePeak, developPeak)
-    val systemHeadroom =
+    val systemHeadroom = if (snapshot.systemLowMemory) {
+        0L
+    } else {
         (snapshot.systemAvailableBytes - snapshot.systemLowMemoryThresholdBytes).coerceAtLeast(0L)
+    }
 
     val canDoubleBuffer =
         !snapshot.systemLowMemory &&
@@ -93,6 +96,20 @@ internal fun chooseTransferPipeline(
         maxResidentDownloads = if (canDoubleBuffer) 2 else 1,
         heapHeadroomBytes = snapshot.heapHeadroomBytes,
     )
+}
+
+/**
+ * Memory the full-resolution renderer may safely plan against right now. The app heap is the hard
+ * per-process ceiling, while Android's available-minus-low-memory threshold prevents a large
+ * native Bitmap allocation from pushing the whole device into reclaim. Both limits matter.
+ */
+internal fun fullResolutionRenderBudget(snapshot: TransferMemorySnapshot): Long {
+    val systemHeadroom = if (snapshot.systemLowMemory) {
+        0L
+    } else {
+        (snapshot.systemAvailableBytes - snapshot.systemLowMemoryThresholdBytes).coerceAtLeast(0L)
+    }
+    return minOf(snapshot.heapHeadroomBytes, systemHeadroom)
 }
 
 /** Conservative allowance for one full GR JPEG/DNG, including response-buffer variance. */

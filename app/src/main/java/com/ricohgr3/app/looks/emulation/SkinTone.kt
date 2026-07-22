@@ -57,6 +57,25 @@ class SkinMask internal constructor(
 }
 
 /**
+ * Places one whole-frame proxy [mask] over a decoded sub-region. Reusing this mapping prevents a
+ * face that crosses a tile join from being re-clipped, re-centred, or rejected independently by
+ * each side of the join.
+ */
+data class SkinMaskMapping(
+    val mask: SkinMask,
+    val originX: Int,
+    val originY: Int,
+    val fullWidth: Int,
+    val fullHeight: Int,
+) {
+    init {
+        require(originX >= 0 && originY >= 0)
+        require(fullWidth > 0 && fullHeight > 0)
+        require(originX < fullWidth && originY < fullHeight)
+    }
+}
+
+/**
  * Pure-Kotlin skin-region detection and naturalisation.
  *
  * Detection deliberately combines semantics, colour, and space:

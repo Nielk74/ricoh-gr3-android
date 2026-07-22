@@ -23,6 +23,8 @@ data class EditState(
     val intensities: Map<String, Float> = emptyMap(),
     /** Per-frame renderer contract. Missing entries migrate safely to the protected Smart path. */
     val renderingIntents: Map<String, RenderingIntent> = emptyMap(),
+    /** Per-frame physical-grain choice. Missing entries preserve the authored grain layer. */
+    val grainEnabled: Map<String, Boolean> = emptyMap(),
 ) {
     /** True if [id] has a (non-Standard) film look applied. */
     fun isEdited(id: String): Boolean = applied.containsKey(id)
@@ -37,6 +39,9 @@ data class EditState(
     fun renderingIntentFor(id: String): RenderingIntent =
         renderingIntents[id] ?: RenderingIntent.SMART
 
+    /** Whether the stock's physical grain is rendered for [id]. */
+    fun grainEnabledFor(id: String): Boolean = grainEnabled[id] ?: true
+
     /**
      * Apply film-stock [look] to [id]. Applying `null` (Standard) resets the frame (clears its
      * edited mark) rather than storing an entry.
@@ -46,12 +51,14 @@ data class EditState(
         look: String?,
         intensity: Float = 1f,
         renderingIntent: RenderingIntent = RenderingIntent.SMART,
+        includeGrain: Boolean = true,
     ): EditState =
         if (look == null) reset(id)
         else copy(
             applied = applied + (id to look),
             intensities = intensities + (id to intensity.coerceIn(0.5f, 1.5f)),
             renderingIntents = renderingIntents + (id to renderingIntent),
+            grainEnabled = grainEnabled + (id to includeGrain),
         )
 
     /** Apply [look] to every id in [ids] (`null` resets each, as in [apply]). */
@@ -60,18 +67,21 @@ data class EditState(
         look: String?,
         intensity: Float = 1f,
         renderingIntent: RenderingIntent = RenderingIntent.SMART,
+        includeGrain: Boolean = true,
     ): EditState =
         if (look == null) {
             copy(
                 applied = applied - ids.toSet(),
                 intensities = intensities - ids.toSet(),
                 renderingIntents = renderingIntents - ids.toSet(),
+                grainEnabled = grainEnabled - ids.toSet(),
             )
         } else {
             copy(
                 applied = applied + ids.associateWith { look },
                 intensities = intensities + ids.associateWith { intensity.coerceIn(0.5f, 1.5f) },
                 renderingIntents = renderingIntents + ids.associateWith { renderingIntent },
+                grainEnabled = grainEnabled + ids.associateWith { includeGrain },
             )
         }
 
@@ -80,12 +90,14 @@ data class EditState(
         if (
             applied.containsKey(id) ||
             intensities.containsKey(id) ||
-            renderingIntents.containsKey(id)
+            renderingIntents.containsKey(id) ||
+            grainEnabled.containsKey(id)
         ) {
             copy(
                 applied = applied - id,
                 intensities = intensities - id,
                 renderingIntents = renderingIntents - id,
+                grainEnabled = grainEnabled - id,
             )
         } else {
             this

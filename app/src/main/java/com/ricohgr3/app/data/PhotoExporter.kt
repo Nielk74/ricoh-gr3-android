@@ -9,6 +9,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.IOException
 import java.io.OutputStream
 
@@ -39,6 +40,18 @@ class PhotoExporter(private val context: Context) {
         mimeType: String,
     ): Uri = withContext(Dispatchers.IO) {
         insert(displayName, mimeType) { out -> out.write(bytes) }
+    }
+
+    /** Copy an already-spooled original into MediaStore without recreating it as a ByteArray. */
+    suspend fun saveFile(
+        source: File,
+        displayName: String,
+        mimeType: String,
+    ): Uri = withContext(Dispatchers.IO) {
+        if (!source.isFile) throw IOException("Staged file is missing: ${source.name}")
+        insert(displayName, mimeType) { out ->
+            source.inputStream().buffered().use { input -> input.copyTo(out, FILE_COPY_BUFFER_BYTES) }
+        }
     }
 
     /**
@@ -95,11 +108,16 @@ class PhotoExporter(private val context: Context) {
                 resolver.update(uri, values, null, null)
             }
             return uri
-        } catch (e: Exception) {
+        } catch (failure: Throwable) {
             // Roll back the pending/empty row so a failed save leaves nothing behind.
             runCatching { resolver.delete(uri, null, null) }
-            if (e is IOException) throw e
-            throw IOException("Failed to save $displayName: ${e.message}", e)
+            if (failure is IOException) throw failure
+            if (failure is Error) throw failure
+            throw IOException("Failed to save $displayName: ${failure.message}", failure)
         }
+    }
+
+    private companion object {
+        const val FILE_COPY_BUFFER_BYTES = 1024 * 1024
     }
 }

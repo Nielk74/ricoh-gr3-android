@@ -2,6 +2,7 @@ package com.ricohgr3.app.wifi
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import java.io.OutputStream
 
 /**
  * A [CameraWifiController] that forwards every call to whatever controller the given
@@ -60,6 +61,22 @@ class SessionBoundWifiController(
         storage: String?,
         onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
     ): ByteArray = require().downloadPhotoWithProgress(folder, file, size, storage, onProgress)
+
+    override suspend fun downloadPhotoTo(
+        folder: String,
+        file: String,
+        destination: OutputStream,
+        size: ImageSize,
+        storage: String?,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
+    ): Long = require().downloadPhotoTo(
+        folder,
+        file,
+        destination,
+        size,
+        storage,
+        onProgress,
+    )
 
     override suspend fun setCameraParams(params: CaptureParams): CameraProps =
         require().setCameraParams(params)

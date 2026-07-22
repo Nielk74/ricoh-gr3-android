@@ -102,6 +102,7 @@ suspend fun saveEdited(
     iso: Int? = null,
     effectStrength: Float = 1f,
     renderingIntent: RenderingIntent = RenderingIntent.SMART,
+    grainEnabled: Boolean = true,
     exportQuality: EditedExportQuality = EditedExportQuality.HIGH,
 ): SaveOutcome {
     // Standard (null) is the as-shot baseline — nothing to bake; keep the pristine original.
@@ -131,6 +132,7 @@ suspend fun saveEdited(
         iso = iso,
         effectStrength = effectStrength,
         renderingIntent = renderingIntent,
+        grainEnabled = grainEnabled,
         isRaw = isRaw,
     )
 
@@ -183,6 +185,7 @@ internal suspend fun saveDownloadedPhoto(
         iso = iso,
         effectStrength = preset.intensity,
         renderingIntent = preset.renderingIntent,
+        grainEnabled = preset.grainEnabled,
         isRaw = isRaw,
     )
     onStage(TransferWorkStage.SAVING)
@@ -211,6 +214,7 @@ private suspend fun renderDownloadedEdit(
     iso: Int?,
     effectStrength: Float,
     renderingIntent: RenderingIntent,
+    grainEnabled: Boolean,
     isRaw: Boolean,
 ): Bitmap = withContext(Dispatchers.Default) {
     // Develop the selected film stock directly. `developForSave` leaves `decoded` untouched,
@@ -226,6 +230,7 @@ private suspend fun renderDownloadedEdit(
                 options = DevelopOptions(
                     intent = renderingIntent,
                     renderSeed = stableRenderSeed(id.toString()),
+                    grainEnabled = grainEnabled,
                 ),
             )
         }
@@ -255,6 +260,7 @@ suspend fun saveEditedLocal(
     loader: FilmLookLoader? = null,
     effectStrength: Float = 1f,
     renderingIntent: RenderingIntent = RenderingIntent.SMART,
+    grainEnabled: Boolean = true,
     exportQuality: EditedExportQuality = EditedExportQuality.HIGH,
     rotationDegrees: Int = 0,
 ): SaveOutcome {
@@ -277,6 +283,7 @@ suspend fun saveEditedLocal(
                     options = DevelopOptions(
                         intent = renderingIntent,
                         renderSeed = stableRenderSeed("local:$baseFile"),
+                        grainEnabled = grainEnabled,
                     ),
                 )
             }
@@ -501,7 +508,7 @@ private fun decodeRawBounded(bytes: ByteArray, maxPixels: Int): Bitmap? {
  * look. This is not a scene-linear RAW stage; it only aligns a sometimes flatter platform output
  * with the camera-JPEG-like base used to author the looks. See [DevelopPipeline.PreGrade].
  */
-private val RawPreGrade = com.ricohgr3.app.looks.emulation.DevelopPipeline.PreGrade(
+internal val RawPreGrade = com.ricohgr3.app.looks.emulation.DevelopPipeline.PreGrade(
     // ImageDecoder's DNG output is already a display rendering on current Android devices.
     // Keep this nearly neutral and let scene analysis do the bounded tonal work.
     contrast = 0.05f, saturation = 1.02f,
@@ -528,12 +535,12 @@ private fun applyLookTint(src: Bitmap, filmLookId: String?, effectStrength: Floa
 }
 
 /** `R0000123.JPG` -> `R0000123_edit.jpg` so the original file isn't overwritten. */
-private fun editedName(file: String): String {
+internal fun editedName(file: String): String {
     val dot = file.lastIndexOf('.')
     return if (dot > 0) file.substring(0, dot) + "_edit.jpg" else file + "_edit.jpg"
 }
 
-private fun mimeTypeFor(file: String): String =
+internal fun mimeTypeFor(file: String): String =
     when (file.substringAfterLast('.', "").lowercase()) {
         "dng" -> "image/x-adobe-dng"
         "png" -> "image/png"

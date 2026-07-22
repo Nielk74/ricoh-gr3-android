@@ -3,6 +3,8 @@ package com.ricohgr3.app.wifi
 import android.net.Network
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
@@ -18,6 +20,7 @@ import okhttp3.ResponseBody
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
 import java.io.IOException
+import java.io.OutputStream
 import java.net.Proxy
 import java.util.concurrent.TimeUnit
 
@@ -103,6 +106,29 @@ class CameraHttpClient(
         okHttpClient.newCall(Request.Builder().url(url).get().build()).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("downloadPhoto ${resp.code} for $folder/$file")
             resp.body?.readBytesWithProgress(onProgress) ?: ByteArray(0)
+        }
+    }
+
+    override suspend fun downloadPhotoTo(
+        folder: String,
+        file: String,
+        destination: OutputStream,
+        size: ImageSize,
+        storage: String?,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
+    ): Long = withContext(Dispatchers.IO) {
+        val url = urlBuilder()
+            .addPathSegment("photos")
+            .addPathSegment(folder)
+            .addPathSegment(file)
+            .apply {
+                size.queryValue?.let { addQueryParameter("size", it) }
+                storage?.let { addQueryParameter("storage", it) }
+            }
+            .build()
+        okHttpClient.newCall(Request.Builder().url(url).get().build()).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("downloadPhoto ${resp.code} for $folder/$file")
+            resp.body?.copyToWithProgress(destination, onProgress) ?: 0L
         }
     }
 
@@ -210,7 +236,7 @@ class CameraHttpClient(
  * sized array directly instead of growing a second buffer and copying a full-resolution file at
  * the end. This keeps the optimized prefetch path's transient heap use predictable.
  */
-private fun ResponseBody.readBytesWithProgress(
+private suspend fun ResponseBody.readBytesWithProgress(
     onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
 ): ByteArray {
     val declaredLength = contentLength().takeIf { it in 0..Int.MAX_VALUE.toLong() }
@@ -221,6 +247,7 @@ private fun ResponseBody.readBytesWithProgress(
         val result = ByteArray(declaredLength.toInt())
         var offset = 0
         while (offset < result.size) {
+            currentCoroutineContext().ensureActive()
             val read = input.read(result, offset, minOf(DOWNLOAD_PROGRESS_CHUNK_BYTES, result.size - offset))
             if (read < 0) {
                 throw EOFException("Expected $declaredLength response bytes, received $offset")
@@ -235,6 +262,7 @@ private fun ResponseBody.readBytesWithProgress(
     val chunk = ByteArray(DOWNLOAD_PROGRESS_CHUNK_BYTES)
     var total = 0L
     while (true) {
+        currentCoroutineContext().ensureActive()
         val read = input.read(chunk)
         if (read < 0) break
         output.write(chunk, 0, read)
@@ -242,6 +270,30 @@ private fun ResponseBody.readBytesWithProgress(
         onProgress(total, null)
     }
     return output.toByteArray()
+}
+
+/** True streaming counterpart used by the bulk importer. */
+private suspend fun ResponseBody.copyToWithProgress(
+    destination: OutputStream,
+    onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
+): Long {
+    val declaredLength = contentLength().takeIf { it >= 0L }
+    val input = byteStream()
+    val chunk = ByteArray(DOWNLOAD_PROGRESS_CHUNK_BYTES)
+    var total = 0L
+    onProgress(0L, declaredLength)
+    while (true) {
+        currentCoroutineContext().ensureActive()
+        val read = input.read(chunk)
+        if (read < 0) break
+        destination.write(chunk, 0, read)
+        total += read
+        onProgress(total, declaredLength)
+    }
+    if (declaredLength != null && total != declaredLength) {
+        throw EOFException("Expected $declaredLength response bytes, received $total")
+    }
+    return total
 }
 
 private const val DOWNLOAD_PROGRESS_CHUNK_BYTES = 512 * 1024

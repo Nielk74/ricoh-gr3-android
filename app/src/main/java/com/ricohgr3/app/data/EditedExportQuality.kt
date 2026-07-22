@@ -15,9 +15,9 @@ enum class EditedExportQuality(
     /** Small sharing copy: one quarter of the High pixel count and a lighter JPEG encode. */
     COMPACT(displayName = "Compact", jpegQuality = 92, pixelCap = 1_500_000),
 
-    /** Existing app behaviour, retained as the migration-safe default. */
+    /** Former default, retained as an explicit faster 6 MP choice. */
     HIGH(displayName = "High", jpegQuality = 97, pixelCap = 6_000_000),
 
-    /** Highest resolution the current device can safely develop, with the least JPEG loss. */
+    /** Full-size for disk-backed auto-import; highest heap-safe resolution on direct save paths. */
     MAXIMUM(displayName = "Maximum", jpegQuality = 100, pixelCap = Int.MAX_VALUE),
 }

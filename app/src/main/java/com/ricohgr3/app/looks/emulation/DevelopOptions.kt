@@ -40,12 +40,28 @@ data class FilmFormat(
  * @property filmFormat physical frame used to make grain and diffusion resolution-independent.
  * @property sceneProfile optional canonical profile calculated once and reused across preview and
  *   export. If absent, the pipeline calculates the same canonical profile from its input.
+ * @property filmPlane optional crop mapping into the photograph's full physical film frame. A
+ *   tiled export supplies origins here so adjacent regions sample one continuous grain field.
+ * @property spatialLongEdgePixels optional full-frame long-edge length. A tiled export supplies
+ *   it so diffusion and halation retain their whole-image physical scale even when a region does
+ *   not itself span the photograph's long edge.
+ * @property grainEnabled whether to render the stock's physical grain layer. Disabling it leaves
+ *   the authored colour, tone, diffusion, halation, and Smart safeguards unchanged.
+ * @property skinMaskMapping optional whole-frame skin proxy positioned over this render region.
+ *   Tiled exports use it so a face is classified once rather than independently at every join.
+ * @property onSkinMaskReady internal analysis hook invoked immediately after the pre-stock skin
+ *   proxy is available. Production preview analysis uses it to capture that proxy once.
  */
 data class DevelopOptions(
     val intent: RenderingIntent = RenderingIntent.SMART,
     val renderSeed: Long = 0L,
     val filmFormat: FilmFormat = FilmFormat.FULL_FRAME_35MM,
     val sceneProfile: SceneProfile? = null,
+    val filmPlane: PhysicalFilmGrain.FilmPlane? = null,
+    val spatialLongEdgePixels: Int? = null,
+    val grainEnabled: Boolean = true,
+    val skinMaskMapping: SkinMaskMapping? = null,
+    val onSkinMaskReady: ((SkinMask?) -> Unit)? = null,
 )
 
 /** Stable FNV-1a identity hash; unlike String.hashCode it supplies a useful 64-bit grain seed. */

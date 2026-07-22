@@ -76,7 +76,8 @@ grounded in the cloned OpenAPI spec + community repos. UI wiring is Phase 6.
       (`sv`/`tv`/`av`/`xv`/`effect` incl. film sims) documented from `capture_ricoh_gr_iii.yaml`
 - [x] **Capture over Wi-Fi**: `POST /v1/camera/shoot` (empty body per spec — verify on device)
 - [x] **Photo browse**: `GET /v1/photos` list + `GET .../info` for EXIF (models + tests)
-- [x] **Photo download**: JPEG + RAW (DNG) pull (`downloadPhoto`, size options); TODO: stream to disk vs. buffer
+- [x] **Photo download**: JPEG + RAW (DNG) pull (`downloadPhoto`, size options) plus direct
+      response streaming into the durable auto-import disk spool
 - [ ] `GET /v1/changes` (WebSocket) — react to camera-side setting changes
 - [ ] Graceful reconnect / AP-drop handling; clear "camera Wi-Fi vs internet" UX
 - [ ] **On-device validation** of the whole Wi-Fi plane (needs physical GR III)
@@ -96,7 +97,8 @@ card. On-device validation against a physical GR III is the remaining gate (no h
       over `CameraWifiSession.State` + `BleState` — the visible BLE→Wi-Fi state machine
 - [ ] Full unified *state machine* class merging BLE + Wi-Fi (currently orchestrated in the VM)
 - [ ] Remember paired camera (auto-reconnect on app open)
-- [ ] Foreground service for long transfers / keep-alive
+- [x] Foreground service for long auto-imports: persistent notification, screen-off CPU/Wi-Fi
+      locks during the camera stage, durable pause/continue manifest, and process-death recovery
 - [ ] Battery + storage indicators (from BLE Camera service)
 - [ ] Handle multiple cameras / camera picker
 
@@ -118,9 +120,10 @@ Concept artifacts approved; full-minimal Concept-A for single-photo viewer.
 - [x] Shared **edit core** in `GalleryViewModel`: per-frame `EditState` + sticky look (DataStore),
       one VM shared gallery↔viewer so a look applied in either shows instantly in the other
 - [ ] Remaining Concept-A screens: connect polish, live view + shutter, settings
-- [x] Transfer progress UX: auto-import and selected-photo saves share full-resolution byte/completion
-      progress, live download/develop/save stages, RAM-aware double buffering, saved/failed/remaining
-      counts, pause/continue, and failed-frame retry
+- [x] Transfer progress UX: auto-import and selected-photo saves expose byte/completion progress,
+      live download/develop/save stages, saved/failed/remaining counts, pause/continue, and failed
+      retry. Auto-import additionally shows drain-first disk-queue and adaptive region progress;
+      selected saves retain RAM-aware double buffering.
 - [ ] On-device thumbnail/photo load against a real GR III
 - [ ] Live-view viewfinder UX (tap-to-focus, exposure controls, minimal chrome)
 - [ ] Onboarding / camera-pairing flow (explain BLE→Wi-Fi handoff simply)

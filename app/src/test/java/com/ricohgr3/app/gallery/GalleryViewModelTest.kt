@@ -166,6 +166,18 @@ class GalleryViewModelTest {
     }
 
     @Test
+    fun `applyLook keeps per-frame and sticky grain choice`() = runTest {
+        val vm = viewModel(FakeCameraWifiController())
+        val id = PhotoId("100RICOH", "R0000001.JPG")
+
+        vm.applyLook(id, "portra400", grainEnabled = false)
+
+        val state = vm.state.value
+        assertFalse(state.grainEnabledFor(id))
+        assertFalse(state.stickyGrainEnabled)
+    }
+
+    @Test
     fun `applyLook STANDARD clears the edited mark`() = runTest {
         val vm = viewModel(FakeCameraWifiController())
         val id = PhotoId("100RICOH", "R0000001.JPG")
@@ -230,11 +242,13 @@ class GalleryViewModelTest {
         vm.setStickyLook("portra400")
         vm.setStickyIntensity(1.4f)
         vm.setStickyRenderingIntent(RenderingIntent.STOCK)
+        vm.setStickyGrainEnabled(false)
 
         val state = vm.state.value
         assertEquals("portra400", state.stickyLook)
         assertEquals(1.4f, state.stickyIntensity)
         assertEquals(RenderingIntent.STOCK, state.stickyRenderingIntent)
+        assertFalse(state.stickyGrainEnabled)
         assertEquals(0, state.editedCount)
     }
 
@@ -264,10 +278,10 @@ class GalleryViewModelTest {
     fun `edited export quality updates without editing a frame`() = runTest {
         val vm = viewModel(FakeCameraWifiController())
 
-        assertEquals(EditedExportQuality.HIGH, vm.state.value.editedExportQuality)
-        vm.setEditedExportQuality(EditedExportQuality.MAXIMUM)
-
         assertEquals(EditedExportQuality.MAXIMUM, vm.state.value.editedExportQuality)
+        vm.setEditedExportQuality(EditedExportQuality.HIGH)
+
+        assertEquals(EditedExportQuality.HIGH, vm.state.value.editedExportQuality)
         assertEquals(0, vm.state.value.editedCount)
     }
 }

@@ -130,6 +130,104 @@ class DevelopPipelineTest {
         assertEquals(0.7f, b[1], 1e-3f)
     }
 
+    @Test fun grainCanBeDisabledWithoutSkippingTheRestOfTheDevelop() {
+        val look = FilmLook(
+            id = "grain-toggle",
+            displayName = "Grain toggle",
+            lutAsset = null,
+            adaptive = AdaptiveParams.NONE,
+            grain = GrainParams(
+                amount = 0.24f,
+                size = 1.1f,
+                shadowBias = 0.3f,
+                seed = 42L,
+            ),
+        )
+        val withGrainR = FloatArray(16 * 16) { 0.5f }
+        val withGrainG = withGrainR.copyOf()
+        val withGrainB = withGrainR.copyOf()
+        val withoutGrainR = withGrainR.copyOf()
+        val withoutGrainG = withGrainG.copyOf()
+        val withoutGrainB = withGrainB.copyOf()
+
+        DevelopPipeline.apply(
+            withGrainR,
+            withGrainG,
+            withGrainB,
+            16,
+            16,
+            look,
+            LutCube.identity(2),
+            options = DevelopOptions(intent = RenderingIntent.STOCK, renderSeed = 7L),
+        )
+        DevelopPipeline.apply(
+            withoutGrainR,
+            withoutGrainG,
+            withoutGrainB,
+            16,
+            16,
+            look,
+            LutCube.identity(2),
+            options = DevelopOptions(
+                intent = RenderingIntent.STOCK,
+                renderSeed = 7L,
+                grainEnabled = false,
+            ),
+        )
+
+        assertTrue("enabled grain changes the uniform frame", withGrainR.any { it != 0.5f })
+        assertTrue(withoutGrainR.all { kotlin.math.abs(it - 0.5f) < 1e-6f })
+        assertTrue(withoutGrainG.all { kotlin.math.abs(it - 0.5f) < 1e-6f })
+        assertTrue(withoutGrainB.all { kotlin.math.abs(it - 0.5f) < 1e-6f })
+    }
+
+    @Test fun grainSwitchMatchesTheCompleteStockWithOnlyItsGrainLayerRemoved() {
+        val entry = FilmLookCatalog.entryFor("portra400")!!
+        val width = 24
+        val height = 16
+        val sourceR = FloatArray(width * height) { index -> 0.12f + (index % width) / 30f }
+        val sourceG = FloatArray(width * height) { index -> 0.10f + (index / width) / 24f }
+        val sourceB = FloatArray(width * height) { index -> 0.18f + (index % 9) / 20f }
+        val disabledR = sourceR.copyOf()
+        val disabledG = sourceG.copyOf()
+        val disabledB = sourceB.copyOf()
+        val authoredWithoutR = sourceR.copyOf()
+        val authoredWithoutG = sourceG.copyOf()
+        val authoredWithoutB = sourceB.copyOf()
+        val options = DevelopOptions(
+            intent = RenderingIntent.STOCK,
+            renderSeed = 99L,
+            grainEnabled = false,
+        )
+
+        DevelopPipeline.apply(
+            disabledR,
+            disabledG,
+            disabledB,
+            width,
+            height,
+            entry.look,
+            FilmLutFactory.build(entry.model),
+            options = options,
+        )
+        DevelopPipeline.apply(
+            authoredWithoutR,
+            authoredWithoutG,
+            authoredWithoutB,
+            width,
+            height,
+            entry.look.copy(grain = GrainParams.NONE),
+            FilmLutFactory.build(entry.model),
+            options = options.copy(grainEnabled = true),
+        )
+
+        for (index in disabledR.indices) {
+            assertEquals(authoredWithoutR[index], disabledR[index], 0f)
+            assertEquals(authoredWithoutG[index], disabledG[index], 0f)
+            assertEquals(authoredWithoutB[index], disabledB[index], 0f)
+        }
+    }
+
     @Test fun slightPleasingWarmthMovesNeutralTowardRedWithoutChangingExposure() {
         val look = FilmLook(
             id = "warm-neutral",

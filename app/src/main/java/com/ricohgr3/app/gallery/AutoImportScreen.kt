@@ -22,6 +22,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +47,7 @@ fun AutoImportScreen(
     onLookChange: (String?) -> Unit,
     onIntensityChange: (Float) -> Unit,
     onRenderingIntentChange: (RenderingIntent) -> Unit,
+    onGrainEnabledChange: (Boolean) -> Unit,
     onQualityChange: (EditedExportQuality) -> Unit,
     onStart: (TransferPreset) -> Unit,
     onCancel: () -> Unit,
@@ -51,6 +56,9 @@ fun AutoImportScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var outputMode by rememberSaveable {
+        mutableStateOf(TransferOutputMode.ORIGINAL_AND_EDITED)
+    }
     Column(modifier = modifier.fillMaxSize().background(GrTheme.colors.paper)) {
         AutoImportHeader(
             transferActive = transfer.isActive,
@@ -80,12 +88,20 @@ fun AutoImportScreen(
                         look = settings.stickyLook,
                         intensity = settings.stickyIntensity,
                         renderingIntent = settings.stickyRenderingIntent,
+                        grainEnabled = settings.stickyGrainEnabled,
                         quality = settings.editedExportQuality,
                         onLookChange = onLookChange,
                         onIntensityChange = onIntensityChange,
                         onRenderingIntentChange = onRenderingIntentChange,
+                        onGrainEnabledChange = onGrainEnabledChange,
                         onQualityChange = onQualityChange,
                     )
+                    if (settings.stickyLook != null) {
+                        AutoImportOutputControl(
+                            value = outputMode,
+                            onValueChange = { outputMode = it },
+                        )
+                    }
                 }
                 Spacer(Modifier.height(18.dp))
                 Button(
@@ -95,7 +111,13 @@ fun AutoImportScreen(
                                 look = settings.stickyLook,
                                 intensity = settings.stickyIntensity,
                                 renderingIntent = settings.stickyRenderingIntent,
+                                grainEnabled = settings.stickyGrainEnabled,
                                 quality = settings.editedExportQuality,
+                                outputMode = if (settings.stickyLook == null) {
+                                    TransferOutputMode.ORIGINAL_ONLY
+                                } else {
+                                    outputMode
+                                },
                             ),
                         )
                     },
@@ -106,6 +128,8 @@ fun AutoImportScreen(
                     Text(
                         if (settings.stickyLook == null) {
                             "Import camera originals"
+                        } else if (outputMode == TransferOutputMode.ORIGINAL_AND_EDITED) {
+                            "Import originals + ${FilmLookCatalog.displayNameFor(settings.stickyLook)}"
                         } else {
                             "Import all with ${FilmLookCatalog.displayNameFor(settings.stickyLook)}"
                         },
@@ -115,8 +139,8 @@ fun AutoImportScreen(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Every frame is fetched at full camera resolution. When memory allows, the next " +
-                        "download overlaps the current save; starting again creates another copy.",
+                    "The complete required full-size batch downloads to private storage first. " +
+                        "Only after the camera phase finishes does local saving and development begin.",
                     style = MaterialTheme.typography.labelSmall,
                     color = GrTheme.colors.inkSoft,
                     modifier = Modifier.padding(horizontal = 4.dp),
@@ -132,7 +156,8 @@ fun AutoImportScreen(
                 if (transfer.isActive) {
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        "You can leave this page. The transfer continues while the app remains open.",
+                        "You can leave the app or lock the phone. The import continues with progress " +
+                            "and controls in its notification.",
                         style = MaterialTheme.typography.labelSmall,
                         color = GrTheme.colors.inkSoft,
                         modifier = Modifier.padding(horizontal = 4.dp),
@@ -184,8 +209,8 @@ private fun AutoImportIntro() {
     )
     Spacer(Modifier.height(10.dp))
     Text(
-        "Choose an untouched original or a developed film look. The app then reads, develops, " +
-            "and saves each camera frame with live progress.",
+        "Choose untouched originals, a developed film look, or both. JPEG+DNG pairs stay together; " +
+            "the DNG is the only develop source when both exist.",
         style = MaterialTheme.typography.bodyMedium,
         color = GrTheme.colors.inkSoft,
     )
@@ -195,11 +220,51 @@ private fun AutoImportIntro() {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FlowStep("01", "FETCH", Modifier.weight(1f))
+        FlowStep("01", "DOWNLOAD", Modifier.weight(1f))
         Text("→", color = GrTheme.colors.grey)
         FlowStep("02", "DEVELOP", Modifier.weight(1f))
         Text("→", color = GrTheme.colors.grey)
         FlowStep("03", "SAVE", Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun AutoImportOutputControl(
+    value: TransferOutputMode,
+    onValueChange: (TransferOutputMode) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "OUTPUTS",
+                style = MaterialTheme.typography.labelSmall,
+                color = GrTheme.colors.inkSoft,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            listOf(
+                TransferOutputMode.EDITED_ONLY to "EDITED",
+                TransferOutputMode.ORIGINAL_AND_EDITED to "ORIGINAL + EDITED",
+            ).forEach { (mode, label) ->
+                TextButton(onClick = { onValueChange(mode) }) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (value == mode) GrTheme.colors.accent else GrTheme.colors.inkSoft,
+                    )
+                }
+            }
+        }
+        Text(
+            if (value == TransferOutputMode.ORIGINAL_AND_EDITED) {
+                "Keeps every JPEG and DNG original, plus one edited JPEG per exposure."
+            } else {
+                "Creates one edited JPEG per exposure; paired JPEGs are skipped when a DNG exists."
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = GrTheme.colors.inkSoft,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
     }
 }
 
@@ -239,7 +304,8 @@ private fun PresetHeading(settings: GalleryUiState) {
                     "Original files"
                 } else {
                     "${FilmLookCatalog.displayNameFor(settings.stickyLook)} · " +
-                        "${(settings.stickyIntensity * 100f).roundToInt()}%"
+                        "${(settings.stickyIntensity * 100f).roundToInt()}%" +
+                        if (settings.stickyGrainEnabled) "" else " · grain off"
                 },
                 style = MaterialTheme.typography.titleMedium,
                 color = GrTheme.colors.ink,

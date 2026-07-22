@@ -3,6 +3,8 @@ package com.ricohgr3.app.data
 import com.ricohgr3.app.wifi.CameraWifiController
 import com.ricohgr3.app.wifi.ImageSize
 import com.ricohgr3.app.wifi.PhotoInfo
+import kotlinx.coroutines.CancellationException
+import java.io.OutputStream
 
 /**
  * Stable identity for one photo on the camera. The Wi-Fi API addresses photos by a
@@ -102,6 +104,8 @@ sealed interface PhotoResult<out T> {
         inline fun <T> runCatchingResult(block: () -> T): PhotoResult<T> =
             try {
                 Success(block())
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 Error(e.message ?: e::class.simpleName ?: "Unknown error", e)
             }
@@ -176,4 +180,22 @@ class PhotoRepository(
                 onProgress = onProgress,
             )
         }
+
+    /** Stream a full camera response directly into a disk spool. */
+    suspend fun downloadPhotoTo(
+        id: PhotoId,
+        destination: OutputStream,
+        size: ImageSize = ImageSize.FULL,
+        storage: String? = null,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
+    ): PhotoResult<Long> = PhotoResult.runCatchingResult {
+        controller.downloadPhotoTo(
+            folder = id.folder,
+            file = id.file,
+            destination = destination,
+            size = size,
+            storage = storage,
+            onProgress = onProgress,
+        )
+    }
 }

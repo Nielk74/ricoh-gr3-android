@@ -1,6 +1,7 @@
 package com.ricohgr3.app.wifi
 
 import kotlinx.coroutines.flow.Flow
+import java.io.OutputStream
 
 /**
  * Transport-agnostic surface for the camera's Wi-Fi HTTP `/v1/` API, mirroring the house
@@ -65,6 +66,27 @@ interface CameraWifiController {
         onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
     ): ByteArray = downloadPhoto(folder, file, size, storage).also { bytes ->
         onProgress(bytes.size.toLong(), bytes.size.toLong())
+    }
+
+    /**
+     * Stream a photo into [destination] without retaining the complete response in the app heap.
+     * The default keeps fakes/source-compatible implementations simple; the OkHttp production
+     * client overrides it with a true response-body stream.
+     *
+     * @return the exact number of bytes written.
+     */
+    suspend fun downloadPhotoTo(
+        folder: String,
+        file: String,
+        destination: OutputStream,
+        size: ImageSize = ImageSize.FULL,
+        storage: String? = null,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
+    ): Long {
+        val bytes = downloadPhoto(folder, file, size, storage)
+        destination.write(bytes)
+        onProgress(bytes.size.toLong(), bytes.size.toLong())
+        return bytes.size.toLong()
     }
 
     /**

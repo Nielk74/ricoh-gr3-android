@@ -26,6 +26,7 @@ import com.ricohgr3.app.gallery.GalleryScreen
 import com.ricohgr3.app.gallery.GalleryViewModel
 import com.ricohgr3.app.gallery.LocalLabScreen
 import com.ricohgr3.app.gallery.TransferViewModel
+import com.ricohgr3.app.gallery.TransferPreset
 import com.ricohgr3.app.gallery.ViewerScreen
 import com.ricohgr3.app.liveview.LiveViewScreen
 import com.ricohgr3.app.liveview.LiveViewViewModel
@@ -54,6 +55,7 @@ fun AppNavHost(
     cameraWifiController: CameraWifiController,
     permissionsGranted: Boolean,
     onRequestPermissions: () -> Unit,
+    onStartAutoImport: (TransferPreset) -> Unit,
     navController: NavHostController = rememberNavController(),
 ) {
     NavHost(navController = navController, startDestination = Screen.Connect.route) {
@@ -121,8 +123,9 @@ fun AppNavHost(
                 onLookChange = galleryViewModel::setStickyLook,
                 onIntensityChange = galleryViewModel::setStickyIntensity,
                 onRenderingIntentChange = galleryViewModel::setStickyRenderingIntent,
+                onGrainEnabledChange = galleryViewModel::setStickyGrainEnabled,
                 onQualityChange = galleryViewModel::setEditedExportQuality,
-                onStart = transferViewModel::startAutoImport,
+                onStart = onStartAutoImport,
                 onCancel = transferViewModel::cancel,
                 onRetry = transferViewModel::retry,
                 onDismiss = {
@@ -146,12 +149,18 @@ fun AppNavHost(
                 onOpenPhoto = { id -> navController.navigate(Screen.Viewer.buildRoute(id.toRouteArg())) },
                 onToggleSelect = galleryViewModel::toggleSelect,
                 onClearSelection = galleryViewModel::clearSelection,
-                onApplyLookToSelection = { look, intensity, renderingIntent ->
-                    galleryViewModel.applyLookToSelection(look, intensity, renderingIntent)
+                onApplyLookToSelection = { look, intensity, renderingIntent, grainEnabled ->
+                    galleryViewModel.applyLookToSelection(
+                        look,
+                        intensity,
+                        renderingIntent,
+                        grainEnabled,
+                    )
                 },
                 onStickyLookChange = galleryViewModel::setStickyLook,
                 onStickyIntensityChange = galleryViewModel::setStickyIntensity,
                 onStickyRenderingIntentChange = galleryViewModel::setStickyRenderingIntent,
+                onStickyGrainEnabledChange = galleryViewModel::setStickyGrainEnabled,
                 onEditedExportQualityChange = galleryViewModel::setEditedExportQuality,
                 transfer = transfer,
                 onSaveSelection = { preset ->
@@ -160,6 +169,7 @@ fun AppNavHost(
                         preset.look,
                         preset.intensity,
                         preset.renderingIntent,
+                        preset.grainEnabled,
                     )
                     val orderedSelection = state.photos
                         .map { it.id }
@@ -195,13 +205,21 @@ fun AppNavHost(
                     appliedLook = state.lookFor(photoId),
                     appliedIntensity = state.intensityFor(photoId),
                     appliedRenderingIntent = state.renderingIntentFor(photoId),
+                    appliedGrainEnabled = state.grainEnabledFor(photoId),
                     stickyLook = state.stickyLook,
                     stickyIntensity = state.stickyIntensity,
                     stickyRenderingIntent = state.stickyRenderingIntent,
+                    stickyGrainEnabled = state.stickyGrainEnabled,
                     editedExportQuality = state.editedExportQuality,
                     onEditedExportQualityChange = galleryViewModel::setEditedExportQuality,
-                    onApplyLook = { look, intensity, renderingIntent ->
-                        galleryViewModel.applyLook(photoId, look, intensity, renderingIntent)
+                    onApplyLook = { look, intensity, renderingIntent, grainEnabled ->
+                        galleryViewModel.applyLook(
+                            photoId,
+                            look,
+                            intensity,
+                            renderingIntent,
+                            grainEnabled,
+                        )
                     },
                     onResetLook = { galleryViewModel.resetLook(photoId) },
                     onBack = { navController.popBackStack() },
@@ -251,7 +269,9 @@ fun AppNavHost(
                 stickyLook = state.stickyLook,
                 stickyIntensity = state.stickyIntensity,
                 stickyRenderingIntent = state.stickyRenderingIntent,
+                stickyGrainEnabled = state.stickyGrainEnabled,
                 editedExportQuality = state.editedExportQuality,
+                onGrainEnabledChange = galleryViewModel::setStickyGrainEnabled,
                 onEditedExportQualityChange = galleryViewModel::setEditedExportQuality,
                 onBack = { navController.popBackStack() },
             )

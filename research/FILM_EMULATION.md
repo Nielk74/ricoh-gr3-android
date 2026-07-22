@@ -188,6 +188,9 @@ output pixel rather than redrawing output-resolution noise.
   across preview/export and sessions; two photographs no longer receive the same grain.
 - **Order/performance:** grain is the final image-forming layer before JPEG encoding and runs off
   the main thread. The implementation allocates axis kernels rather than a full-frame grain plate.
+- **User override:** the render preset may disable this final layer. That switch does not alter
+  stock tone/colour, diffusion, halation, scene analysis, or subject protections and is persisted
+  for direct previews/exports as well as durable auto-import jobs.
 
 Per-stock density amount ranges from 0.018 (Ektar 100, finest) to 0.092 (Portra 800, the most
 pronounced colour stock in the authored set). The edited JPEG selector makes the final encode
@@ -316,11 +319,15 @@ regression tests for the paired stage, neutral identity, crossover, monotonic ex
 and retained highlight separation.
 
 ### DNG (platform RAW rendition) → JPEG
-`PhotoSave.saveEdited` now develops **DNG** originals too (previously they were saved untouched):
-the DNG is decoded via the platform `ImageDecoder` path (`decodeRawBounded`, API 28+), downsampled
-to the selected Compact/High cap or Maximum's device-heap safety ceiling, given a mild **RAW base
-grade** (`DevelopPipeline.PreGrade`: contrast + slight saturation — RAW previews decode flatter
-than the camera JPEG the models were tuned against), then run through the film look. The result is
+`PhotoSave.saveEdited` develops **DNG** originals too (previously they were saved untouched):
+the DNG is decoded via the platform `ImageDecoder` path (API 28+), given a mild **RAW base grade**
+(`DevelopPipeline.PreGrade`: contrast + slight saturation — RAW previews decode flatter than the
+camera JPEG the models were tuned against), then run through the film look. Compact/High use their
+bounded decode paths. Maximum auto-import prepares a full-dimension region-decodable rendition and
+develops sequential overlap-padded vertical regions sized from live process/system headroom; global
+scene analysis, one whole-frame skin proxy, full-frame spatial scale, top-connected sky semantics,
+and the physical grain origin are shared across regions. Direct Maximum saves retain their device-safe
+bound. The result is
 **always saved as JPEG** (a developed rendition is a finished image, not sensor data). Edited DNG
 save is unavailable below API 28. If a newer platform rejects a particular DNG, the app reports
 that failure and asks the user to choose **Save original**; it never silently returns untouched

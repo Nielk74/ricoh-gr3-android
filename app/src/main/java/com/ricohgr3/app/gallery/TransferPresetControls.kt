@@ -29,10 +29,12 @@ internal fun TransferPresetEditor(
     look: String?,
     intensity: Float,
     renderingIntent: RenderingIntent,
+    grainEnabled: Boolean,
     quality: EditedExportQuality,
     onLookChange: (String?) -> Unit,
     onIntensityChange: (Float) -> Unit,
     onRenderingIntentChange: (RenderingIntent) -> Unit,
+    onGrainEnabledChange: (Boolean) -> Unit,
     onQualityChange: (EditedExportQuality) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
@@ -60,6 +62,11 @@ internal fun TransferPresetEditor(
                 onValueChange = onIntensityChange,
                 enabled = enabled,
             )
+            GrainControl(
+                value = grainEnabled,
+                onValueChange = onGrainEnabledChange,
+                enabled = enabled,
+            )
         }
         EditedExportQualityControl(
             value = quality,
@@ -74,6 +81,60 @@ internal fun TransferPresetEditor(
                 modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
             )
         }
+    }
+}
+
+/** Independently include or omit the stock's final physical-grain layer. */
+@Composable
+internal fun GrainControl(
+    value: Boolean,
+    onValueChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .alpha(if (enabled) 1f else 0.5f),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "GRAIN",
+                style = MaterialTheme.typography.labelSmall,
+                color = GrTheme.colors.inkSoft,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            listOf(true to "ON", false to "OFF").forEach { (choice, label) ->
+                TextButton(
+                    onClick = { onValueChange(choice) },
+                    enabled = enabled,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (choice == value) {
+                            GrTheme.colors.accent
+                        } else {
+                            GrTheme.colors.inkSoft
+                        },
+                    )
+                }
+            }
+        }
+        Text(
+            text = if (value) {
+                "Physical film grain included"
+            } else {
+                "Grain removed · colour, tone, diffusion, and halation unchanged"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = GrTheme.colors.inkSoft,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
     }
 }
 
@@ -189,7 +250,7 @@ internal fun exportQualitySummary(quality: EditedExportQuality): String =
         EditedExportQuality.COMPACT -> "Up to 1.5 MP · JPEG 92"
         EditedExportQuality.HIGH -> "Up to 6 MP · JPEG 97"
         EditedExportQuality.MAXIMUM ->
-            "Highest resolution this phone can safely develop · JPEG 100"
+            "Auto-import: original dimensions via tiles · direct saves: device-safe maximum · JPEG 100"
     }
 
 /** 50–150% stock intensity. 100% is authored; 5% ticks keep the choice deliberate. */

@@ -30,6 +30,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ricohgr3.app.data.PhotoRepository
 import com.ricohgr3.app.gallery.GalleryViewModel
 import com.ricohgr3.app.gallery.TransferMemoryMonitor
+import com.ricohgr3.app.gallery.TransferPreset
 import com.ricohgr3.app.gallery.TransferViewModel
 import com.ricohgr3.app.looks.StickyLookStore
 import com.ricohgr3.app.nav.AppNavHost
@@ -66,6 +67,7 @@ class MainActivity : ComponentActivity() {
                     val filmLookLoader = remember(appContext) { com.ricohgr3.app.looks.emulation.FilmLookLoader(appContext) }
                     val stickyLookStore = remember { StickyLookStore(appContext) }
                     val transferMemoryMonitor = remember(appContext) { TransferMemoryMonitor(appContext) }
+                    val ricohApplication = application as RicohApplication
                     val galleryViewModel: GalleryViewModel = viewModel(
                         factory = GalleryViewModel.Factory(photoRepository, stickyLookStore),
                     )
@@ -75,6 +77,7 @@ class MainActivity : ComponentActivity() {
                             photoExporter,
                             filmLookLoader,
                             transferMemoryMonitor,
+                            ricohApplication.autoImportManager,
                         ),
                     )
 
@@ -83,6 +86,28 @@ class MainActivity : ComponentActivity() {
                         ActivityResultContracts.RequestMultiplePermissions()
                     ) { result ->
                         granted = result.values.all { it }
+                    }
+                    var pendingAutoImport by remember { mutableStateOf<TransferPreset?>(null) }
+                    val notificationLauncher =
+                        androidx.activity.compose.rememberLauncherForActivityResult(
+                            ActivityResultContracts.RequestPermission(),
+                        ) {
+                            pendingAutoImport?.let(transferViewModel::startAutoImport)
+                            pendingAutoImport = null
+                        }
+                    val startAutoImport: (TransferPreset) -> Unit = { preset ->
+                        if (
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            ContextCompat.checkSelfPermission(
+                                this,
+                                Manifest.permission.POST_NOTIFICATIONS,
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            pendingAutoImport = preset
+                            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            transferViewModel.startAutoImport(preset)
+                        }
                     }
 
                     val updateStatus by vm.updateStatus.collectAsStateWithLifecycle()
@@ -115,6 +140,7 @@ class MainActivity : ComponentActivity() {
                                 cameraWifiController = cameraWifiController,
                                 permissionsGranted = granted,
                                 onRequestPermissions = { launcher.launch(requiredPermissions()) },
+                                onStartAutoImport = startAutoImport,
                             )
                         }
                     }

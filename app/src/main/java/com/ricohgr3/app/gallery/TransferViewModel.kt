@@ -28,10 +28,22 @@ data class TransferPreset(
     val look: String?,
     val intensity: Float = 1f,
     val renderingIntent: RenderingIntent = RenderingIntent.SMART,
-    val quality: EditedExportQuality = EditedExportQuality.HIGH,
+    val grainEnabled: Boolean = true,
+    val quality: EditedExportQuality = EditedExportQuality.MAXIMUM,
+    val outputMode: TransferOutputMode = TransferOutputMode.EDITED_ONLY,
 ) {
     /** Clamp values arriving from UI state before a long-running transfer captures them. */
-    fun normalized(): TransferPreset = copy(intensity = intensity.coerceIn(0.5f, 1.5f))
+    fun normalized(): TransferPreset = copy(
+        intensity = intensity.coerceIn(0.5f, 1.5f),
+        outputMode = if (look == null) TransferOutputMode.ORIGINAL_ONLY else outputMode,
+    )
+}
+
+/** Which files an auto-import should publish after the complete camera batch is staged. */
+enum class TransferOutputMode {
+    ORIGINAL_ONLY,
+    EDITED_ONLY,
+    ORIGINAL_AND_EDITED,
 }
 
 enum class TransferSource {
@@ -42,6 +54,8 @@ enum class TransferSource {
 enum class TransferPhase {
     IDLE,
     SCANNING,
+    DOWNLOADING,
+    PROCESSING,
     TRANSFERRING,
     COMPLETED,
     CANCELLED,
@@ -49,6 +63,7 @@ enum class TransferPhase {
 }
 
 enum class TransferWorkStage {
+    PREPARING,
     DEVELOPING,
     SAVING,
 }
@@ -70,6 +85,7 @@ data class TransferUiState(
     val total: Int = 0,
     val completed: Int = 0,
     val saved: Int = 0,
+    val downloadTotal: Int = 0,
     val downloadCompleted: Int = 0,
     val downloading: PhotoId? = null,
     val downloadingNumber: Int = 0,
@@ -77,15 +93,19 @@ data class TransferUiState(
     val downloadTotalBytes: Long? = null,
     val processing: PhotoId? = null,
     val processingNumber: Int = 0,
+    val processingPart: Int = 0,
+    val processingParts: Int = 0,
     val workStage: TransferWorkStage? = null,
     val pipelineDepth: Int = 1,
     val heapHeadroomMb: Int? = null,
+    val diskBacked: Boolean = false,
     val failures: List<TransferFailure> = emptyList(),
     val message: String? = null,
     val stopRequested: Boolean = false,
 ) {
     val isActive: Boolean
-        get() = phase == TransferPhase.SCANNING || phase == TransferPhase.TRANSFERRING
+        get() = phase == TransferPhase.SCANNING || phase == TransferPhase.DOWNLOADING ||
+            phase == TransferPhase.PROCESSING || phase == TransferPhase.TRANSFERRING
 
     val isTerminal: Boolean
         get() = phase == TransferPhase.COMPLETED || phase == TransferPhase.CANCELLED ||
@@ -100,7 +120,8 @@ data class TransferUiState(
 
     val downloadProgress: Float
         get() {
-            if (total <= 0) return 0f
+            val count = downloadTotal.takeIf { it > 0 } ?: total
+            if (count <= 0) return 0f
             val currentFraction = if (
                 downloading != null && downloadTotalBytes != null && downloadTotalBytes > 0L
             ) {
@@ -108,14 +129,26 @@ data class TransferUiState(
             } else {
                 0.0
             }
-            return ((downloadCompleted.toDouble() + currentFraction) / total.toDouble())
+            return ((downloadCompleted.toDouble() + currentFraction) / count.toDouble())
                 .coerceIn(0.0, 1.0)
                 .toFloat()
         }
 
     val saveProgress: Float
-        get() = if (total <= 0) 0f else
-            (completed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+        get() {
+            if (total <= 0) return 0f
+            val activeRegionFraction = if (
+                phase == TransferPhase.PROCESSING &&
+                processing != null &&
+                workStage == TransferWorkStage.DEVELOPING &&
+                processingParts > 0
+            ) {
+                (processingPart.toFloat() / processingParts.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            return ((completed + activeRegionFraction) / total.toFloat()).coerceIn(0f, 1f)
+        }
 
     val current: PhotoId?
         get() = processing ?: downloading
@@ -168,6 +201,7 @@ class TransferViewModel internal constructor(
     private val photoDownloader: TransferDownloader,
     private val downloadedSaver: DownloadedSaver,
     private val pipelinePlanner: (TransferPreset) -> TransferPipelinePlan,
+    private val autoImportController: AutoImportController? = null,
 ) : ViewModel() {
 
     /** Compact constructor retained for coordination tests and non-Android callers. */
@@ -197,6 +231,7 @@ class TransferViewModel internal constructor(
         exporter: PhotoExporter,
         filmLookLoader: FilmLookLoader,
         memoryMonitor: TransferMemoryMonitor,
+        autoImportController: AutoImportController,
     ) : this(
         photoLister = { repository.loadPhotos() },
         photoDownloader = { id, preset, onProgress ->
@@ -239,10 +274,26 @@ class TransferViewModel internal constructor(
         pipelinePlanner = { preset ->
             chooseTransferPipeline(memoryMonitor.snapshot(), preset)
         },
+        autoImportController = autoImportController,
     )
 
     private val _state = MutableStateFlow(TransferUiState())
     val state: StateFlow<TransferUiState> = _state.asStateFlow()
+
+    init {
+        autoImportController?.let { controller ->
+            viewModelScope.launch {
+                controller.state.collect { serviceState ->
+                    if (
+                        serviceState.phase != TransferPhase.IDLE ||
+                        _state.value.source == TransferSource.AUTO_IMPORT
+                    ) {
+                        _state.value = serviceState
+                    }
+                }
+            }
+        }
+    }
 
     private var resumableIds: List<PhotoId> = emptyList()
 
@@ -250,6 +301,10 @@ class TransferViewModel internal constructor(
     fun startAutoImport(preset: TransferPreset) {
         if (_state.value.isActive) return
         val safePreset = preset.normalized()
+        autoImportController?.let { controller ->
+            controller.start(safePreset)
+            return
+        }
         resumableIds = emptyList()
         _state.value = TransferUiState(
             phase = TransferPhase.SCANNING,
@@ -287,6 +342,10 @@ class TransferViewModel internal constructor(
     /** Finish the in-flight frame, then pause before the next one to avoid duplicate saves. */
     fun cancel() {
         if (!_state.value.isActive) return
+        if (_state.value.source == TransferSource.AUTO_IMPORT && autoImportController != null) {
+            autoImportController.pause()
+            return
+        }
         _state.update { it.copy(stopRequested = true) }
     }
 
@@ -294,6 +353,10 @@ class TransferViewModel internal constructor(
     fun retry() {
         val previous = _state.value
         if (previous.isActive) return
+        if (previous.source == TransferSource.AUTO_IMPORT && autoImportController != null) {
+            autoImportController.retry()
+            return
+        }
         val preset = previous.preset ?: return
         val failedIds = previous.failures.map { it.id }
         when {
@@ -318,6 +381,10 @@ class TransferViewModel internal constructor(
     /** Return the panels to their preset state after the user has reviewed the result. */
     fun dismiss() {
         if (!_state.value.isActive) {
+            if (_state.value.source == TransferSource.AUTO_IMPORT && autoImportController != null) {
+                autoImportController.dismiss()
+                return
+            }
             resumableIds = emptyList()
             _state.value = TransferUiState()
         }
@@ -643,13 +710,20 @@ class TransferViewModel internal constructor(
         private val exporter: PhotoExporter,
         private val filmLookLoader: FilmLookLoader,
         private val memoryMonitor: TransferMemoryMonitor,
+        private val autoImportController: AutoImportController,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             require(modelClass.isAssignableFrom(TransferViewModel::class.java)) {
                 "Unknown ViewModel class: ${modelClass.name}"
             }
-            return TransferViewModel(repository, exporter, filmLookLoader, memoryMonitor) as T
+            return TransferViewModel(
+                repository,
+                exporter,
+                filmLookLoader,
+                memoryMonitor,
+                autoImportController,
+            ) as T
         }
     }
 }
@@ -658,7 +732,7 @@ class TransferViewModel internal constructor(
 internal fun parseTransferIso(value: String?): Int? =
     value?.trim()?.toIntOrNull()?.takeIf { it > 0 }
 
-private fun transferFailureReason(failure: Throwable): String =
+internal fun transferFailureReason(failure: Throwable): String =
     if (failure is OutOfMemoryError) {
         "Not enough memory to develop this frame"
     } else {

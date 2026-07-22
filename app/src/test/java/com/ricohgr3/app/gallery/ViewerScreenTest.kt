@@ -23,7 +23,8 @@ class ViewerScreenTest {
         )
         assertEquals("Up to 6 MP · JPEG 97", exportQualitySummary(EditedExportQuality.HIGH))
         assertTrue(exportQualitySummary(EditedExportQuality.MAXIMUM).contains("JPEG 100"))
-        assertTrue(exportQualitySummary(EditedExportQuality.MAXIMUM).contains("this phone"))
+        assertTrue(exportQualitySummary(EditedExportQuality.MAXIMUM).contains("original dimensions"))
+        assertTrue(exportQualitySummary(EditedExportQuality.MAXIMUM).contains("device-safe maximum"))
     }
 
     @Test

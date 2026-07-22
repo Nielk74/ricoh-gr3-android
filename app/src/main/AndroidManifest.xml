@@ -36,11 +36,19 @@
          traffic onto the camera's internet-less AP (WifiNetworkSpecifier, API 29+). -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 
+    <!-- A user-started camera import remains visible and reliable with the screen off. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <uses-feature
         android:name="android.hardware.bluetooth_le"
         android:required="true" />
 
     <application
+        android:name=".RicohApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -57,6 +65,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".gallery.AutoImportService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|dataSync"
+            android:stopWithTask="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

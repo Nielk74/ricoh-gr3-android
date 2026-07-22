@@ -35,8 +35,10 @@ data class GalleryUiState(
     val stickyIntensity: Float = 1f,
     /** Last-used renderer contract, sticky alongside the stock and intensity. */
     val stickyRenderingIntent: RenderingIntent = RenderingIntent.SMART,
-    /** Persisted quality for developed JPEG copies; High matches pre-selector behaviour. */
-    val editedExportQuality: EditedExportQuality = EditedExportQuality.HIGH,
+    /** Whether edited renders include the stock's physical grain layer. */
+    val stickyGrainEnabled: Boolean = true,
+    /** Persisted quality for developed JPEG copies; new installs preserve source dimensions. */
+    val editedExportQuality: EditedExportQuality = EditedExportQuality.MAXIMUM,
 ) {
     val hasSelection: Boolean get() = selected.isNotEmpty()
     val selectionCount: Int get() = selected.size
@@ -54,6 +56,9 @@ data class GalleryUiState(
     /** Applied renderer contract, defaulting to Smart for edits from older app versions. */
     fun renderingIntentFor(id: PhotoId): RenderingIntent =
         edits.renderingIntentFor(id.toString())
+
+    /** Applied physical-grain choice, defaulting on for older edit state. */
+    fun grainEnabledFor(id: PhotoId): Boolean = edits.grainEnabledFor(id.toString())
 
     /** Number of frames with a look applied. */
     val editedCount: Int get() = edits.applied.size
@@ -97,6 +102,11 @@ class GalleryViewModel(
             viewModelScope.launch {
                 store.renderingIntentFlow.collect { persisted ->
                     _state.update { it.copy(stickyRenderingIntent = persisted) }
+                }
+            }
+            viewModelScope.launch {
+                store.grainEnabledFlow.collect { persisted ->
+                    _state.update { it.copy(stickyGrainEnabled = persisted) }
                 }
             }
             viewModelScope.launch {
@@ -154,6 +164,7 @@ class GalleryViewModel(
         look: String?,
         intensity: Float = 1f,
         renderingIntent: RenderingIntent = RenderingIntent.SMART,
+        grainEnabled: Boolean = true,
     ) {
         val safeIntensity = intensity.coerceIn(0.5f, 1.5f)
         _state.update {
@@ -163,10 +174,11 @@ class GalleryViewModel(
                     look,
                     safeIntensity,
                     renderingIntent,
+                    grainEnabled,
                 ),
             )
         }
-        persistSticky(look, safeIntensity, renderingIntent)
+        persistSticky(look, safeIntensity, renderingIntent, grainEnabled)
     }
 
     /**
@@ -177,15 +189,16 @@ class GalleryViewModel(
         look: String?,
         intensity: Float? = null,
         renderingIntent: RenderingIntent = _state.value.stickyRenderingIntent,
+        grainEnabled: Boolean = _state.value.stickyGrainEnabled,
     ) {
         val safeIntensity = (intensity ?: _state.value.stickyIntensity).coerceIn(0.5f, 1.5f)
         _state.update {
             val ids = it.selected.map { id -> id.toString() }
             it.copy(
-                edits = it.edits.applyAll(ids, look, safeIntensity, renderingIntent),
+                edits = it.edits.applyAll(ids, look, safeIntensity, renderingIntent, grainEnabled),
             )
         }
-        persistSticky(look, safeIntensity, renderingIntent)
+        persistSticky(look, safeIntensity, renderingIntent, grainEnabled)
     }
 
     /** Clear the look on [id], returning it to Standard (unedited). */
@@ -200,6 +213,7 @@ class GalleryViewModel(
             look,
             _state.value.stickyIntensity,
             _state.value.stickyRenderingIntent,
+            _state.value.stickyGrainEnabled,
         )
     }
 
@@ -209,6 +223,7 @@ class GalleryViewModel(
             _state.value.stickyLook,
             intensity.coerceIn(0.5f, 1.5f),
             _state.value.stickyRenderingIntent,
+            _state.value.stickyGrainEnabled,
         )
     }
 
@@ -218,6 +233,17 @@ class GalleryViewModel(
             _state.value.stickyLook,
             _state.value.stickyIntensity,
             renderingIntent,
+            _state.value.stickyGrainEnabled,
+        )
+    }
+
+    /** Enable or disable the physical grain layer for subsequent edited renders. */
+    fun setStickyGrainEnabled(enabled: Boolean) {
+        persistSticky(
+            _state.value.stickyLook,
+            _state.value.stickyIntensity,
+            _state.value.stickyRenderingIntent,
+            enabled,
         )
     }
 
@@ -233,6 +259,7 @@ class GalleryViewModel(
         look: String?,
         intensity: Float,
         renderingIntent: RenderingIntent,
+        grainEnabled: Boolean,
     ) {
         val safeIntensity = intensity.coerceIn(0.5f, 1.5f)
         _state.update {
@@ -240,11 +267,12 @@ class GalleryViewModel(
                 stickyLook = look,
                 stickyIntensity = safeIntensity,
                 stickyRenderingIntent = renderingIntent,
+                stickyGrainEnabled = grainEnabled,
             )
         }
         stickyLookStore?.let { store ->
             viewModelScope.launch {
-                store.setLook(look, safeIntensity, renderingIntent)
+                store.setLook(look, safeIntensity, renderingIntent, grainEnabled)
             }
         }
     }

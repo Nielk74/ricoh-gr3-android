@@ -60,6 +60,25 @@ class TransferMemoryMonitorTest {
         )
     }
 
+    @Test
+    fun `full-resolution budget uses the tighter process or system limit`() {
+        val heapLimited = TransferMemorySnapshot(
+            maxHeapBytes = 512L * MIB,
+            usedHeapBytes = 160L * MIB,
+            systemAvailableBytes = 2_000L * MIB,
+            systemLowMemoryThresholdBytes = 300L * MIB,
+            systemLowMemory = false,
+        )
+        val systemLimited = heapLimited.copy(
+            usedHeapBytes = 12L * MIB,
+            systemAvailableBytes = 540L * MIB,
+        )
+
+        assertEquals(352L * MIB, fullResolutionRenderBudget(heapLimited))
+        assertEquals(240L * MIB, fullResolutionRenderBudget(systemLimited))
+        assertEquals(0L, fullResolutionRenderBudget(systemLimited.copy(systemLowMemory = true)))
+    }
+
     private companion object {
         const val MIB = 1024L * 1024L
     }

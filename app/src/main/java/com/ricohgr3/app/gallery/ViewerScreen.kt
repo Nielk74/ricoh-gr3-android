@@ -77,12 +77,14 @@ fun ViewerScreen(
     appliedLook: String?,
     appliedIntensity: Float,
     appliedRenderingIntent: RenderingIntent,
+    appliedGrainEnabled: Boolean,
     stickyLook: String?,
     stickyIntensity: Float,
     stickyRenderingIntent: RenderingIntent,
+    stickyGrainEnabled: Boolean,
     editedExportQuality: EditedExportQuality,
     onEditedExportQualityChange: (EditedExportQuality) -> Unit,
-    onApplyLook: (String?, Float, RenderingIntent) -> Unit,
+    onApplyLook: (String?, Float, RenderingIntent, Boolean) -> Unit,
     onResetLook: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -111,6 +113,9 @@ fun ViewerScreen(
             if (appliedLook != null) appliedRenderingIntent else stickyRenderingIntent,
         )
     }
+    var grainEnabled by remember(id) {
+        mutableStateOf(if (appliedLook != null) appliedGrainEnabled else stickyGrainEnabled)
+    }
     var showingBefore by remember { mutableStateOf(false) }
 
     // Save-to-device state: a status line surfaced to the UI so a failed download is visible
@@ -136,6 +141,7 @@ fun ViewerScreen(
                             iso = parseIso(info?.sv),
                             effectStrength = effectStrength,
                             renderingIntent = renderingIntent,
+                            grainEnabled = grainEnabled,
                             exportQuality = editedExportQuality,
                         )
                     }
@@ -190,6 +196,7 @@ fun ViewerScreen(
         picked,
         effectStrength,
         renderingIntent,
+        grainEnabled,
         rawBitmap,
         filmLookLoader,
         info?.sv,
@@ -216,6 +223,7 @@ fun ViewerScreen(
                                 options = DevelopOptions(
                                     intent = renderingIntent,
                                     renderSeed = stableRenderSeed(id.toString()),
+                                    grainEnabled = grainEnabled,
                                 ),
                             )
                             .asImageBitmap()
@@ -310,6 +318,10 @@ fun ViewerScreen(
                 value = effectStrength,
                 onValueChange = { effectStrength = it },
             )
+            GrainControl(
+                value = grainEnabled,
+                onValueChange = { grainEnabled = it },
+            )
             EditedExportQualityControl(
                 value = editedExportQuality,
                 onValueChange = onEditedExportQualityChange,
@@ -323,7 +335,9 @@ fun ViewerScreen(
             appliedIntensity = appliedIntensity,
             renderingIntent = renderingIntent,
             appliedRenderingIntent = appliedRenderingIntent,
-            onApply = { onApplyLook(picked, effectStrength, renderingIntent) },
+            grainEnabled = grainEnabled,
+            appliedGrainEnabled = appliedGrainEnabled,
+            onApply = { onApplyLook(picked, effectStrength, renderingIntent, grainEnabled) },
             onReset = {
                 picked = null
                 effectStrength = 1f
@@ -335,6 +349,7 @@ fun ViewerScreen(
             picked = picked,
             effectStrength = effectStrength,
             renderingIntent = renderingIntent,
+            grainEnabled = grainEnabled,
             saving = saving,
             status = saveStatus,
             editedSaveUnavailableReason = editedSaveUnavailableReason,
@@ -355,6 +370,7 @@ private fun SaveBar(
     picked: String?,
     effectStrength: Float,
     renderingIntent: RenderingIntent,
+    grainEnabled: Boolean,
     saving: Boolean,
     status: String?,
     editedSaveUnavailableReason: String?,
@@ -387,7 +403,8 @@ private fun SaveBar(
                 Text(
                     "Save with ${FilmLookCatalog.displayNameFor(picked)} · " +
                         "${(effectStrength * 100f).roundToInt()}% · " +
-                        renderingIntent.displayName,
+                        renderingIntent.displayName +
+                        if (grainEnabled) "" else " · no grain",
                     color = GrTheme.colors.accent,
                 )
             }
@@ -560,6 +577,8 @@ private fun ViewerActions(
     appliedIntensity: Float,
     renderingIntent: RenderingIntent,
     appliedRenderingIntent: RenderingIntent,
+    grainEnabled: Boolean,
+    appliedGrainEnabled: Boolean,
     onApply: () -> Unit,
     onReset: () -> Unit,
 ) {
@@ -580,9 +599,10 @@ private fun ViewerActions(
             picked != null && abs(effectStrength - appliedIntensity.coerceIn(0.5f, 1.5f)) > 0.01f
         val renderingIntentChanged =
             picked != null && renderingIntent != appliedRenderingIntent
+        val grainChanged = picked != null && grainEnabled != appliedGrainEnabled
         TextButton(
             onClick = onApply,
-            enabled = picked != appliedLook || intensityChanged || renderingIntentChanged,
+            enabled = picked != appliedLook || intensityChanged || renderingIntentChanged || grainChanged,
         ) {
             Text(
                 text = if (picked == null) {

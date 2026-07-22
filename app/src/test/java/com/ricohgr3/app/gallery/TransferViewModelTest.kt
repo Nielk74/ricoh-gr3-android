@@ -56,6 +56,7 @@ class TransferViewModelTest {
             look = "portra400",
             intensity = 1.8f,
             renderingIntent = RenderingIntent.STOCK,
+            grainEnabled = false,
             quality = EditedExportQuality.MAXIMUM,
         )
 
@@ -68,6 +69,7 @@ class TransferViewModelTest {
         assertEquals(listOf(first, second, third), saved.map { it.first })
         assertTrue(saved.all { it.second.intensity == 1.5f })
         assertTrue(saved.all { it.second.quality == EditedExportQuality.MAXIMUM })
+        assertTrue(saved.none { it.second.grainEnabled })
         assertEquals(TransferPhase.COMPLETED, result.phase)
         assertEquals(3, result.total)
         assertEquals(3, result.completed)
@@ -392,5 +394,23 @@ class TransferViewModelTest {
         assertNull(parseTransferIso("auto"))
         assertNull(parseTransferIso("0"))
         assertNull(parseTransferIso(null))
+    }
+
+    @Test
+    fun `full-resolution regions advance local and overall progress before the output completes`() {
+        val state = TransferUiState(
+            phase = TransferPhase.PROCESSING,
+            total = 2,
+            completed = 0,
+            downloadTotal = 1,
+            downloadCompleted = 1,
+            processing = first,
+            processingPart = 2,
+            processingParts = 4,
+            workStage = TransferWorkStage.DEVELOPING,
+        )
+
+        assertEquals(0.25f, state.saveProgress)
+        assertEquals(0.625f, state.progress)
     }
 }

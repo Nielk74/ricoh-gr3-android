@@ -33,6 +33,8 @@ enum class Transport { BLUETOOTH, WIFI }
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
+    private val ricohApp = app as RicohApplication
+
     val ble: CameraController = CameraBleManager(app.applicationContext)
 
     val state = ble.state
@@ -73,7 +75,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * join-and-bind state machine; its [CameraWifiSession.state] drives the connect flow's Wi-Fi
      * steps and yields the bound [com.ricohgr3.app.wifi.CameraWifiController] once connected.
      */
-    val wifiSession: CameraWifiSession? = CameraWifiSession.createOrNull(app.applicationContext)
+    val wifiSession: CameraWifiSession? = ricohApp.wifiSession
 
     init {
         updateCheckJob = viewModelScope.launch { maybeAutoCheckForUpdates() }
@@ -292,7 +294,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
-        wifiSession?.disconnect()
+        // The application-scoped foreground importer owns the camera session while active. An
+        // Activity recreation or task dismissal must not tear down its in-flight downloads.
+        if (!ricohApp.autoImportManager.state.value.isActive) wifiSession?.disconnect()
         ble.close()
         super.onCleared()
     }

@@ -3,6 +3,7 @@ package com.ricohgr3.app.looks
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -39,7 +40,7 @@ object LookPreferenceCodec {
     fun decodeEditedExportQuality(value: String?): EditedExportQuality =
         value?.let { encoded ->
             EditedExportQuality.entries.firstOrNull { it.name == encoded }
-        } ?: EditedExportQuality.HIGH
+        } ?: EditedExportQuality.MAXIMUM
 }
 
 /** The app-wide DataStore for look preferences. */
@@ -67,7 +68,12 @@ class StickyLookStore(private val context: Context) {
         LookPreferenceCodec.decodeRenderingIntent(prefs[LAST_RENDERING_INTENT_KEY])
     }
 
-    /** Edited-export quality; old installs retain the former 6 MP / JPEG 97 behaviour. */
+    /** Last-used physical-grain choice; old installs retain the authored grain by default. */
+    val grainEnabledFlow: Flow<Boolean> = context.looksDataStore.data.map { prefs ->
+        prefs[LAST_GRAIN_ENABLED_KEY] ?: true
+    }
+
+    /** Edited-export quality; unset installs default to full source dimensions. */
     val editedExportQualityFlow: Flow<EditedExportQuality> = context.looksDataStore.data.map { prefs ->
         LookPreferenceCodec.decodeEditedExportQuality(prefs[EDITED_EXPORT_QUALITY_KEY])
     }
@@ -77,12 +83,14 @@ class StickyLookStore(private val context: Context) {
         look: String?,
         intensity: Float = 1f,
         renderingIntent: RenderingIntent = RenderingIntent.SMART,
+        grainEnabled: Boolean = true,
     ) {
         context.looksDataStore.edit { prefs ->
             prefs[LAST_LOOK_KEY] = LookPreferenceCodec.encode(look)
             prefs[LAST_INTENSITY_KEY] = intensity.coerceIn(0.5f, 1.5f)
             prefs[LAST_RENDERING_INTENT_KEY] =
                 LookPreferenceCodec.encodeRenderingIntent(renderingIntent)
+            prefs[LAST_GRAIN_ENABLED_KEY] = grainEnabled
         }
     }
 
@@ -97,6 +105,7 @@ class StickyLookStore(private val context: Context) {
         val LAST_LOOK_KEY = stringPreferencesKey("last_look")
         val LAST_INTENSITY_KEY = floatPreferencesKey("last_look_intensity")
         val LAST_RENDERING_INTENT_KEY = stringPreferencesKey("last_look_rendering_intent")
+        val LAST_GRAIN_ENABLED_KEY = booleanPreferencesKey("last_look_grain_enabled")
         val EDITED_EXPORT_QUALITY_KEY = stringPreferencesKey("edited_export_quality")
     }
 }

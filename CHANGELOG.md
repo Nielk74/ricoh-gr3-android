@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.9.7 — 2026-07-23
+
+- Rebuilt auto-import as a durable, drain-first workflow: every required full-size camera file is
+  streamed to an app-private disk spool before any gallery save or film development begins. Partial
+  downloads are atomic, completed work survives activity recreation, and failed/paused jobs can
+  continue without repeating successful outputs.
+- Added **Original + edited** output. JPEG+DNG pairs save both untouched originals while only the
+  DNG is developed; edited-only imports skip a paired JPEG entirely. A JPEG-only exposure is still
+  developed normally.
+- Moved auto-import into a visible foreground service with CPU and camera-Wi-Fi locks, persistent
+  notification progress, and pause/continue controls so a user-started import can keep running with
+  the app in the background or the phone locked.
+- Made Maximum auto-import development preserve the platform-decoded source dimensions. The film
+  pipeline processes adaptive, overlap-padded vertical regions sequentially, sized from both live
+  app-heap headroom and Android's device low-memory threshold, while retaining whole-frame Smart
+  analysis, one shared skin proxy, spatial scale, top-connected sky semantics, and one continuous
+  physical grain field.
+- Expanded progress to show separate batch-download and output-completion tracks, active byte/file
+  details, per-image region progress, the disk-backed queue, and the live safe memory budget.
+- Added a persistent Grain on/off control for previews and edited exports. Turning it off removes
+  only the physical grain layer; the selected stock's colour, tone, diffusion, halation, and Smart
+  protections remain active, including across paused/resumed auto-imports.
+
 ## v0.9.6 — 2026-07-22
 
 - Kept auto-import and batch-save camera fetches at full resolution while adding adaptive
