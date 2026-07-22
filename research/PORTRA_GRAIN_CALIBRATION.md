@@ -73,11 +73,9 @@ residuals into emulsion ground truth.
   Portra 800 retains its independent `0.92` stock-scale factor. The crystal-size/clumping anchors
   are now `2.15`/`0.16` and `2.55`/`0.25`. Size is interpreted on a 36 mm film plane rather than
   in output pixels; these are visual calibrations, not measured crystal diameters.
-- Smart rendering no longer lets one frame-global texture score suppress the complete grain
-  field. A bounded 480-pixel canonical detail map locally raises visibility in continuous tone
-  and defocus (`+0.35`/`+0.36`) while reducing it over focused edges and texture
-  (`-0.45`/`-0.44`). Thus a smooth background can carry more visible emulsion structure without
-  adding the same amount over eyelashes, pores, foliage, lettering, or architecture.
+- Do not spatially gate grain using focus, edges, or local detail. The field is present at every
+  non-endpoint pixel and its visibility depends only on that pixel's luminance: strongest through
+  useful midtones, then progressively lower toward black and paper white.
 - The app and review lab use the accepted 36×24 mm mapping. Alternative enlargement scales are
   not part of the calibrated model.
 - Keep chroma restrained and tied to the same luminance crystal. Scanner references show more
@@ -94,8 +92,8 @@ residuals into emulsion ground truth.
 
 `DevelopPipelineTest.fasterColourStocksCarryLargerMoreVisibleGrain` guards the catalog ordering.
 `PhysicalFilmGrainTest` guards stable per-photo identity, different fields across photos, zero
-mean/endpoints, 720-vs-3000 footprint consistency, retained bright-tone texture, smooth-versus-
-focused local ordering, tightly correlated colour, non-repetition, absence of low-frequency
-clouds, and crop anchoring. Absolute amplitude still requires the controlled acquisition and
+mean/endpoints, 720-vs-3000 footprint consistency, retained bright-tone texture, tone-only local
+application, tightly correlated colour, non-repetition, absence of low-frequency clouds, and crop
+anchoring. Absolute amplitude still requires the controlled acquisition and
 holdout process in
 [`FILM_FIDELITY_CALIBRATION.md`](FILM_FIDELITY_CALIBRATION.md).

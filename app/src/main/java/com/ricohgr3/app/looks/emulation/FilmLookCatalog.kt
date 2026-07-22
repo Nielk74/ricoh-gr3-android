@@ -89,8 +89,6 @@ object FilmLookCatalog {
         size: Float,
         clumping: Float,
         seed: Long,
-        smoothAreaBoost: Float = 0f,
-        detailSuppression: Float = 0f,
         highlightPersistence: Float = 0f,
     ) = GrainParams(
         amount = amount,
@@ -99,8 +97,6 @@ object FilmLookCatalog {
         chroma = 0.06f,
         clumping = clumping,
         seed = seed,
-        smoothAreaBoost = smoothAreaBoost,
-        detailSuppression = detailSuppression,
         highlightPersistence = highlightPersistence,
     )
 
@@ -392,15 +388,10 @@ object FilmLookCatalog {
                 saturationBoost = 0.20f,
             ),
             grain = grain(
-                // Keep the smooth-tone result from the first 35 mm pass, but obtain it through
-                // local visibility rather than a frame-wide amplitude lift: defocus/sky remains
-                // clear while focused detail drops below the former calibration.
                 amount = 0.060f,
                 size = 2.15f,
                 clumping = 0.16f,
                 seed = 400,
-                smoothAreaBoost = 0.35f,
-                detailSuppression = 0.45f,
                 highlightPersistence = 0.35f,
             ),
             whitePointRecovery = WhitePointRecoveryParams(amount = 0.78f),
@@ -457,8 +448,6 @@ object FilmLookCatalog {
                 size = 2.55f,
                 clumping = 0.25f,
                 seed = 800,
-                smoothAreaBoost = 0.36f,
-                detailSuppression = 0.44f,
                 highlightPersistence = 0.42f,
             ),
             whitePointRecovery = WhitePointRecoveryParams(amount = 0.82f),

@@ -11,7 +11,7 @@ captures.
 The app is independent and unofficial. It uses the camera's community-documented BLE GATT and
 local HTTP interfaces; it does not require Ricoh's Image Sync app or a cloud account.
 
-> **Current release: v0.9.4.** The app, protocol clients, colour-science core, update path, and
+> **Current release: v0.9.5.** The app, protocol clients, colour-science core, update path, and
 > automated tests are implemented. Real-camera radio behaviour still needs validation across GR
 > III/IIIx firmware and Android vendors; see [Current limitations](#current-limitations).
 
@@ -128,8 +128,8 @@ Important details:
   pixel integrates its footprint analytically, preserving the same field and apparent crystal
   scale across resolution. Density variation peaks through low-mid/mid tones, rolls off near
   black/white, retains bounded texture in bright Portra tone, and uses larger, more irregular
-  crystals for faster stocks. Portra Smart rendering locally strengthens continuous tone and
-  defocus while protecting focused texture on the calibrated 35 mm footprint. Edited JPEGs offer
+  crystals for faster stocks. Grain visibility is driven only by each pixel's luminance—not by
+  focus, edges, or neighbouring detail—on the calibrated 35 mm footprint. Edited JPEGs offer
   Compact (JPEG 92), High (JPEG 97), and Maximum (JPEG 100) output so file size and retained
   texture are an explicit choice.
 - **DNG boundary:** Android, not this app, renders the DNG into display RGB. It is not a

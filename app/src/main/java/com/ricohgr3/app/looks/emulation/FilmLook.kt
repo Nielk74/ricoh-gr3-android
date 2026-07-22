@@ -233,9 +233,6 @@ data class HalationParams(
  *   `0.2` give a fast stock more occasional dense crystals). This never introduces a blurred or
  *   low-frequency grain layer.
  * @property seed fixes the field for deterministic (testable, non-flickering) output.
- * @property smoothAreaBoost local Smart-only visibility lift in defocus and continuous tone.
- * @property detailSuppression local Smart-only guard against stacking grain over sharpened source
- *   edges and texture. Both controls modulate the same physical field; they never add blurred noise.
  * @property highlightPersistence retains some density texture in bright-but-not-paper-white tone.
  */
 data class GrainParams(
@@ -245,13 +242,9 @@ data class GrainParams(
     val chroma: Float = 0.1f,
     val clumping: Float = 0.12f,
     val seed: Long = 0L,
-    val smoothAreaBoost: Float = 0f,
-    val detailSuppression: Float = 0f,
     val highlightPersistence: Float = 0f,
 ) {
     init {
-        require(smoothAreaBoost.isFinite() && smoothAreaBoost in 0f..0.6f)
-        require(detailSuppression.isFinite() && detailSuppression in 0f..0.6f)
         require(highlightPersistence.isFinite() && highlightPersistence in 0f..1f)
     }
 

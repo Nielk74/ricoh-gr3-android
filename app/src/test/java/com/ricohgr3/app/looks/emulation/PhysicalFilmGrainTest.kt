@@ -159,50 +159,48 @@ class PhysicalFilmGrainTest {
         assertTrue("paper white remains an exact endpoint", white.all { it == 1f })
     }
 
-    @Test fun smartLocalVisibilityFavoursSmoothToneOverFocusedTexture() {
+    @Test fun grainVisibilityDependsOnToneNotNeighbouringDetail() {
         val width = 320
         val height = 192
         val count = width * height
-        val original = FloatArray(count) { index ->
+        val flat = FloatArray(count) { 0.50f }
+        val textured = FloatArray(count) { index ->
             val x = index % width
             val y = index / width
-            // Only five code-value percentage points around grey: the guard must recognize fine
-            // subject texture, not merely obvious black/white edges.
-            if (x < width / 2) 0.50f else if ((x + y) % 2 == 0) 0.475f else 0.525f
+            when ((x + y) % 3) {
+                0 -> 0.50f
+                1 -> 0.475f
+                else -> 0.525f
+            }
         }
-        val r = original.copyOf()
-        val g = original.copyOf()
-        val b = original.copyOf()
+        val flatR = flat.copyOf()
+        val flatG = flat.copyOf()
+        val flatB = flat.copyOf()
+        val texturedR = textured.copyOf()
+        val texturedG = textured.copyOf()
+        val texturedB = textured.copyOf()
+        val params = grain.copy(chroma = 0f)
         PhysicalFilmGrain.apply(
-            r, g, b, width, height,
-            grain.copy(
-                chroma = 0f,
-                smoothAreaBoost = 0.25f,
-                detailSuppression = 0.25f,
-            ),
+            flatR, flatG, flatB, width, height, params,
+            renderSeed = 711L,
+            filmPlane = canonicalCrop(width),
+        )
+        PhysicalFilmGrain.apply(
+            texturedR, texturedG, texturedB, width, height, params,
             renderSeed = 711L,
             filmPlane = canonicalCrop(width),
         )
 
-        val smoothResidual = ArrayList<Float>()
-        val detailResidual = ArrayList<Float>()
-        for (y in 8 until height - 8) {
-            for (x in 8 until width / 2 - 8) {
-                val index = y * width + x
-                smoothResidual += r[index] - original[index]
-            }
-            for (x in width / 2 + 8 until width - 8) {
-                val index = y * width + x
-                detailResidual += r[index] - original[index]
+        for (index in 0 until count) {
+            if (textured[index] == 0.50f) {
+                assertEquals(
+                    "equal-luminance pixels must receive equal grain regardless of neighbours",
+                    flatR[index],
+                    texturedR[index],
+                    0f,
+                )
             }
         }
-        val smoothStd = standardDeviation(smoothResidual.toFloatArray())
-        val detailStd = standardDeviation(detailResidual.toFloatArray())
-        assertTrue(
-            "smooth/defocused tone needs more visible grain than focused detail " +
-                "($smoothStd vs $detailStd)",
-            smoothStd > detailStd * 1.20,
-        )
     }
 
     @Test fun rgbVariationIsDistinctButTightlyCorrelated() {

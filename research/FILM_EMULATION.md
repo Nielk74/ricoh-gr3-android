@@ -57,10 +57,10 @@ display-referred photographs:
    from immutable pre-halation highlights and subtract the source core, preventing red fog over
    flat highlights and recursive halo growth.
 9. `PhysicalFilmGrain` defines one deterministic, infinite crystal field in physical film
-   coordinates on the calibrated 35 mm frame. A local Smart visibility map raises the same field
-   in defocus and continuous tone while restraining it over focused source detail; it replaces
-   Portra's former frame-global texture suppression. Bright diffuse tones retain a bounded
-   stock-specific part of the density response while exact black and paper white remain fixed.
+   coordinates on the calibrated 35 mm frame. It has no focus, edge, or local-detail visibility
+   mask: every non-endpoint pixel samples the same field, with visibility determined only by that
+   pixel's luminance and the stock response. Bright diffuse tones retain a bounded stock-specific
+   part of the density response while exact black and paper white remain fixed.
    Each output pixel analytically integrates its film-plane footprint, so a preview and a
    downsampled export see the same field, crystal scale, and variance. Grain is zero-mean,
    midtone-peaked density variation with restrained correlated colour and stock-specific
@@ -177,9 +177,9 @@ output pixel rather than redrawing output-resolution noise.
   white. Portra retains a bounded fraction through bright diffuse tone so compression does not
   make highlights unnaturally texture-free. The scalar field perturbs luminance in bounded
   linear-light log-odds space, preserving exact endpoints and avoiding a grey veil.
-- **Local visibility:** Smart Portra rendering derives a small immutable-source detail map before
-  applying grain. Smooth/defocused tone gains visibility while focused edges and texture suppress
-  it locally; one sharp subject can no longer reduce grain across the whole frame.
+- **Tone-only visibility:** no focus/detail mask is involved. Equal-luminance pixels receive equal
+  grain amplitude whether they belong to a sharp subject or a defocused background; the midtone
+  density response alone determines where the field is most visible.
 - **Format scale:** the default 36×24 mm mapping is the calibrated 35 mm result used by the app
   and review lab.
 - **Colour structure:** a small secondary field creates tightly correlated, luminance-neutral RGB

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.9.5 — 2026-07-22
+
+- Removed Portra's focus/detail grain mask. The physical 35 mm grain field is now applied without
+  spatial content gating; only pixel luminance shapes its visibility, peaking in the midtones and
+  rolling off toward black and paper white.
+- Kept the accepted 35 mm grain scale as the sole format and removed alternative enlargement
+  experiments.
+
 ## v0.9.4 — 2026-07-22
 
 - Recalibrated Portra 400 and Portra 800 around the accepted 35 mm grain footprint: smooth and

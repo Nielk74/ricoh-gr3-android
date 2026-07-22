@@ -342,10 +342,6 @@ object DevelopPipeline {
         if (gr.enabled) {
             val scaled = gr.copy(
                 amount = gr.amount * adjustment.grainScale * layerMix,
-                // Stock remains the scene-invariant physical field. Smart may compensate for the
-                // sharpening/texture already baked into a display-referred JPEG or DNG rendition.
-                smoothAreaBoost = if (smart) gr.smoothAreaBoost else 0f,
-                detailSuppression = if (smart) gr.detailSuppression else 0f,
             )
             PhysicalFilmGrain.apply(
                 r = r,
