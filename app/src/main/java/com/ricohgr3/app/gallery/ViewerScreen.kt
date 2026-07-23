@@ -310,21 +310,15 @@ fun ViewerScreen(
         )
 
         if (picked != null) {
-            RenderingIntentControl(
-                value = renderingIntent,
-                onValueChange = { renderingIntent = it },
-            )
-            EffectStrengthControl(
-                value = effectStrength,
-                onValueChange = { effectStrength = it },
-            )
-            GrainControl(
-                value = grainEnabled,
-                onValueChange = { grainEnabled = it },
-            )
-            EditedExportQualityControl(
-                value = editedExportQuality,
-                onValueChange = onEditedExportQualityChange,
+            LookTuningTabs(
+                renderingIntent = renderingIntent,
+                onRenderingIntentChange = { renderingIntent = it },
+                effectStrength = effectStrength,
+                onEffectStrengthChange = { effectStrength = it },
+                grainEnabled = grainEnabled,
+                onGrainEnabledChange = { grainEnabled = it },
+                quality = editedExportQuality,
+                onQualityChange = onEditedExportQualityChange,
             )
         }
 

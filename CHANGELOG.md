@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.8 — 2026-07-23
+
+- Grouped the viewer and local-lab tuning controls into **Develop** and **Export** tabs so only
+  one section is visible at a time. The look strip, apply/reset, and save actions stay on screen;
+  the local lab's rotation control lives in the Develop tab (and remains available without a look
+  for rotated-only saves).
+
 ## v0.9.7 — 2026-07-23
 
 - Rebuilt auto-import as a durable, drain-first workflow: every required full-size camera file is

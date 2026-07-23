@@ -6,12 +6,21 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -80,6 +89,91 @@ internal fun TransferPresetEditor(
                 color = GrTheme.colors.inkSoft,
                 modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
             )
+        }
+    }
+}
+
+/** Sections of the tuning panel, shown one at a time so the screen stays uncluttered. */
+internal enum class LookPanelTab(val label: String) {
+    DEVELOP("DEVELOP"),
+    EXPORT("EXPORT"),
+}
+
+/**
+ * The per-photo fine-tuning controls grouped under tabs: DEVELOP holds the film-response
+ * parameters (rendering intent, strength, grain — plus [extraDevelopContent], used by the
+ * local lab for its rotation control), EXPORT holds the edited-export quality. The look
+ * strip and the apply/save actions stay outside, always visible.
+ */
+@Composable
+internal fun LookTuningTabs(
+    renderingIntent: RenderingIntent,
+    onRenderingIntentChange: (RenderingIntent) -> Unit,
+    effectStrength: Float,
+    onEffectStrengthChange: (Float) -> Unit,
+    grainEnabled: Boolean,
+    onGrainEnabledChange: (Boolean) -> Unit,
+    quality: EditedExportQuality,
+    onQualityChange: (EditedExportQuality) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    extraDevelopContent: (@Composable () -> Unit)? = null,
+) {
+    var tab by rememberSaveable { mutableStateOf(LookPanelTab.DEVELOP) }
+    Column(modifier = modifier.fillMaxWidth()) {
+        TabRow(
+            selectedTabIndex = tab.ordinal,
+            containerColor = GrTheme.colors.paper,
+            contentColor = GrTheme.colors.ink,
+            indicator = { tabPositions ->
+                if (tab.ordinal < tabPositions.size) {
+                    TabRowDefaults.SecondaryIndicator(
+                        modifier = Modifier.tabIndicatorOffset(tabPositions[tab.ordinal]),
+                        color = GrTheme.colors.accent,
+                    )
+                }
+            },
+            divider = { HorizontalDivider(color = GrTheme.colors.hair) },
+        ) {
+            LookPanelTab.entries.forEach { entry ->
+                Tab(
+                    selected = tab == entry,
+                    onClick = { tab = entry },
+                    enabled = enabled,
+                    text = {
+                        Text(entry.label, style = MaterialTheme.typography.labelSmall)
+                    },
+                    selectedContentColor = GrTheme.colors.accent,
+                    unselectedContentColor = GrTheme.colors.inkSoft,
+                )
+            }
+        }
+        when (tab) {
+            LookPanelTab.DEVELOP -> {
+                RenderingIntentControl(
+                    value = renderingIntent,
+                    onValueChange = onRenderingIntentChange,
+                    enabled = enabled,
+                )
+                EffectStrengthControl(
+                    value = effectStrength,
+                    onValueChange = onEffectStrengthChange,
+                    enabled = enabled,
+                )
+                GrainControl(
+                    value = grainEnabled,
+                    onValueChange = onGrainEnabledChange,
+                    enabled = enabled,
+                )
+                extraDevelopContent?.invoke()
+            }
+            LookPanelTab.EXPORT -> {
+                EditedExportQualityControl(
+                    value = quality,
+                    onValueChange = onQualityChange,
+                    enabled = enabled,
+                )
+            }
         }
     }
 }

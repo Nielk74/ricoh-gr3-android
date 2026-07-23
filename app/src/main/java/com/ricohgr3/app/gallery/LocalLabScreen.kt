@@ -344,32 +344,33 @@ fun LocalLabScreen(
         )
 
         if (picked != null) {
-            RenderingIntentControl(
-                value = renderingIntent,
-                onValueChange = { renderingIntent = it },
-            )
-            EffectStrengthControl(
-                value = effectStrength,
-                onValueChange = { effectStrength = it },
-            )
-            GrainControl(
-                value = grainEnabled,
-                onValueChange = {
+            LookTuningTabs(
+                renderingIntent = renderingIntent,
+                onRenderingIntentChange = { renderingIntent = it },
+                effectStrength = effectStrength,
+                onEffectStrengthChange = { effectStrength = it },
+                grainEnabled = grainEnabled,
+                onGrainEnabledChange = {
                     grainEnabled = it
                     onGrainEnabledChange(it)
                 },
+                quality = editedExportQuality,
+                onQualityChange = onEditedExportQualityChange,
+                extraDevelopContent = {
+                    RotationControl(
+                        rotation = rotation,
+                        enabled = orientedBitmap != null,
+                        onRotate = { delta -> rotation = ((rotation + delta) % 360 + 360) % 360 },
+                    )
+                },
             )
-            EditedExportQualityControl(
-                value = editedExportQuality,
-                onValueChange = onEditedExportQualityChange,
+        } else {
+            RotationControl(
+                rotation = rotation,
+                enabled = orientedBitmap != null,
+                onRotate = { delta -> rotation = ((rotation + delta) % 360 + 360) % 360 },
             )
         }
-
-        RotationControl(
-            rotation = rotation,
-            enabled = orientedBitmap != null,
-            onRotate = { delta -> rotation = ((rotation + delta) % 360 + 360) % 360 },
-        )
 
         LocalLabSaveBar(
             hasPhoto = orientedBitmap != null,
