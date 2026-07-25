@@ -20,7 +20,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
+          cache: ${{ runner.environment == 'github-hosted' && 'gradle' || '' }}
 
       - name: Set up Android SDK
         if: runner.environment == 'github-hosted'
